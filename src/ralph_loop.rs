@@ -18,6 +18,7 @@ impl RalphLoop {
             config.api_endpoint.clone(),
             config.api_token.clone(),
             config.work_dir.to_string_lossy().to_string(),
+            config.verification_command.clone(),
         );
 
         Self {

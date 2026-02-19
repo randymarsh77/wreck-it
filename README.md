@@ -83,6 +83,7 @@ Options:
 - `-w, --work-dir <PATH>`: Working directory (defaults from `~/.wreck-it/config.json`)
 - `--model-provider <copilot|llama>`: Model provider (saved to `~/.wreck-it/config.json`)
 - `--api-endpoint <URL>`: Provider endpoint (for local llama use `http://localhost:11434/v1`)
+- `--verify-command <COMMAND>`: Custom shell command/script to verify completion (non-zero exit marks task failed)
 
 **Note**: The Copilot CLI must be authenticated and available in your PATH. The SDK will automatically connect to the Copilot CLI server.
 

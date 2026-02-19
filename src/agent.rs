@@ -13,6 +13,7 @@ pub struct AgentClient {
     model_provider: ModelProvider,
     api_endpoint: String,
     api_token: Option<String>,
+    verification_command: Option<String>,
 }
 
 impl AgentClient {
@@ -21,6 +22,7 @@ impl AgentClient {
         api_endpoint: String,
         api_token: Option<String>,
         work_dir: String,
+        verification_command: Option<String>,
     ) -> Self {
         Self {
             copilot_client: None,
@@ -29,6 +31,7 @@ impl AgentClient {
             model_provider,
             api_endpoint,
             api_token,
+            verification_command,
         }
     }
 
@@ -222,6 +225,15 @@ impl AgentClient {
         // Validate work directory first
         self.validate_work_dir()?;
 
+        if let Some(command) = self.verification_command.as_deref() {
+            tracing::info!(
+                "Running custom verification command '{}' in {}",
+                command,
+                self.work_dir
+            );
+            return self.run_shell_command(command);
+        }
+
         tracing::info!("Running tests in {}", self.work_dir);
 
         // Try to run common test commands
@@ -245,6 +257,24 @@ impl AgentClient {
 
         // If no test command works, assume success
         Ok(true)
+    }
+
+    fn run_shell_command(&self, command: &str) -> Result<bool> {
+        let mut cmd = if cfg!(target_os = "windows") {
+            let mut c = Command::new("cmd");
+            c.args(["/C", command]);
+            c
+        } else {
+            let mut c = Command::new("sh");
+            c.args(["-c", command]);
+            c
+        };
+
+        let output = cmd
+            .current_dir(&self.work_dir)
+            .output()
+            .context("Failed to run verification command")?;
+        Ok(output.status.success())
     }
 
     /// Commit changes to the repository
@@ -309,5 +339,49 @@ impl Drop for AgentClient {
         if self.copilot_client.is_some() {
             tracing::debug!("AgentClient dropped, Copilot client will be cleaned up");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn init_git_repo(path: &Path) {
+        Command::new("git")
+            .args(["init"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+    }
+
+    #[test]
+    fn run_tests_uses_custom_verification_command_when_configured() {
+        let dir = tempdir().unwrap();
+        init_git_repo(dir.path());
+        let client = AgentClient::new(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            dir.path().to_string_lossy().to_string(),
+            Some("true".to_string()),
+        );
+
+        assert!(client.run_tests().unwrap());
+    }
+
+    #[test]
+    fn run_tests_marks_failure_when_custom_verification_command_fails() {
+        let dir = tempdir().unwrap();
+        init_git_repo(dir.path());
+        let client = AgentClient::new(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            dir.path().to_string_lossy().to_string(),
+            Some("false".to_string()),
+        );
+
+        assert!(!client.run_tests().unwrap());
     }
 }

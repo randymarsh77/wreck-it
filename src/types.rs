@@ -40,6 +40,10 @@ pub struct Config {
     /// Model provider
     #[serde(default = "default_model_provider")]
     pub model_provider: ModelProvider,
+
+    /// Optional shell command to verify completion after each loop iteration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_command: Option<String>,
 }
 
 fn default_max_iterations() -> usize {
@@ -71,6 +75,7 @@ impl Default for Config {
             api_endpoint: default_api_endpoint(),
             api_token: None,
             model_provider: default_model_provider(),
+            verification_command: None,
         }
     }
 }
