@@ -1,7 +1,8 @@
 use crate::types::Task;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use std::path::Path;
 
 /// Agent client for interacting with GitHub Copilot SDK
 #[allow(dead_code)]
@@ -33,6 +34,35 @@ impl AgentClient {
             api_token,
             work_dir,
         }
+    }
+
+    /// Validate that the work directory is safe to use
+    fn validate_work_dir(&self) -> Result<()> {
+        let path = Path::new(&self.work_dir);
+        
+        // Check if path exists
+        if !path.exists() {
+            bail!("Work directory does not exist: {}", self.work_dir);
+        }
+
+        // Check if it's a directory
+        if !path.is_dir() {
+            bail!("Work directory is not a directory: {}", self.work_dir);
+        }
+
+        // Check if it's a git repository
+        let git_dir = path.join(".git");
+        if !git_dir.exists() {
+            bail!("Work directory is not a git repository: {}", self.work_dir);
+        }
+
+        // Convert to canonical path to prevent path traversal
+        let canonical = path.canonicalize()
+            .context("Failed to canonicalize work directory")?;
+        
+        tracing::debug!("Validated work directory: {}", canonical.display());
+        
+        Ok(())
     }
 
     /// Execute a task using the Copilot agent
@@ -82,6 +112,9 @@ impl AgentClient {
 
     /// Run tests in the working directory
     pub fn run_tests(&self) -> Result<bool> {
+        // Validate work directory first
+        self.validate_work_dir()?;
+        
         tracing::info!("Running tests in {}", self.work_dir);
 
         // Try to run common test commands
@@ -109,16 +142,39 @@ impl AgentClient {
 
     /// Commit changes to the repository
     pub fn commit_changes(&self, message: &str) -> Result<()> {
+        // Validate work directory first
+        self.validate_work_dir()?;
+        
         tracing::info!("Committing changes: {}", message);
 
+        // Check git status first to see what files would be staged
+        let status_output = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(&self.work_dir)
+            .output()
+            .context("Failed to check git status")?;
+
+        if status_output.stdout.is_empty() {
+            tracing::info!("No changes to commit");
+            return Ok(());
+        }
+
+        let status_text = String::from_utf8_lossy(&status_output.stdout);
+        tracing::debug!("Git status:\n{}", status_text);
+
+        // Stage changes - using --all stages all changes (tracked and untracked)
+        // while respecting .gitignore patterns
         Command::new("git")
-            .args(["add", "."])
+            .args(["add", "--all"])
             .current_dir(&self.work_dir)
             .output()
             .context("Failed to stage changes")?;
 
+        // Commit with the message - using args array prevents command injection
+        // We sanitize newlines for cleaner commit messages
+        let safe_message = message.replace('\n', " ").replace('\r', "");
         Command::new("git")
-            .args(["commit", "-m", message])
+            .args(["commit", "-m", &safe_message])
             .current_dir(&self.work_dir)
             .output()
             .context("Failed to commit changes")?;
