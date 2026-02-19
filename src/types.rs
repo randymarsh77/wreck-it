@@ -41,7 +41,7 @@ pub struct Config {
     #[serde(default = "default_model_provider")]
     pub model_provider: ModelProvider,
 
-    /// Optional shell command to verify completion after each loop iteration
+    /// Optional shell command to verify completion after each loop iteration (trusted input only)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_command: Option<String>,
 }

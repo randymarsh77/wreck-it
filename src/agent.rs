@@ -231,6 +231,8 @@ impl AgentClient {
                 command,
                 self.work_dir
             );
+            // Intentional shell execution: this is a user-configured verification hook
+            // and must only be used with trusted command input.
             return self.run_shell_command(command);
         }
 
@@ -259,6 +261,10 @@ impl AgentClient {
         Ok(true)
     }
 
+    /// Run a trusted verification shell command in the work directory.
+    ///
+    /// Returns `Ok(true)` when the command exits with status code 0,
+    /// `Ok(false)` when it exits non-zero, and `Err` when execution fails.
     fn run_shell_command(&self, command: &str) -> Result<bool> {
         let mut cmd = if cfg!(target_os = "windows") {
             let mut c = Command::new("cmd");
@@ -274,6 +280,16 @@ impl AgentClient {
             .current_dir(&self.work_dir)
             .output()
             .context("Failed to run verification command")?;
+        if !output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            tracing::warn!(
+                "Verification command failed (exit: {:?})\nstdout:\n{}\nstderr:\n{}",
+                output.status.code(),
+                stdout,
+                stderr
+            );
+        }
         Ok(output.status.success())
     }
 

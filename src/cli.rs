@@ -38,7 +38,7 @@ pub enum Commands {
         #[arg(long, value_enum)]
         model_provider: Option<ModelProvider>,
 
-        /// Shell command/script used to verify completion after each task
+        /// Shell command/script used to verify completion after each task (trusted input only)
         #[arg(long)]
         verify_command: Option<String>,
     },
