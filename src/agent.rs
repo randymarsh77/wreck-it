@@ -262,6 +262,7 @@ impl AgentClient {
     }
 
     /// Stop the Copilot client if it was initialized
+    #[allow(dead_code)]
     pub async fn stop(&mut self) -> Result<()> {
         if let Some(client) = self.copilot_client.take() {
             tracing::info!("Stopping Copilot SDK client...");

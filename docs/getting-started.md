@@ -4,6 +4,24 @@ This guide will walk you through using wreck-it to automate multi-step developme
 
 ## Installation
 
+### Prerequisites
+
+Before installing wreck-it, you need:
+
+1. **GitHub Copilot CLI**: Install and authenticate the GitHub Copilot CLI
+   ```bash
+   # Follow the installation guide at:
+   # https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli
+   
+   # Authenticate with GitHub
+   copilot auth login
+   
+   # Verify it's working
+   copilot --version
+   ```
+
+2. **GitHub Copilot Subscription**: Required to use the SDK. See [GitHub Copilot pricing](https://github.com/features/copilot#pricing).
+
 ### Using Nix (Recommended)
 
 ```bash
@@ -65,13 +83,7 @@ Edit `tasks.json` to define your tasks:
 ]
 ```
 
-### 3. Set Up Your Copilot Token
-
-```bash
-export COPILOT_API_TOKEN="your-token-here"
-```
-
-### 4. Run the Loop
+### 3. Run the Loop
 
 ```bash
 wreck-it run --task-file tasks.json --max-iterations 50
@@ -82,6 +94,8 @@ The TUI will launch and show:
 - List of tasks with status
 - Real-time logs
 - Controls (Space to pause, Q to quit)
+
+**Note**: The Copilot CLI must be authenticated (via `copilot auth login`) before running. The SDK will automatically use your Copilot CLI credentials.
 
 ## Example Workflow
 

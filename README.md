@@ -22,6 +22,16 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 
 ## Installation
 
+### Prerequisites
+
+1. **GitHub Copilot CLI**: Install the GitHub Copilot CLI and ensure it's available in your PATH:
+   ```bash
+   # Follow the GitHub Copilot CLI installation guide
+   # https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli
+   ```
+
+2. **GitHub Copilot Subscription**: A GitHub Copilot subscription is required to use the SDK. See [GitHub Copilot pricing](https://github.com/features/copilot#pricing) for details.
+
 ### Using Nix Flakes (Recommended)
 
 ```bash
@@ -39,6 +49,19 @@ cargo build --release
 ```
 
 ## Usage
+
+### Setup
+
+1. **Authenticate with GitHub Copilot**:
+   ```bash
+   # Login to GitHub Copilot CLI
+   copilot auth login
+   ```
+
+2. **Verify Copilot is working**:
+   ```bash
+   copilot --version
+   ```
 
 ### Initialize a Task File
 
@@ -58,8 +81,8 @@ Options:
 - `-t, --task-file <PATH>`: Path to task file (default: tasks.json)
 - `-m, --max-iterations <NUM>`: Maximum iterations (default: 100)
 - `-w, --work-dir <PATH>`: Working directory (default: .)
-- `--api-endpoint <URL>`: Copilot API endpoint
-- `--api-token <TOKEN>`: Copilot API token (or set COPILOT_API_TOKEN env var)
+
+**Note**: The Copilot CLI must be authenticated and available in your PATH. The SDK will automatically connect to the Copilot CLI server.
 
 ### TUI Controls
 
