@@ -1,4 +1,4 @@
-use crate::types::Task;
+use crate::types::{ModelProvider, Task};
 use anyhow::{bail, Context, Result};
 use copilot_sdk_supercharged::*;
 use std::path::Path;
@@ -10,14 +10,25 @@ pub struct AgentClient {
     copilot_client: Option<Arc<CopilotClient>>,
     cli_path: Option<String>,
     work_dir: String,
+    model_provider: ModelProvider,
+    api_endpoint: String,
+    api_token: Option<String>,
 }
 
 impl AgentClient {
-    pub fn new(_api_endpoint: String, _api_token: Option<String>, work_dir: String) -> Self {
+    pub fn new(
+        model_provider: ModelProvider,
+        api_endpoint: String,
+        api_token: Option<String>,
+        work_dir: String,
+    ) -> Self {
         Self {
             copilot_client: None,
             cli_path: None, // Will use default from PATH
             work_dir,
+            model_provider,
+            api_endpoint,
+            api_token,
         }
     }
 
@@ -103,6 +114,23 @@ impl AgentClient {
         let config = SessionConfig {
             request_permission: Some(false), // Auto-approve for autonomous mode
             request_user_input: Some(false), // No user input in autonomous mode
+            model: if self.model_provider == ModelProvider::Llama {
+                Some("llama3.2".to_string())
+            } else {
+                None
+            },
+            provider: if self.model_provider == ModelProvider::Llama {
+                Some(ProviderConfig {
+                    provider_type: Some("openai".to_string()),
+                    wire_api: None,
+                    base_url: self.api_endpoint.clone(),
+                    api_key: self.api_token.clone(),
+                    bearer_token: None,
+                    azure: None,
+                })
+            } else {
+                None
+            },
             ..Default::default()
         };
 

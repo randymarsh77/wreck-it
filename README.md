@@ -78,9 +78,11 @@ wreck-it run
 ```
 
 Options:
-- `-t, --task-file <PATH>`: Path to task file (default: tasks.json)
-- `-m, --max-iterations <NUM>`: Maximum iterations (default: 100)
-- `-w, --work-dir <PATH>`: Working directory (default: .)
+- `-t, --task-file <PATH>`: Path to task file (defaults from `~/.wreck-it/config.json`)
+- `-m, --max-iterations <NUM>`: Maximum iterations (defaults from `~/.wreck-it/config.json`)
+- `-w, --work-dir <PATH>`: Working directory (defaults from `~/.wreck-it/config.json`)
+- `--model-provider <copilot|llama>`: Model provider (saved to `~/.wreck-it/config.json`)
+- `--api-endpoint <URL>`: Provider endpoint (for local llama use `http://localhost:11434/v1`)
 
 **Note**: The Copilot CLI must be authenticated and available in your PATH. The SDK will automatically connect to the Copilot CLI server.
 

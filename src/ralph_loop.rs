@@ -14,6 +14,7 @@ impl RalphLoop {
     pub fn new(config: Config) -> Self {
         let max_iterations = config.max_iterations;
         let agent = AgentClient::new(
+            config.model_provider.clone(),
             config.api_endpoint.clone(),
             config.api_token.clone(),
             config.work_dir.to_string_lossy().to_string(),

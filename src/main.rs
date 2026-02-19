@@ -1,5 +1,6 @@
 mod agent;
 mod cli;
+mod config_manager;
 mod ralph_loop;
 mod task_manager;
 mod tui;
@@ -8,10 +9,11 @@ mod types;
 use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Commands};
+use config_manager::{load_user_config, save_user_config};
 use ralph_loop::RalphLoop;
 use std::env;
 use tui::TuiApp;
-use types::{Config, Task, TaskStatus};
+use types::{ModelProvider, Task, TaskStatus};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,17 +34,34 @@ async fn main() -> Result<()> {
             work_dir,
             api_endpoint,
             api_token,
+            model_provider,
         } => {
-            // Get API token from argument or environment variable
-            let token = api_token.or_else(|| env::var("COPILOT_API_TOKEN").ok());
+            let mut config = load_user_config().unwrap_or_default();
+            if let Some(task_file) = task_file {
+                config.task_file = task_file;
+            }
+            if let Some(max_iterations) = max_iterations {
+                config.max_iterations = max_iterations;
+            }
+            if let Some(work_dir) = work_dir {
+                config.work_dir = work_dir;
+            }
+            if let Some(api_endpoint) = api_endpoint {
+                config.api_endpoint = api_endpoint;
+            }
+            if let Some(model_provider) = model_provider {
+                config.model_provider = model_provider;
+            }
+            if config.model_provider == ModelProvider::Llama
+                && config.api_endpoint == "https://api.githubcopilot.com"
+            {
+                config.api_endpoint = "http://localhost:11434/v1".to_string();
+            }
+            config.api_token = api_token
+                .or(config.api_token)
+                .or_else(|| env::var("COPILOT_API_TOKEN").ok());
 
-            let config = Config {
-                max_iterations,
-                task_file,
-                work_dir,
-                api_endpoint,
-                api_token: token,
-            };
+            save_user_config(&config)?;
 
             let ralph_loop = RalphLoop::new(config);
             let mut app = TuiApp::new(ralph_loop);

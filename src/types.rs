@@ -1,5 +1,13 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelProvider {
+    Copilot,
+    Llama,
+}
 
 /// Configuration for the Ralph Wiggum loop
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +31,10 @@ pub struct Config {
     /// GitHub Copilot API token (optional, can be set via environment)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_token: Option<String>,
+
+    /// Model provider
+    #[serde(default = "default_model_provider")]
+    pub model_provider: ModelProvider,
 }
 
 fn default_max_iterations() -> usize {
@@ -41,6 +53,10 @@ fn default_api_endpoint() -> String {
     "https://api.githubcopilot.com".to_string()
 }
 
+fn default_model_provider() -> ModelProvider {
+    ModelProvider::Copilot
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -49,6 +65,7 @@ impl Default for Config {
             work_dir: default_work_dir(),
             api_endpoint: default_api_endpoint(),
             api_token: None,
+            model_provider: default_model_provider(),
         }
     }
 }
