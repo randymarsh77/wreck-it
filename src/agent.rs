@@ -1,45 +1,68 @@
 use crate::types::Task;
-use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
-use std::process::Command;
+use anyhow::{bail, Context, Result};
+use copilot_sdk_supercharged::*;
 use std::path::Path;
+use std::process::Command;
+use std::sync::Arc;
 
 /// Agent client for interacting with GitHub Copilot SDK
-#[allow(dead_code)]
 pub struct AgentClient {
-    api_endpoint: String,
-    api_token: Option<String>,
+    copilot_client: Option<Arc<CopilotClient>>,
+    cli_path: Option<String>,
     work_dir: String,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Serialize)]
-struct AgentRequest {
-    task: String,
-    context: String,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-struct AgentResponse {
-    #[allow(dead_code)]
-    success: bool,
-    message: String,
-}
-
 impl AgentClient {
-    pub fn new(api_endpoint: String, api_token: Option<String>, work_dir: String) -> Self {
+    pub fn new(_api_endpoint: String, _api_token: Option<String>, work_dir: String) -> Self {
         Self {
-            api_endpoint,
-            api_token,
+            copilot_client: None,
+            cli_path: None, // Will use default from PATH
             work_dir,
         }
+    }
+
+    /// Initialize the Copilot SDK client
+    async fn ensure_client(&mut self) -> Result<Arc<CopilotClient>> {
+        if let Some(ref client) = self.copilot_client {
+            return Ok(Arc::clone(client));
+        }
+
+        tracing::info!("Initializing Copilot SDK client...");
+
+        let options = CopilotClientOptions {
+            cli_path: self.cli_path.clone(),
+            log_level: "info".to_string(),
+            ..Default::default()
+        };
+
+        let client = CopilotClient::new(options);
+        client
+            .start()
+            .await
+            .context("Failed to start Copilot client")?;
+
+        // Verify connectivity with a ping
+        match client.ping(Some("wreck-it agent")).await {
+            Ok(response) => {
+                tracing::info!(
+                    "Copilot SDK connected (protocol v{})",
+                    response.protocol_version.unwrap_or(0)
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Copilot ping failed: {}, continuing anyway", e);
+            }
+        }
+
+        let client_arc = Arc::new(client);
+        self.copilot_client = Some(Arc::clone(&client_arc));
+        Ok(client_arc)
     }
 
     /// Validate that the work directory is safe to use
     fn validate_work_dir(&self) -> Result<()> {
         let path = Path::new(&self.work_dir);
-        
+
         // Check if path exists
         if !path.exists() {
             bail!("Work directory does not exist: {}", self.work_dir);
@@ -57,28 +80,77 @@ impl AgentClient {
         }
 
         // Convert to canonical path to prevent path traversal
-        let canonical = path.canonicalize()
+        let canonical = path
+            .canonicalize()
             .context("Failed to canonicalize work directory")?;
-        
+
         tracing::debug!("Validated work directory: {}", canonical.display());
-        
+
         Ok(())
     }
 
     /// Execute a task using the Copilot agent
-    pub async fn execute_task(&self, task: &Task) -> Result<String> {
-        // For now, we'll simulate the agent execution
-        // In a real implementation, this would call the GitHub Copilot SDK
-
+    pub async fn execute_task(&mut self, task: &Task) -> Result<String> {
         tracing::info!("Executing task: {}", task.description);
 
-        // Simulate reading the codebase as context
-        let context = self.read_codebase_context()?;
+        // Validate work directory
+        self.validate_work_dir()?;
 
-        // In a real implementation, this would make an API call to Copilot
-        let result = self
-            .simulate_agent_execution(&task.description, &context)
-            .await?;
+        // Get or create the Copilot client
+        let client = self.ensure_client().await?;
+
+        // Create a session configuration
+        let config = SessionConfig {
+            request_permission: Some(false), // Auto-approve for autonomous mode
+            request_user_input: Some(false), // No user input in autonomous mode
+            ..Default::default()
+        };
+
+        // Create a session
+        let session = client
+            .create_session(config)
+            .await
+            .context("Failed to create Copilot session")?;
+
+        tracing::info!("Created Copilot session: {}", session.session_id());
+
+        // Prepare the prompt with task and context
+        let context = self.read_codebase_context()?;
+        let prompt = format!(
+            "You are an AI coding agent working on a task in a git repository.\n\
+             Working directory: {}\n\n\
+             Task: {}\n\n\
+             Context:\n{}\n\n\
+             Please implement the necessary code changes to complete this task. \
+             Be specific and provide complete, working code.",
+            self.work_dir, task.description, context
+        );
+
+        // Send the message and wait for response
+        let response = session
+            .send_and_wait(
+                MessageOptions {
+                    prompt,
+                    attachments: None,
+                    mode: None,
+                },
+                Some(120_000), // 2 minute timeout
+            )
+            .await
+            .context("Failed to get response from Copilot")?;
+
+        // Extract the response content
+        let result = if let Some(event) = response {
+            event
+                .assistant_message_content()
+                .unwrap_or("Task completed")
+                .to_string()
+        } else {
+            "No response from Copilot agent".to_string()
+        };
+
+        // Clean up the session
+        session.destroy().await.ok();
 
         Ok(result)
     }
@@ -87,34 +159,41 @@ impl AgentClient {
         // Read key files from the codebase to provide context
         let mut context = String::new();
 
-        // This would typically read relevant files based on the task
-        context.push_str(&format!("Working directory: {}\n", self.work_dir));
+        // Get git status for context
+        if let Ok(output) = Command::new("git")
+            .args(["status", "--short"])
+            .current_dir(&self.work_dir)
+            .output()
+        {
+            let status = String::from_utf8_lossy(&output.stdout);
+            if !status.is_empty() {
+                context.push_str("Git status:\n");
+                context.push_str(&status);
+                context.push('\n');
+            }
+        }
+
+        // Get recent commits for context
+        if let Ok(output) = Command::new("git")
+            .args(["log", "--oneline", "-5"])
+            .current_dir(&self.work_dir)
+            .output()
+        {
+            let log = String::from_utf8_lossy(&output.stdout);
+            if !log.is_empty() {
+                context.push_str("\nRecent commits:\n");
+                context.push_str(&log);
+            }
+        }
 
         Ok(context)
-    }
-
-    async fn simulate_agent_execution(&self, task: &str, context: &str) -> Result<String> {
-        // This is a placeholder for the actual Copilot SDK integration
-        // In practice, this would:
-        // 1. Send task + context to Copilot API
-        // 2. Receive code changes or instructions
-        // 3. Apply changes to the filesystem
-        // 4. Return the result
-
-        tracing::info!("Simulating agent execution for: {}", task);
-        tracing::debug!("Context length: {} bytes", context.len());
-
-        // Simulate some work
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        Ok(format!("Completed task: {}", task))
     }
 
     /// Run tests in the working directory
     pub fn run_tests(&self) -> Result<bool> {
         // Validate work directory first
         self.validate_work_dir()?;
-        
+
         tracing::info!("Running tests in {}", self.work_dir);
 
         // Try to run common test commands
@@ -144,7 +223,7 @@ impl AgentClient {
     pub fn commit_changes(&self, message: &str) -> Result<()> {
         // Validate work directory first
         self.validate_work_dir()?;
-        
+
         tracing::info!("Committing changes: {}", message);
 
         // Check git status first to see what files would be staged
@@ -180,5 +259,26 @@ impl AgentClient {
             .context("Failed to commit changes")?;
 
         Ok(())
+    }
+
+    /// Stop the Copilot client if it was initialized
+    pub async fn stop(&mut self) -> Result<()> {
+        if let Some(client) = self.copilot_client.take() {
+            tracing::info!("Stopping Copilot SDK client...");
+            // Try to get exclusive access to stop the client
+            if let Ok(client) = Arc::try_unwrap(client) {
+                client.stop().await.ok();
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for AgentClient {
+    fn drop(&mut self) {
+        // Best effort cleanup - we can't await in Drop, so we just release the reference
+        if self.copilot_client.is_some() {
+            tracing::debug!("AgentClient dropped, Copilot client will be cleaned up");
+        }
     }
 }
