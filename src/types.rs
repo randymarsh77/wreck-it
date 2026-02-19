@@ -2,6 +2,11 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub const DEFAULT_COPILOT_ENDPOINT: &str = "https://api.githubcopilot.com";
+pub const DEFAULT_LLAMA_ENDPOINT: &str = "http://localhost:11434/v1";
+pub const DEFAULT_LLAMA_MODEL: &str = "llama3.2";
+pub const LLAMA_PROVIDER_TYPE: &str = "openai";
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelProvider {
@@ -50,7 +55,7 @@ fn default_work_dir() -> PathBuf {
 }
 
 fn default_api_endpoint() -> String {
-    "https://api.githubcopilot.com".to_string()
+    DEFAULT_COPILOT_ENDPOINT.to_string()
 }
 
 fn default_model_provider() -> ModelProvider {

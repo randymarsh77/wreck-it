@@ -13,7 +13,7 @@ use config_manager::{load_user_config, save_user_config};
 use ralph_loop::RalphLoop;
 use std::env;
 use tui::TuiApp;
-use types::{ModelProvider, Task, TaskStatus};
+use types::{ModelProvider, Task, TaskStatus, DEFAULT_COPILOT_ENDPOINT, DEFAULT_LLAMA_ENDPOINT};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -53,9 +53,9 @@ async fn main() -> Result<()> {
                 config.model_provider = model_provider;
             }
             if config.model_provider == ModelProvider::Llama
-                && config.api_endpoint == "https://api.githubcopilot.com"
+                && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
             {
-                config.api_endpoint = "http://localhost:11434/v1".to_string();
+                config.api_endpoint = DEFAULT_LLAMA_ENDPOINT.to_string();
             }
             config.api_token = api_token
                 .or(config.api_token)

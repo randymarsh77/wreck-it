@@ -1,4 +1,4 @@
-use crate::types::{ModelProvider, Task};
+use crate::types::{ModelProvider, Task, DEFAULT_LLAMA_MODEL, LLAMA_PROVIDER_TYPE};
 use anyhow::{bail, Context, Result};
 use copilot_sdk_supercharged::*;
 use std::path::Path;
@@ -115,13 +115,13 @@ impl AgentClient {
             request_permission: Some(false), // Auto-approve for autonomous mode
             request_user_input: Some(false), // No user input in autonomous mode
             model: if self.model_provider == ModelProvider::Llama {
-                Some("llama3.2".to_string())
+                Some(DEFAULT_LLAMA_MODEL.to_string())
             } else {
                 None
             },
             provider: if self.model_provider == ModelProvider::Llama {
                 Some(ProviderConfig {
-                    provider_type: Some("openai".to_string()),
+                    provider_type: Some(LLAMA_PROVIDER_TYPE.to_string()),
                     wire_api: None,
                     base_url: self.api_endpoint.clone(),
                     api_key: self.api_token.clone(),
