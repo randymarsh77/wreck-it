@@ -26,3 +26,6 @@ result-*
 # Task files
 tasks/
 *.task.json
+
+# Test artifacts
+test-e2e.sh
