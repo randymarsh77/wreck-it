@@ -1,6 +1,9 @@
 mod agent;
 mod cli;
 mod config_manager;
+mod headless;
+mod headless_config;
+mod headless_state;
 mod ralph_loop;
 mod task_manager;
 mod tui;
@@ -36,6 +39,7 @@ async fn main() -> Result<()> {
             api_token,
             model_provider,
             verify_command,
+            headless,
         } => {
             let mut config = load_user_config().unwrap_or_default();
             if let Some(task_file) = task_file {
@@ -67,9 +71,13 @@ async fn main() -> Result<()> {
 
             save_user_config(&config)?;
 
-            let ralph_loop = RalphLoop::new(config);
-            let mut app = TuiApp::new(ralph_loop);
-            app.run().await?;
+            if headless {
+                headless::run_headless(config).await?;
+            } else {
+                let ralph_loop = RalphLoop::new(config);
+                let mut app = TuiApp::new(ralph_loop);
+                app.run().await?;
+            }
         }
 
         Commands::Init { output } => {
