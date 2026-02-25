@@ -35,6 +35,7 @@ async fn main() -> Result<()> {
             api_endpoint,
             api_token,
             model_provider,
+            verify_command,
         } => {
             let mut config = load_user_config().unwrap_or_default();
             if let Some(task_file) = task_file {
@@ -51,6 +52,9 @@ async fn main() -> Result<()> {
             }
             if let Some(model_provider) = model_provider {
                 config.model_provider = model_provider;
+            }
+            if let Some(verify_command) = verify_command {
+                config.verification_command = Some(verify_command);
             }
             if config.model_provider == ModelProvider::Llama
                 && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
