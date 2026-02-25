@@ -41,6 +41,10 @@ pub enum Commands {
         /// Shell command/script used to verify completion after each task (trusted input only)
         #[arg(long)]
         verify_command: Option<String>,
+
+        /// Run in headless mode (no TUI, for CI environments)
+        #[arg(long)]
+        headless: bool,
     },
 
     /// Initialize a new task file
