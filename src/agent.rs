@@ -1,4 +1,4 @@
-use crate::types::{ModelProvider, Task, DEFAULT_LLAMA_MODEL, LLAMA_PROVIDER_TYPE};
+use crate::types::{EvaluationMode, ModelProvider, Task, DEFAULT_LLAMA_MODEL, LLAMA_PROVIDER_TYPE};
 use anyhow::{bail, Context, Result};
 use copilot_sdk_supercharged::*;
 use std::path::Path;
@@ -14,9 +14,14 @@ pub struct AgentClient {
     api_endpoint: String,
     api_token: Option<String>,
     verification_command: Option<String>,
+    evaluation_mode: EvaluationMode,
+    completeness_prompt: Option<String>,
+    completion_marker_file: String,
 }
 
 impl AgentClient {
+    /// Create a new client with default evaluation settings (used by tests).
+    #[cfg(test)]
     pub fn new(
         model_provider: ModelProvider,
         api_endpoint: String,
@@ -32,7 +37,41 @@ impl AgentClient {
             api_endpoint,
             api_token,
             verification_command,
+            evaluation_mode: EvaluationMode::default(),
+            completeness_prompt: None,
+            completion_marker_file: crate::types::DEFAULT_COMPLETION_MARKER.to_string(),
         }
+    }
+
+    /// Create a new client with full configuration including evaluation settings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_evaluation(
+        model_provider: ModelProvider,
+        api_endpoint: String,
+        api_token: Option<String>,
+        work_dir: String,
+        verification_command: Option<String>,
+        evaluation_mode: EvaluationMode,
+        completeness_prompt: Option<String>,
+        completion_marker_file: String,
+    ) -> Self {
+        Self {
+            copilot_client: None,
+            cli_path: None,
+            work_dir,
+            model_provider,
+            api_endpoint,
+            api_token,
+            verification_command,
+            evaluation_mode,
+            completeness_prompt,
+            completion_marker_file,
+        }
+    }
+
+    /// Return the configured evaluation mode.
+    pub fn evaluation_mode(&self) -> EvaluationMode {
+        self.evaluation_mode
     }
 
     /// Initialize the Copilot SDK client
@@ -225,6 +264,13 @@ impl AgentClient {
         // Validate work directory first
         self.validate_work_dir()?;
 
+        // When using agent-file evaluation, delegate to agent-based check.
+        if self.evaluation_mode == EvaluationMode::AgentFile {
+            // The caller should use evaluate_completeness() instead.
+            // Returning true here so the normal flow does not block.
+            return Ok(true);
+        }
+
         if let Some(command) = self.verification_command.as_deref() {
             tracing::info!(
                 "Running custom verification command '{}' in {}",
@@ -259,6 +305,104 @@ impl AgentClient {
 
         // If no test command works, assume success
         Ok(true)
+    }
+
+    /// Evaluate task completeness using an agent.
+    ///
+    /// Sends a prompt to the Copilot agent describing what "complete" means.
+    /// The agent is instructed to write `completion_marker_file` inside
+    /// `work_dir` if (and only if) it determines the task is done.
+    /// Returns `Ok(true)` when the marker file exists after the agent runs.
+    pub async fn evaluate_completeness(&mut self, task: &Task) -> Result<bool> {
+        self.validate_work_dir()?;
+
+        let marker_path = Path::new(&self.work_dir).join(&self.completion_marker_file);
+
+        // Remove stale marker so we get a clean signal.
+        if marker_path.exists() {
+            std::fs::remove_file(&marker_path).ok();
+        }
+
+        let client = self.ensure_client().await?;
+
+        let config = SessionConfig {
+            request_permission: Some(false),
+            request_user_input: Some(false),
+            model: if self.model_provider == ModelProvider::Llama {
+                Some(DEFAULT_LLAMA_MODEL.to_string())
+            } else {
+                None
+            },
+            provider: if self.model_provider == ModelProvider::Llama {
+                Some(ProviderConfig {
+                    provider_type: Some(LLAMA_PROVIDER_TYPE.to_string()),
+                    wire_api: None,
+                    base_url: self.api_endpoint.clone(),
+                    api_key: self.api_token.clone(),
+                    bearer_token: None,
+                    azure: None,
+                })
+            } else {
+                None
+            },
+            ..Default::default()
+        };
+
+        let session = client
+            .create_session(config)
+            .await
+            .context("Failed to create evaluation session")?;
+
+        let user_prompt = self
+            .completeness_prompt
+            .as_deref()
+            .unwrap_or("Check if the current task has been completed successfully.");
+
+        let prompt = format!(
+            "You are an evaluation agent. Your job is to determine whether a task is complete.\n\
+             Working directory: {work_dir}\n\n\
+             Task: {task_desc}\n\n\
+             Completeness criteria:\n{criteria}\n\n\
+             If the task is complete, create the file '{marker}' in the working directory \
+             containing the text \"COMPLETE\". If the task is NOT complete, do NOT create that file.\n\
+             Only create the file when you are confident the task is fully done.",
+            work_dir = self.work_dir,
+            task_desc = task.description,
+            criteria = user_prompt,
+            marker = self.completion_marker_file,
+        );
+
+        let response = session
+            .send_and_wait(
+                MessageOptions {
+                    prompt,
+                    attachments: None,
+                    mode: None,
+                },
+                Some(120_000),
+            )
+            .await
+            .context("Failed to get evaluation response from agent")?;
+
+        if let Some(event) = &response {
+            if let Some(msg) = event.assistant_message_content() {
+                tracing::info!("Evaluation agent response: {}", msg);
+            }
+        }
+
+        session.destroy().await.ok();
+
+        // Check whether the marker file was created.
+        let complete = marker_path.exists();
+        if complete {
+            tracing::info!("Evaluation agent wrote marker file – task is complete");
+            // Clean up the marker so it doesn't interfere with later tasks.
+            std::fs::remove_file(&marker_path).ok();
+        } else {
+            tracing::info!("Evaluation agent did NOT write marker file – task incomplete");
+        }
+
+        Ok(complete)
     }
 
     /// Run a trusted verification shell command in the work directory.
@@ -399,5 +543,48 @@ mod tests {
         );
 
         assert!(!client.run_tests().unwrap());
+    }
+
+    #[test]
+    fn run_tests_returns_true_in_agent_file_mode() {
+        let dir = tempdir().unwrap();
+        init_git_repo(dir.path());
+        let client = AgentClient::with_evaluation(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            dir.path().to_string_lossy().to_string(),
+            None,
+            EvaluationMode::AgentFile,
+            Some("check completeness".to_string()),
+            ".task-complete".to_string(),
+        );
+
+        // In agent-file mode, run_tests() short-circuits to true.
+        assert!(client.run_tests().unwrap());
+    }
+
+    #[test]
+    fn evaluation_mode_accessor() {
+        let client = AgentClient::new(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            ".".to_string(),
+            None,
+        );
+        assert_eq!(client.evaluation_mode(), EvaluationMode::Command);
+
+        let client2 = AgentClient::with_evaluation(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            ".".to_string(),
+            None,
+            EvaluationMode::AgentFile,
+            None,
+            ".done".to_string(),
+        );
+        assert_eq!(client2.evaluation_mode(), EvaluationMode::AgentFile);
     }
 }

@@ -1,4 +1,4 @@
-use crate::types::ModelProvider;
+use crate::types::{EvaluationMode, ModelProvider};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -41,6 +41,21 @@ pub enum Commands {
         /// Shell command/script used to verify completion after each task (trusted input only)
         #[arg(long)]
         verify_command: Option<String>,
+
+        /// Evaluation mode: "command" (default) runs a shell command, "agent-file"
+        /// asks an agent to evaluate completeness and write a marker file.
+        #[arg(long, value_enum)]
+        evaluation_mode: Option<EvaluationMode>,
+
+        /// Prompt describing task completeness for the evaluation agent
+        /// (used when --evaluation-mode=agent-file)
+        #[arg(long)]
+        completeness_prompt: Option<String>,
+
+        /// Path to the marker file the evaluation agent writes when the task
+        /// is complete (used when --evaluation-mode=agent-file)
+        #[arg(long)]
+        completion_marker_file: Option<PathBuf>,
 
         /// Run in headless mode (no TUI, for CI environments)
         #[arg(long)]
