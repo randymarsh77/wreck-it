@@ -35,6 +35,16 @@ pub struct HeadlessConfig {
     /// Marker file the evaluation agent writes when the task is complete.
     #[serde(default = "default_completion_marker")]
     pub completion_marker_file: PathBuf,
+
+    /// GitHub repository owner (org or user).  When not set, derived from
+    /// the `origin` git remote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_owner: Option<String>,
+
+    /// GitHub repository name.  When not set, derived from the `origin` git
+    /// remote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_name: Option<String>,
 }
 
 fn default_task_file() -> PathBuf {
@@ -63,6 +73,8 @@ impl Default for HeadlessConfig {
             evaluation_mode: EvaluationMode::default(),
             completeness_prompt: None,
             completion_marker_file: default_completion_marker(),
+            repo_owner: None,
+            repo_name: None,
         }
     }
 }
@@ -129,6 +141,8 @@ state_file = ".my-state.json"
             config.completion_marker_file,
             PathBuf::from(crate::types::DEFAULT_COMPLETION_MARKER)
         );
+        assert!(config.repo_owner.is_none());
+        assert!(config.repo_name.is_none());
     }
 
     #[test]
@@ -163,5 +177,23 @@ completion_marker_file = ".done"
         let config = load_headless_config(&config_file).unwrap();
         assert_eq!(config.evaluation_mode, EvaluationMode::Command);
         assert!(config.completeness_prompt.is_none());
+    }
+
+    #[test]
+    fn test_load_headless_config_with_repo_info() {
+        let dir = tempdir().unwrap();
+        let config_file = dir.path().join(".wreck-it.toml");
+        fs::write(
+            &config_file,
+            r#"
+repo_owner = "octocat"
+repo_name = "hello-world"
+"#,
+        )
+        .unwrap();
+
+        let config = load_headless_config(&config_file).unwrap();
+        assert_eq!(config.repo_owner.as_deref(), Some("octocat"));
+        assert_eq!(config.repo_name.as_deref(), Some("hello-world"));
     }
 }
