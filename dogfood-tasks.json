@@ -1,17 +1,17 @@
 [
   {
     "id": "ideas-1",
-    "description": "Research state-of-the-art AI agent orchestration frameworks (e.g., AutoGen, CrewAI, LangGraph, OpenAI Swarm, MetaGPT) and multi-agent collaboration patterns. Document findings in docs/research-notes.md including: key architectural patterns, how they handle agent communication, task decomposition strategies, and feedback loops. Identify at least 5 concrete ideas that could be integrated into wreck-it to advance its orchestration capabilities.",
-    "status": "completed"
+    "description": "Research state-of-the-art AI agent orchestration frameworks (e.g., AutoGen, CrewAI, LangGraph, OpenAI Swarm, MetaGPT) and multi-agent collaboration patterns. Also research developments with gastown and openclaw and how they relate to agent orchestration. Document findings in docs/research-notes.md including: key architectural patterns, how they handle agent communication, task decomposition strategies, and feedback loops. Identify at least 5 concrete ideas that could be integrated into wreck-it to advance its orchestration capabilities.",
+    "status": "pending"
   },
   {
     "id": "ideas-2",
-    "description": "Research emerging patterns in AI-driven code development tools (e.g., Devin, SWE-Agent, OpenHands, Aider, Cursor agent mode) focusing on: how they handle long-running autonomous coding sessions, self-healing/retry strategies, context management across iterations, and quality feedback mechanisms. Document findings in docs/research-notes.md and propose at least 5 actionable improvements for wreck-it's Ralph Wiggum loop.",
-    "status": "completed"
+    "description": "Research emerging patterns in AI-driven code development tools (e.g., Devin, SWE-Agent, OpenHands, Aider, Cursor agent mode) and developments with gastown and openclaw focusing on: how they handle long-running autonomous coding sessions, self-healing/retry strategies, context management across iterations, and quality feedback mechanisms. Document findings in docs/research-notes.md and propose at least 5 actionable improvements for wreck-it's Ralph Wiggum loop.",
+    "status": "pending"
   },
   {
     "id": "ideas-3",
-    "description": "Based on the research documented in docs/research-notes.md, create a prioritized roadmap of new features and improvements for wreck-it. Add new task entries to dogfood-tasks.json (as additional tasks in phase 4 or higher with appropriate depends_on referencing existing eval tasks) for each proposed improvement. Focus on features that would make wreck-it a breakthrough tool: dynamic task generation by agents, inter-agent communication, intelligent task routing based on agent specialization, and self-improving loop strategies.",
+    "description": "Based on the research documented in docs/research-notes.md (including findings on gastown and openclaw), create a prioritized roadmap of new features and improvements for wreck-it. Add new task entries to dogfood-tasks.json (as additional tasks in phase 4 or higher with appropriate depends_on referencing existing eval tasks) for each proposed improvement. Focus on features that would make wreck-it a breakthrough tool: dynamic task generation by agents, inter-agent communication, intelligent task routing based on agent specialization, self-improving loop strategies, and integration opportunities with gastown and openclaw.",
     "status": "pending",
     "depends_on": [
       "ideas-1",
