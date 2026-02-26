@@ -60,13 +60,14 @@ jobs:
 
       - name: Run wreck-it headless iteration
         run: |
-          ./target/release/wreck-it run --headless \
-            --work-dir "." \
-            --task-file "dogfood-tasks.json" \
-            ${MAX_ITER:+--max-iterations "$MAX_ITER"}
+          ARGS="--headless --work-dir . --task-file dogfood-tasks.json"
+          if [ -n "$MAX_ITER" ]; then
+            ARGS="$ARGS --max-iterations $MAX_ITER"
+          fi
+          ./target/release/wreck-it run $ARGS
         env:
           COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
-          MAX_ITER: ${{ github.event.inputs.max_iterations }}
+          MAX_ITER: ${{ inputs.max_iterations }}
 
       - name: Commit and push state changes
         run: |
