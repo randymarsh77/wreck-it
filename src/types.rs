@@ -4,7 +4,10 @@ use std::path::PathBuf;
 
 pub const DEFAULT_COPILOT_ENDPOINT: &str = "https://api.githubcopilot.com";
 pub const DEFAULT_LLAMA_ENDPOINT: &str = "http://localhost:11434/v1";
+pub const DEFAULT_GITHUB_MODELS_ENDPOINT: &str =
+    "https://models.github.ai/inference/chat/completions";
 pub const DEFAULT_LLAMA_MODEL: &str = "llama3.2";
+pub const DEFAULT_GITHUB_MODELS_MODEL: &str = "openai/gpt-4o";
 pub const LLAMA_PROVIDER_TYPE: &str = "openai";
 pub const DEFAULT_COMPLETION_MARKER: &str = ".task-complete";
 
@@ -13,6 +16,7 @@ pub const DEFAULT_COMPLETION_MARKER: &str = ".task-complete";
 pub enum ModelProvider {
     Copilot,
     Llama,
+    GithubModels,
 }
 
 /// How task completeness is evaluated after the agent finishes work.
@@ -325,5 +329,16 @@ mod tests {
             config.completion_marker_file,
             PathBuf::from(DEFAULT_COMPLETION_MARKER)
         );
+    }
+
+    #[test]
+    fn model_provider_github_models_roundtrip() {
+        let config = Config {
+            model_provider: ModelProvider::GithubModels,
+            ..Config::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let loaded: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.model_provider, ModelProvider::GithubModels);
     }
 }

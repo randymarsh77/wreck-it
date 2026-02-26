@@ -63,7 +63,7 @@ jobs:
 
       - name: Run wreck-it headless iteration
         run: |
-          ARGS="--headless --work-dir . --task-file dogfood-tasks.json"
+          ARGS="--headless --work-dir . --task-file dogfood-tasks.json --model-provider github-models"
           if [ -n "$MAX_ITER" ]; then
             ARGS="$ARGS --max-iterations $MAX_ITER"
           fi

@@ -16,7 +16,10 @@ use config_manager::{load_user_config, save_user_config};
 use ralph_loop::RalphLoop;
 use std::env;
 use tui::TuiApp;
-use types::{ModelProvider, Task, TaskStatus, DEFAULT_COPILOT_ENDPOINT, DEFAULT_LLAMA_ENDPOINT};
+use types::{
+    ModelProvider, Task, TaskStatus, DEFAULT_COPILOT_ENDPOINT, DEFAULT_GITHUB_MODELS_ENDPOINT,
+    DEFAULT_LLAMA_ENDPOINT,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -77,9 +80,15 @@ async fn main() -> Result<()> {
             {
                 config.api_endpoint = DEFAULT_LLAMA_ENDPOINT.to_string();
             }
+            if config.model_provider == ModelProvider::GithubModels
+                && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
+            {
+                config.api_endpoint = DEFAULT_GITHUB_MODELS_ENDPOINT.to_string();
+            }
             config.api_token = api_token
                 .or(config.api_token)
-                .or_else(|| env::var("COPILOT_API_TOKEN").ok());
+                .or_else(|| env::var("COPILOT_API_TOKEN").ok())
+                .or_else(|| env::var("GITHUB_TOKEN").ok());
 
             save_user_config(&config)?;
 
