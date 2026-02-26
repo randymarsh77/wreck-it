@@ -2,7 +2,7 @@
   {
     "id": "ideas-1",
     "description": "Research state-of-the-art AI agent orchestration frameworks (e.g., AutoGen, CrewAI, LangGraph, OpenAI Swarm, MetaGPT) and multi-agent collaboration patterns. Also research developments with gastown and openclaw and how they relate to agent orchestration. Document findings in docs/research-notes.md including: key architectural patterns, how they handle agent communication, task decomposition strategies, and feedback loops. Identify at least 5 concrete ideas that could be integrated into wreck-it to advance its orchestration capabilities.",
-    "status": "pending"
+    "status": "inprogress"
   },
   {
     "id": "ideas-2",
