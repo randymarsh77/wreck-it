@@ -6,10 +6,8 @@
 #
 # Required secrets:
 #   PAT_TOKEN – Personal Access Token with repo + PR merge permissions
-#               (used to push changes and merge agent PRs)
-#
-# The built-in GITHUB_TOKEN with `models: read` is used for agent execution
-# via GitHub Models, so no separate Copilot API token secret is needed.
+#               (used to push changes, merge agent PRs, and assign Copilot
+#               to issues — the built-in GITHUB_TOKEN cannot assign Copilot)
 name: Dogfood - Agent Swarm
 
 on:
@@ -70,7 +68,7 @@ jobs:
           fi
           ./target/release/wreck-it run $ARGS
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           MAX_ITER: ${{ inputs.max_iterations }}
 
       - name: Commit and push state changes

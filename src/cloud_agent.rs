@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
+const COPILOT_LOGIN: &str = "copilot";
 
 /// Status of a cloud agent session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,7 +120,7 @@ impl CloudAgentClient {
         );
 
         let body = serde_json::json!({
-            "assignees": ["copilot"],
+            "assignees": [COPILOT_LOGIN],
         });
 
         match self
@@ -133,11 +134,31 @@ impl CloudAgentClient {
             .await
         {
             Ok(resp) if resp.status().is_success() => {
-                tracing::info!(
-                    "Assigned Copilot to issue #{} – coding agent triggered",
-                    issue_number
+                // Verify that Copilot actually appears in the assignees list.
+                // The API can return 200 without actually assigning Copilot
+                // when the token lacks sufficient permissions.
+                if let Ok(issue) = resp.json::<serde_json::Value>().await {
+                    let assigned = issue["assignees"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .any(|a| a["login"].as_str() == Some(COPILOT_LOGIN))
+                        })
+                        .unwrap_or(false);
+                    if assigned {
+                        tracing::info!(
+                            "Assigned Copilot to issue #{} – coding agent triggered",
+                            issue_number
+                        );
+                        return true;
+                    }
+                }
+                tracing::warn!(
+                    "Copilot not found in assignees for issue #{} after assignment; \
+                     the token may lack permission to assign Copilot (a PAT may be required)",
+                    issue_number,
                 );
-                true
+                false
             }
             Ok(resp) => {
                 tracing::warn!(
