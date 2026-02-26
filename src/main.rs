@@ -39,6 +39,9 @@ async fn main() -> Result<()> {
             api_token,
             model_provider,
             verify_command,
+            evaluation_mode,
+            completeness_prompt,
+            completion_marker_file,
             headless,
         } => {
             let mut config = load_user_config().unwrap_or_default();
@@ -59,6 +62,15 @@ async fn main() -> Result<()> {
             }
             if let Some(verify_command) = verify_command {
                 config.verification_command = Some(verify_command);
+            }
+            if let Some(evaluation_mode) = evaluation_mode {
+                config.evaluation_mode = evaluation_mode;
+            }
+            if let Some(completeness_prompt) = completeness_prompt {
+                config.completeness_prompt = Some(completeness_prompt);
+            }
+            if let Some(completion_marker_file) = completion_marker_file {
+                config.completion_marker_file = completion_marker_file;
             }
             if config.model_provider == ModelProvider::Llama
                 && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
@@ -87,16 +99,22 @@ async fn main() -> Result<()> {
                     id: "1".to_string(),
                     description: "First task - implement feature X".to_string(),
                     status: TaskStatus::Pending,
+                    phase: 1,
+                    depends_on: vec![],
                 },
                 Task {
                     id: "2".to_string(),
                     description: "Second task - add tests for feature X".to_string(),
                     status: TaskStatus::Pending,
+                    phase: 1,
+                    depends_on: vec![],
                 },
                 Task {
                     id: "3".to_string(),
                     description: "Third task - update documentation".to_string(),
                     status: TaskStatus::Pending,
+                    phase: 2,
+                    depends_on: vec!["1".to_string(), "2".to_string()],
                 },
             ];
 

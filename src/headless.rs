@@ -129,13 +129,91 @@ fn run_agent_working(state: &mut HeadlessState) -> Result<()> {
 }
 
 /// Phase: NeedsVerification – run the verification command to check the agent's
-/// work.
+/// work.  Supports both shell-command and agent-file evaluation modes.
 async fn run_needs_verification(
     config: &Config,
     headless_cfg: &HeadlessConfig,
     state: &mut HeadlessState,
     work_dir: &Path,
 ) -> Result<()> {
+    use crate::types::EvaluationMode;
+
+    // Determine the effective evaluation mode.
+    let eval_mode = if headless_cfg.evaluation_mode != EvaluationMode::Command {
+        headless_cfg.evaluation_mode
+    } else {
+        config.evaluation_mode
+    };
+
+    if eval_mode == EvaluationMode::AgentFile {
+        // Use the agent-based evaluation path.
+        let marker = if *headless_cfg.completion_marker_file
+            != *std::path::Path::new(crate::types::DEFAULT_COMPLETION_MARKER)
+        {
+            headless_cfg.completion_marker_file.clone()
+        } else {
+            config.completion_marker_file.clone()
+        };
+
+        let completeness_prompt = headless_cfg
+            .completeness_prompt
+            .as_deref()
+            .or(config.completeness_prompt.as_deref());
+
+        let task_desc = state
+            .last_prompt
+            .clone()
+            .unwrap_or_else(|| "unknown task".to_string());
+
+        let task = crate::types::Task {
+            id: state
+                .current_task_id
+                .clone()
+                .unwrap_or_else(|| "?".to_string()),
+            description: task_desc,
+            status: crate::types::TaskStatus::InProgress,
+            phase: 1,
+            depends_on: vec![],
+        };
+
+        let mut agent = crate::agent::AgentClient::with_evaluation(
+            config.model_provider.clone(),
+            config.api_endpoint.clone(),
+            config.api_token.clone(),
+            work_dir.to_string_lossy().to_string(),
+            config.verification_command.clone(),
+            eval_mode,
+            completeness_prompt.map(|s| s.to_string()),
+            marker.to_string_lossy().to_string(),
+        );
+
+        println!("[wreck-it] running agent-based completeness evaluation");
+        match agent.evaluate_completeness(&task).await {
+            Ok(true) => {
+                println!("[wreck-it] agent evaluation: task is complete");
+                state.phase = AgentPhase::Completed;
+                state.memory.push(format!(
+                    "iteration {}: agent evaluation passed for task {:?}",
+                    state.iteration, state.current_task_id
+                ));
+            }
+            Ok(false) => {
+                println!("[wreck-it] agent evaluation: task is NOT complete");
+                state.memory.push(format!(
+                    "iteration {}: agent evaluation failed for task {:?}",
+                    state.iteration, state.current_task_id
+                ));
+                state.phase = AgentPhase::NeedsTrigger;
+            }
+            Err(e) => {
+                println!("[wreck-it] agent evaluation error: {}", e);
+                state.phase = AgentPhase::NeedsTrigger;
+            }
+        }
+        return Ok(());
+    }
+
+    // Existing shell-command verification path.
     let verify_cmd = headless_cfg
         .verify_command
         .as_deref()

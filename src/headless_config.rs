@@ -1,3 +1,4 @@
+use crate::types::EvaluationMode;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -22,6 +23,18 @@ pub struct HeadlessConfig {
     /// Path where headless state is persisted between invocations.
     #[serde(default = "default_state_file")]
     pub state_file: PathBuf,
+
+    /// How completeness is evaluated.
+    #[serde(default)]
+    pub evaluation_mode: EvaluationMode,
+
+    /// Prompt describing completeness for the evaluation agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completeness_prompt: Option<String>,
+
+    /// Marker file the evaluation agent writes when the task is complete.
+    #[serde(default = "default_completion_marker")]
+    pub completion_marker_file: PathBuf,
 }
 
 fn default_task_file() -> PathBuf {
@@ -36,6 +49,10 @@ fn default_state_file() -> PathBuf {
     PathBuf::from(".wreck-it-state.json")
 }
 
+fn default_completion_marker() -> PathBuf {
+    PathBuf::from(crate::types::DEFAULT_COMPLETION_MARKER)
+}
+
 impl Default for HeadlessConfig {
     fn default() -> Self {
         Self {
@@ -43,6 +60,9 @@ impl Default for HeadlessConfig {
             max_iterations: default_max_iterations(),
             verify_command: None,
             state_file: default_state_file(),
+            evaluation_mode: EvaluationMode::default(),
+            completeness_prompt: None,
+            completion_marker_file: default_completion_marker(),
         }
     }
 }
@@ -103,5 +123,45 @@ state_file = ".my-state.json"
         assert_eq!(config.max_iterations, 100);
         assert!(config.verify_command.is_none());
         assert_eq!(config.state_file, PathBuf::from(".wreck-it-state.json"));
+        assert_eq!(config.evaluation_mode, EvaluationMode::Command);
+        assert!(config.completeness_prompt.is_none());
+        assert_eq!(
+            config.completion_marker_file,
+            PathBuf::from(crate::types::DEFAULT_COMPLETION_MARKER)
+        );
+    }
+
+    #[test]
+    fn test_load_headless_config_with_agent_file_evaluation() {
+        let dir = tempdir().unwrap();
+        let config_file = dir.path().join(".wreck-it.toml");
+        fs::write(
+            &config_file,
+            r#"
+evaluation_mode = "agent_file"
+completeness_prompt = "Verify all tests pass and code compiles"
+completion_marker_file = ".done"
+"#,
+        )
+        .unwrap();
+
+        let config = load_headless_config(&config_file).unwrap();
+        assert_eq!(config.evaluation_mode, EvaluationMode::AgentFile);
+        assert_eq!(
+            config.completeness_prompt.as_deref(),
+            Some("Verify all tests pass and code compiles")
+        );
+        assert_eq!(config.completion_marker_file, PathBuf::from(".done"));
+    }
+
+    #[test]
+    fn test_load_headless_config_defaults_evaluation_mode() {
+        let dir = tempdir().unwrap();
+        let config_file = dir.path().join(".wreck-it.toml");
+        fs::write(&config_file, "").unwrap();
+
+        let config = load_headless_config(&config_file).unwrap();
+        assert_eq!(config.evaluation_mode, EvaluationMode::Command);
+        assert!(config.completeness_prompt.is_none());
     }
 }
