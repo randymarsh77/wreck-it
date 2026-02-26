@@ -30,9 +30,17 @@ pub struct HeadlessState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_task_id: Option<String>,
 
+    /// GitHub issue number created to trigger the cloud agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issue_number: Option<u64>,
+
     /// PR number created by the cloud agent (if any).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pr_number: Option<u64>,
+
+    /// URL of the PR created by the cloud agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_url: Option<String>,
 
     /// The last prompt sent to the agent.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,7 +57,9 @@ impl Default for HeadlessState {
             phase: AgentPhase::NeedsTrigger,
             iteration: 0,
             current_task_id: None,
+            issue_number: None,
             pr_number: None,
+            pr_url: None,
             last_prompt: None,
             memory: Vec::new(),
         }
@@ -100,7 +110,9 @@ mod tests {
             phase: AgentPhase::AgentWorking,
             iteration: 3,
             current_task_id: Some("task-1".to_string()),
+            issue_number: Some(99),
             pr_number: Some(42),
+            pr_url: Some("https://github.com/o/r/pull/42".to_string()),
             last_prompt: Some("implement feature X".to_string()),
             memory: vec!["context note".to_string()],
         };
@@ -111,7 +123,12 @@ mod tests {
         assert_eq!(loaded.phase, AgentPhase::AgentWorking);
         assert_eq!(loaded.iteration, 3);
         assert_eq!(loaded.current_task_id.as_deref(), Some("task-1"));
+        assert_eq!(loaded.issue_number, Some(99));
         assert_eq!(loaded.pr_number, Some(42));
+        assert_eq!(
+            loaded.pr_url.as_deref(),
+            Some("https://github.com/o/r/pull/42")
+        );
         assert_eq!(loaded.last_prompt.as_deref(), Some("implement feature X"));
         assert_eq!(loaded.memory, vec!["context note".to_string()]);
     }
@@ -122,7 +139,9 @@ mod tests {
         assert_eq!(state.phase, AgentPhase::NeedsTrigger);
         assert_eq!(state.iteration, 0);
         assert!(state.current_task_id.is_none());
+        assert!(state.issue_number.is_none());
         assert!(state.pr_number.is_none());
+        assert!(state.pr_url.is_none());
         assert!(state.last_prompt.is_none());
         assert!(state.memory.is_empty());
     }

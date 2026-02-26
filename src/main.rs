@@ -1,5 +1,6 @@
 mod agent;
 mod cli;
+mod cloud_agent;
 mod config_manager;
 mod headless;
 mod headless_config;

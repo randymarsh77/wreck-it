@@ -1,6 +1,6 @@
+use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus};
 use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::headless_state::{load_headless_state, save_headless_state, AgentPhase, HeadlessState};
-use crate::ralph_loop::RalphLoop;
 use crate::task_manager::{load_tasks, save_tasks};
 use crate::types::Config;
 use anyhow::{Context, Result};
@@ -12,8 +12,17 @@ const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
 /// Run wreck-it in headless mode.
 ///
 /// This is designed for CI environments (e.g. a cron-triggered GitHub Actions
-/// workflow).  Each invocation performs a single iteration of the ralph loop
-/// and persists state so subsequent cron runs can pick up where we left off.
+/// workflow).  Instead of running a local AI chat loop, each invocation drives
+/// one step of a cloud-agent state machine:
+///
+///   NeedsTrigger → create a GitHub issue and assign Copilot (triggers the
+///                  cloud coding agent)
+///   AgentWorking → poll the issue for a linked PR created by the agent
+///   NeedsVerification → check PR mergeability and merge it
+///   Completed → mark the task done, advance to the next one
+///
+/// State is persisted between invocations so subsequent cron runs pick up
+/// where the previous one left off.
 pub async fn run_headless(config: Config) -> Result<()> {
     // Try to load repo-committed headless config for state_file path and
     // other overrides.
@@ -38,7 +47,7 @@ pub async fn run_headless(config: Config) -> Result<()> {
             run_needs_trigger(&config, &headless_cfg, &mut state, &work_dir).await?;
         }
         AgentPhase::AgentWorking => {
-            run_agent_working(&mut state)?;
+            run_agent_working(&config, &headless_cfg, &mut state, &work_dir).await?;
         }
         AgentPhase::NeedsVerification => {
             run_needs_verification(&config, &headless_cfg, &mut state, &work_dir).await?;
@@ -47,7 +56,9 @@ pub async fn run_headless(config: Config) -> Result<()> {
             println!("[wreck-it] previous task completed, advancing to next trigger");
             state.phase = AgentPhase::NeedsTrigger;
             state.current_task_id = None;
+            state.issue_number = None;
             state.pr_number = None;
+            state.pr_url = None;
             state.last_prompt = None;
         }
     }
@@ -62,7 +73,11 @@ pub async fn run_headless(config: Config) -> Result<()> {
     Ok(())
 }
 
-/// Phase: NeedsTrigger – pick the next task and run one ralph loop iteration.
+/// Phase: NeedsTrigger – pick the next task and trigger a cloud coding agent.
+///
+/// Instead of running a local AI chat loop, this creates a GitHub issue with
+/// the task description and assigns Copilot to it, which triggers the cloud
+/// coding agent to autonomously make changes and create a pull request.
 async fn run_needs_trigger(
     config: &Config,
     headless_cfg: &HeadlessConfig,
@@ -96,208 +111,207 @@ async fn run_needs_trigger(
     state.current_task_id = Some(pending_task.id.clone());
     state.last_prompt = Some(pending_task.description.clone());
 
+    // Resolve GitHub token and repo info.
+    let github_token = config
+        .api_token
+        .clone()
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .context("GitHub token required to trigger cloud agent")?;
+
+    let (repo_owner, repo_name) = resolve_repo_info(
+        headless_cfg.repo_owner.as_deref(),
+        headless_cfg.repo_name.as_deref(),
+        work_dir,
+    )?;
+
+    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+
     println!(
-        "[wreck-it] triggering agent for task {}: {}",
+        "[wreck-it] triggering cloud agent for task {}: {}",
         pending_task.id, pending_task.description
     );
 
-    // Track which tasks are pending before the loop so we can detect
-    // infrastructure failures (tasks that flip from Pending to Failed without
-    // the agent actually completing any work).
-    let pending_before_iteration: std::collections::HashSet<String> = tasks
-        .iter()
-        .filter(|t| t.status == crate::types::TaskStatus::Pending)
-        .map(|t| t.id.clone())
-        .collect();
+    let result = client
+        .trigger_agent(&pending_task.id, &pending_task.description)
+        .await?;
 
-    // Run one iteration of the ralph loop
-    let mut ralph = RalphLoop::new(config.clone());
-    ralph.initialize()?;
-    let _should_continue = ralph.run_iteration().await?;
-
-    // After the iteration, check the task status
+    state.issue_number = Some(result.issue_number);
+    state.pr_number = None;
+    state.pr_url = None;
+    state.phase = AgentPhase::AgentWorking;
     state.memory.push(format!(
-        "iteration {}: triggered task {}",
-        state.iteration, pending_task.id
+        "iteration {}: triggered cloud agent for task {} (issue #{})",
+        state.iteration, pending_task.id, result.issue_number,
     ));
 
-    // Reload tasks to detect agent infrastructure failures.  If any task that
-    // was Pending before the iteration is now Failed (or stuck InProgress),
-    // reset it to Pending so the headless state-machine can retry on the next
-    // cron invocation.  The iteration counter + max_iterations still bounds
-    // total retries.
-    // NOTE: InProgress resets are safe here because `run_iteration().await`
-    // has fully completed – no tasks are still executing at this point.
+    // Mark task as InProgress and save.
     let mut updated_tasks = load_tasks(&task_file)?;
-    let mut reset_count = 0;
-    for t in &mut updated_tasks {
-        if pending_before_iteration.contains(&t.id)
-            && (t.status == crate::types::TaskStatus::Failed
-                || t.status == crate::types::TaskStatus::InProgress)
-        {
-            t.status = crate::types::TaskStatus::Pending;
-            reset_count += 1;
+    if let Some(task) = updated_tasks.iter_mut().find(|t| t.id == pending_task.id) {
+        task.status = crate::types::TaskStatus::InProgress;
+    }
+    save_tasks(&task_file, &updated_tasks)?;
+
+    println!(
+        "[wreck-it] cloud agent triggered – issue: {}",
+        result.issue_url,
+    );
+
+    Ok(())
+}
+
+/// Phase: AgentWorking – the cloud agent is still processing; check whether it
+/// has created a PR yet.
+async fn run_agent_working(
+    config: &Config,
+    headless_cfg: &HeadlessConfig,
+    state: &mut HeadlessState,
+    work_dir: &Path,
+) -> Result<()> {
+    let issue_number = match state.issue_number {
+        Some(n) => n,
+        None => {
+            println!("[wreck-it] no issue number in state, going back to trigger");
+            state.phase = AgentPhase::NeedsTrigger;
+            return Ok(());
+        }
+    };
+
+    let github_token = config
+        .api_token
+        .clone()
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .context("GitHub token required to check cloud agent status")?;
+
+    let (repo_owner, repo_name) = resolve_repo_info(
+        headless_cfg.repo_owner.as_deref(),
+        headless_cfg.repo_name.as_deref(),
+        work_dir,
+    )?;
+
+    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+
+    println!(
+        "[wreck-it] checking cloud agent status for issue #{}",
+        issue_number
+    );
+
+    match client.check_agent_status(issue_number).await? {
+        CloudAgentStatus::Working => {
+            println!(
+                "[wreck-it] agent is still working on issue #{}, will check again next run",
+                issue_number
+            );
+            // Stay in AgentWorking phase.
+        }
+        CloudAgentStatus::PrCreated { pr_number, pr_url } => {
+            println!("[wreck-it] agent created PR #{}: {}", pr_number, pr_url);
+            state.pr_number = Some(pr_number);
+            state.pr_url = Some(pr_url);
+            state.phase = AgentPhase::NeedsVerification;
+            state.memory.push(format!(
+                "iteration {}: agent created PR #{} for task {:?}",
+                state.iteration, pr_number, state.current_task_id,
+            ));
+        }
+        CloudAgentStatus::CompletedNoPr => {
+            println!("[wreck-it] agent completed without creating a PR");
+            state.phase = AgentPhase::NeedsTrigger;
+            state.memory.push(format!(
+                "iteration {}: agent completed without PR for task {:?}",
+                state.iteration, state.current_task_id,
+            ));
         }
     }
-    if reset_count > 0 {
-        println!(
-            "[wreck-it] reset {} failed task(s) to pending for retry",
-            reset_count
-        );
-        save_tasks(&task_file, &updated_tasks)?;
-        // Skip verification – the agent execution itself failed.
-        state.phase = AgentPhase::NeedsTrigger;
-    } else {
-        state.phase = AgentPhase::NeedsVerification;
-    }
 
     Ok(())
 }
 
-/// Phase: AgentWorking – the cloud agent is still processing; nothing to do
-/// this invocation.
-fn run_agent_working(state: &mut HeadlessState) -> Result<()> {
-    println!(
-        "[wreck-it] agent is still working on task {:?}, will check again next run",
-        state.current_task_id
-    );
-    // Transition to verification so the next invocation checks the result.
-    state.phase = AgentPhase::NeedsVerification;
-    Ok(())
-}
-
-/// Phase: NeedsVerification – run the verification command to check the agent's
-/// work.  Supports both shell-command and agent-file evaluation modes.
+/// Phase: NeedsVerification – the agent created a PR; try to merge it.
+///
+/// Checks whether the PR is mergeable and merges it.  On success the task is
+/// marked complete; on failure we stay in this phase so the next cron
+/// invocation will retry.
 async fn run_needs_verification(
     config: &Config,
     headless_cfg: &HeadlessConfig,
     state: &mut HeadlessState,
     work_dir: &Path,
 ) -> Result<()> {
-    use crate::types::EvaluationMode;
-
-    // Determine the effective evaluation mode.
-    let eval_mode = if headless_cfg.evaluation_mode != EvaluationMode::Command {
-        headless_cfg.evaluation_mode
-    } else {
-        config.evaluation_mode
+    let pr_number = match state.pr_number {
+        Some(n) => n,
+        None => {
+            println!("[wreck-it] no PR to verify, going back to trigger");
+            state.phase = AgentPhase::NeedsTrigger;
+            return Ok(());
+        }
     };
 
-    if eval_mode == EvaluationMode::AgentFile {
-        // Use the agent-based evaluation path.
-        let marker = if *headless_cfg.completion_marker_file
-            != *std::path::Path::new(crate::types::DEFAULT_COMPLETION_MARKER)
-        {
-            headless_cfg.completion_marker_file.clone()
-        } else {
-            config.completion_marker_file.clone()
-        };
+    let github_token = config
+        .api_token
+        .clone()
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .context("GitHub token required to merge PR")?;
 
-        let completeness_prompt = headless_cfg
-            .completeness_prompt
-            .as_deref()
-            .or(config.completeness_prompt.as_deref());
+    let (repo_owner, repo_name) = resolve_repo_info(
+        headless_cfg.repo_owner.as_deref(),
+        headless_cfg.repo_name.as_deref(),
+        work_dir,
+    )?;
 
-        let task_desc = state
-            .last_prompt
-            .clone()
-            .unwrap_or_else(|| "unknown task".to_string());
+    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
 
-        let task = crate::types::Task {
-            id: state
-                .current_task_id
-                .clone()
-                .unwrap_or_else(|| "?".to_string()),
-            description: task_desc,
-            status: crate::types::TaskStatus::InProgress,
-            phase: 1,
-            depends_on: vec![],
-        };
+    println!("[wreck-it] checking PR #{} for merge readiness", pr_number);
 
-        let mut agent = crate::agent::AgentClient::with_evaluation(
-            config.model_provider.clone(),
-            config.api_endpoint.clone(),
-            config.api_token.clone(),
-            work_dir.to_string_lossy().to_string(),
-            config.verification_command.clone(),
-            eval_mode,
-            completeness_prompt.map(|s| s.to_string()),
-            marker.to_string_lossy().to_string(),
-        );
-
-        println!("[wreck-it] running agent-based completeness evaluation");
-        match agent.evaluate_completeness(&task).await {
-            Ok(true) => {
-                println!("[wreck-it] agent evaluation: task is complete");
-                state.phase = AgentPhase::Completed;
-                state.memory.push(format!(
-                    "iteration {}: agent evaluation passed for task {:?}",
-                    state.iteration, state.current_task_id
-                ));
-            }
-            Ok(false) => {
-                println!("[wreck-it] agent evaluation: task is NOT complete");
-                state.memory.push(format!(
-                    "iteration {}: agent evaluation failed for task {:?}",
-                    state.iteration, state.current_task_id
-                ));
-                state.phase = AgentPhase::NeedsTrigger;
-            }
-            Err(e) => {
-                println!("[wreck-it] agent evaluation error: {}", e);
-                state.phase = AgentPhase::NeedsTrigger;
-            }
+    // Check if the PR is mergeable before attempting the merge.
+    match client.is_pr_mergeable(pr_number).await {
+        Ok(true) => { /* proceed to merge */ }
+        Ok(false) => {
+            println!(
+                "[wreck-it] PR #{} is not yet mergeable, will retry next run",
+                pr_number
+            );
+            state.memory.push(format!(
+                "iteration {}: PR #{} not yet mergeable",
+                state.iteration, pr_number,
+            ));
+            return Ok(());
         }
-        return Ok(());
+        Err(e) => {
+            println!(
+                "[wreck-it] error checking PR #{} mergeability: {}",
+                pr_number, e
+            );
+            return Ok(());
+        }
     }
 
-    // Existing shell-command verification path.
-    let verify_cmd = headless_cfg
-        .verify_command
-        .as_deref()
-        .or(config.verification_command.as_deref());
+    match client.merge_pr(pr_number).await {
+        Ok(()) => {
+            println!("[wreck-it] PR #{} merged successfully", pr_number);
+            state.phase = AgentPhase::Completed;
+            state.memory.push(format!(
+                "iteration {}: merged PR #{} for task {:?}",
+                state.iteration, pr_number, state.current_task_id,
+            ));
 
-    if let Some(cmd) = verify_cmd {
-        println!("[wreck-it] running verification: {}", cmd);
-        let output = if cfg!(target_os = "windows") {
-            std::process::Command::new("cmd")
-                .args(["/C", cmd])
-                .current_dir(work_dir)
-                .output()
-        } else {
-            std::process::Command::new("sh")
-                .args(["-c", cmd])
-                .current_dir(work_dir)
-                .output()
-        };
-
-        match output {
-            Ok(out) if out.status.success() => {
-                println!("[wreck-it] verification passed");
-                state.phase = AgentPhase::Completed;
-                state.memory.push(format!(
-                    "iteration {}: verification passed for task {:?}",
-                    state.iteration, state.current_task_id
-                ));
+            // Mark task as completed.
+            let task_file = work_dir.join(&headless_cfg.task_file);
+            let mut tasks = load_tasks(&task_file)?;
+            if let Some(task_id) = &state.current_task_id {
+                if let Some(task) = tasks.iter_mut().find(|t| &t.id == task_id) {
+                    task.status = crate::types::TaskStatus::Completed;
+                }
             }
-            Ok(out) => {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                println!("[wreck-it] verification failed: {}", stderr);
-                state.memory.push(format!(
-                    "iteration {}: verification failed for task {:?}",
-                    state.iteration, state.current_task_id
-                ));
-                // Go back to trigger to retry
-                state.phase = AgentPhase::NeedsTrigger;
-            }
-            Err(e) => {
-                println!("[wreck-it] verification command error: {}", e);
-                state.phase = AgentPhase::NeedsTrigger;
-            }
+            save_tasks(&task_file, &tasks)?;
         }
-    } else {
-        println!("[wreck-it] no verification command configured, marking complete");
-        state.phase = AgentPhase::Completed;
+        Err(e) => {
+            println!("[wreck-it] failed to merge PR #{}: {}", pr_number, e);
+            state.memory.push(format!(
+                "iteration {}: merge failed for PR #{}: {}",
+                state.iteration, pr_number, e,
+            ));
+            // Stay in NeedsVerification to retry on the next invocation.
+        }
     }
 
     Ok(())
