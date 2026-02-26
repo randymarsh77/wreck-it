@@ -1,0 +1,70 @@
+[
+  {
+    "id": "ideas-1",
+    "description": "Research state-of-the-art AI agent orchestration frameworks (e.g., AutoGen, CrewAI, LangGraph, OpenAI Swarm, MetaGPT) and multi-agent collaboration patterns. Document findings in docs/research-notes.md including: key architectural patterns, how they handle agent communication, task decomposition strategies, and feedback loops. Identify at least 5 concrete ideas that could be integrated into wreck-it to advance its orchestration capabilities.",
+    "status": "pending",
+    "phase": 1
+  },
+  {
+    "id": "ideas-2",
+    "description": "Research emerging patterns in AI-driven code development tools (e.g., Devin, SWE-Agent, OpenHands, Aider, Cursor agent mode) focusing on: how they handle long-running autonomous coding sessions, self-healing/retry strategies, context management across iterations, and quality feedback mechanisms. Document findings in docs/research-notes.md and propose at least 5 actionable improvements for wreck-it's Ralph Wiggum loop.",
+    "status": "pending",
+    "phase": 1
+  },
+  {
+    "id": "ideas-3",
+    "description": "Based on the research documented in docs/research-notes.md, create a prioritized roadmap of new features and improvements for wreck-it. Add new task entries to dogfood-tasks.json (as additional tasks in phase 4 or higher with appropriate depends_on referencing existing eval tasks) for each proposed improvement. Focus on features that would make wreck-it a breakthrough tool: dynamic task generation by agents, inter-agent communication, intelligent task routing based on agent specialization, and self-improving loop strategies.",
+    "status": "pending",
+    "phase": 1,
+    "depends_on": ["ideas-1", "ideas-2"]
+  },
+  {
+    "id": "impl-1",
+    "description": "Implement a role-based agent system in wreck-it. Add a 'role' field to the Task struct in src/types.rs that can be one of: 'ideas' (research and generate tasks), 'implementer' (write code), 'evaluator' (review and validate). Update the task_manager.rs to filter and select tasks by role. Update the serialization to include the role field in tasks.json. Ensure backward compatibility: tasks without a role field default to 'implementer'. Add unit tests for the new role field.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": ["ideas-3"]
+  },
+  {
+    "id": "impl-2",
+    "description": "Implement dynamic task generation capability: allow agents to programmatically add new tasks to the task file during execution. Add a method to TaskManager that appends new tasks to the JSON file with proper ID generation (using a prefix + incrementing number pattern). Add a mechanism in the ralph_loop.rs to detect newly added tasks after each iteration and incorporate them into the task queue. Include safeguards: max total tasks limit, validation of task structure, and prevention of circular dependencies. Add unit tests.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": ["ideas-3"]
+  },
+  {
+    "id": "impl-3",
+    "description": "Implement an agent context/memory system that persists across iterations. Create a new src/agent_memory.rs module that maintains a per-task context file (.wreck-it-memory/{task_id}.md) containing: previous attempts and their outcomes, key decisions made, relevant code locations discovered, and learnings from failed attempts. Integrate this with the AgentClient so context is included in agent prompts. This enables agents to learn from previous iterations rather than starting fresh each time. Add unit tests.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": ["ideas-3"]
+  },
+  {
+    "id": "impl-4",
+    "description": "Implement intelligent task routing and scheduling in ralph_loop.rs. Instead of simple phase-based ordering, add a scoring system that considers: task priority, estimated complexity, dependency satisfaction, number of previous failed attempts, and time since last attempt. Add a TaskScheduler struct that encapsulates this logic and returns an ordered list of ready tasks. This replaces the simple ready_task_indices method with a smarter selection strategy. Add unit tests.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": ["impl-1"]
+  },
+  {
+    "id": "eval-1",
+    "description": "Evaluate the role-based agent system (impl-1) and dynamic task generation (impl-2) implementations. Verify: 1) The role field is properly serialized/deserialized with backward compatibility, 2) Tasks can be dynamically added during execution without corrupting the task file, 3) Circular dependency detection works correctly, 4) All new unit tests pass. Run 'cargo test' and 'cargo clippy' to confirm code quality. Document any issues found in the task descriptions of new fix tasks if needed.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": ["impl-1", "impl-2"]
+  },
+  {
+    "id": "eval-2",
+    "description": "Evaluate the agent memory system (impl-3) and intelligent task scheduling (impl-4) implementations. Verify: 1) Memory files are created and updated correctly across iterations, 2) Memory context is properly injected into agent prompts, 3) The task scheduler produces correct orderings for various scenarios, 4) Edge cases are handled (empty task list, all failed tasks, circular scoring). Run 'cargo test' and 'cargo clippy'. Document any issues found.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": ["impl-3", "impl-4"]
+  },
+  {
+    "id": "eval-3",
+    "description": "Perform end-to-end integration evaluation of all new features working together. Create a small test scenario with a mix of ideas, implementer, and evaluator tasks that exercise: role-based routing, dynamic task generation, agent memory persistence, and intelligent scheduling. Verify the complete workflow runs without errors in headless mode. Run the full test suite with 'cargo test --verbose'. Update docs/architecture.md to reflect the new agent swarm capabilities. Mark this task complete only if all systems work together correctly.",
+    "status": "pending",
+    "phase": 4,
+    "depends_on": ["eval-1", "eval-2"]
+  }
+]
