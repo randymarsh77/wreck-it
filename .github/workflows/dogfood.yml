@@ -1,0 +1,99 @@
+# Dogfood workflow: use wreck-it to develop wreck-it.
+#
+# This workflow runs wreck-it in headless mode against the dogfood task list,
+# orchestrating an agent swarm of ideas/implementer/evaluator agents to
+# iteratively improve the codebase.
+#
+# Required secrets:
+#   COPILOT_API_TOKEN  – GitHub Copilot API token for agent execution
+#   PAT_TOKEN          – Personal Access Token with repo + PR merge permissions
+#                        (used to push changes and merge agent PRs)
+name: Dogfood - Agent Swarm
+
+on:
+  schedule:
+    # Run every 30 minutes during active development
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      max_iterations:
+        description: 'Override max iterations for this run'
+        required: false
+        default: '5'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dogfood:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure git for bot commits
+        run: |
+          git config user.name "wreck-it[bot]"
+          git config user.email "wreck-it[bot]@users.noreply.github.com"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-dogfood-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build wreck-it
+        run: cargo build --release
+
+      - name: Run wreck-it headless iteration
+        run: |
+          ./target/release/wreck-it run --headless \
+            --work-dir "." \
+            --task-file "dogfood-tasks.json" \
+            ${MAX_ITER:+--max-iterations "$MAX_ITER"}
+        env:
+          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          MAX_ITER: ${{ github.event.inputs.max_iterations }}
+
+      - name: Commit and push state changes
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git add -A
+            git commit -m "wreck-it: dogfood iteration update"
+            git push
+          fi
+
+      - name: Create PR if on feature branch
+        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          commit-message: "wreck-it: dogfood agent swarm update"
+          title: "🤖 wreck-it dogfood: agent swarm iteration"
+          body: |
+            Automated update from the wreck-it dogfood agent swarm.
+
+            This PR contains changes made by the agent swarm during a headless
+            iteration. The swarm consists of:
+            - **Ideas agents**: Research and propose improvements
+            - **Implementer agents**: Write code and implement features
+            - **Evaluator agents**: Review and validate completeness
+
+            See `dogfood-tasks.json` for current task status.
+          branch: dogfood/agent-updates
+          base: main
