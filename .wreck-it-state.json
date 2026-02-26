@@ -1,6 +1,6 @@
 {
   "phase": "needs_trigger",
-  "iteration": 8,
+  "iteration": 9,
   "current_task_id": "ideas-3",
   "last_prompt": "Based on the research documented in docs/research-notes.md, create a prioritized roadmap of new features and improvements for wreck-it. Add new task entries to dogfood-tasks.json (as additional tasks in phase 4 or higher with appropriate depends_on referencing existing eval tasks) for each proposed improvement. Focus on features that would make wreck-it a breakthrough tool: dynamic task generation by agents, inter-agent communication, intelligent task routing based on agent specialization, and self-improving loop strategies.",
   "memory": [
@@ -12,6 +12,7 @@
     "iteration 5: triggered task ideas-3",
     "iteration 6: triggered task ideas-3",
     "iteration 7: triggered task ideas-3",
-    "iteration 8: triggered task ideas-3"
+    "iteration 8: triggered task ideas-3",
+    "iteration 9: triggered task ideas-3"
   ]
 }
