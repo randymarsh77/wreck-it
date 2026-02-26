@@ -23,6 +23,9 @@ tokio = { version = "1.36", features = ["full"] }
 # GitHub Copilot SDK
 copilot-sdk-supercharged = "1.0"
 
+# HTTP client for direct API calls (GitHub Models)
+reqwest = { version = "0.12", features = ["json"] }
+
 # Error handling
 anyhow = "1.0"
 thiserror = "1.0"

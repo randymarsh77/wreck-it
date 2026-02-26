@@ -1,4 +1,7 @@
-use crate::types::{EvaluationMode, ModelProvider, Task, DEFAULT_LLAMA_MODEL, LLAMA_PROVIDER_TYPE};
+use crate::types::{
+    EvaluationMode, ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
+    LLAMA_PROVIDER_TYPE,
+};
 use anyhow::{bail, Context, Result};
 use copilot_sdk_supercharged::*;
 use std::path::Path;
@@ -149,6 +152,11 @@ impl AgentClient {
         // Validate work directory
         self.validate_work_dir()?;
 
+        // Use direct HTTP for GithubModels provider
+        if self.model_provider == ModelProvider::GithubModels {
+            return self.execute_task_via_http(task).await;
+        }
+
         // Get or create the Copilot client
         let client = self.ensure_client().await?;
 
@@ -223,6 +231,125 @@ impl AgentClient {
         session.destroy().await.ok();
 
         Ok(result)
+    }
+
+    /// Execute a task via direct HTTP to the GitHub Models API (OpenAI-compatible).
+    async fn execute_task_via_http(&self, task: &Task) -> Result<String> {
+        let context = self.read_codebase_context()?;
+        let prompt = format!(
+            "You are an AI coding agent working on a task in a git repository.\n\
+             Working directory: {}\n\n\
+             Task: {}\n\n\
+             Context:\n{}\n\n\
+             Please implement the necessary code changes to complete this task. \
+             Be specific and provide complete, working code.",
+            self.work_dir, task.description, context
+        );
+
+        self.chat_via_http(&prompt).await
+    }
+
+    /// Evaluate task completeness via direct HTTP to the GitHub Models API.
+    async fn evaluate_completeness_via_http(&self, task: &Task) -> Result<bool> {
+        let marker_path = Path::new(&self.work_dir).join(&self.completion_marker_file);
+
+        // Remove stale marker so we get a clean signal.
+        if marker_path.exists() {
+            std::fs::remove_file(&marker_path).ok();
+        }
+
+        let user_prompt = self
+            .completeness_prompt
+            .as_deref()
+            .unwrap_or("Check if the current task has been completed successfully.");
+
+        let prompt = format!(
+            "You are an evaluation agent. Your job is to determine whether a task is complete.\n\
+             Working directory: {work_dir}\n\n\
+             Task: {task_desc}\n\n\
+             Completeness criteria:\n{criteria}\n\n\
+             If the task is complete, create the file '{marker}' in the working directory \
+             containing the text \"COMPLETE\". If the task is NOT complete, do NOT create that file.\n\
+             Only create the file when you are confident the task is fully done.",
+            work_dir = self.work_dir,
+            task_desc = task.description,
+            criteria = user_prompt,
+            marker = self.completion_marker_file,
+        );
+
+        let response = self.chat_via_http(&prompt).await;
+
+        if let Ok(msg) = &response {
+            tracing::info!("Evaluation agent response: {}", msg);
+        }
+
+        let complete = marker_path.exists();
+        if complete {
+            tracing::info!("Evaluation agent wrote marker file – task is complete");
+            std::fs::remove_file(&marker_path).ok();
+        } else {
+            tracing::info!("Evaluation agent did NOT write marker file – task incomplete");
+        }
+
+        Ok(complete)
+    }
+
+    /// Send a chat completion request via HTTP to an OpenAI-compatible API.
+    async fn chat_via_http(&self, prompt: &str) -> Result<String> {
+        let token = self
+            .api_token
+            .as_deref()
+            .context("API token is required for github-models provider")?;
+
+        let model = DEFAULT_GITHUB_MODELS_MODEL;
+
+        let body = serde_json::json!({
+            "model": model,
+            "messages": [
+                { "role": "user", "content": prompt }
+            ]
+        });
+
+        tracing::info!(
+            "Sending HTTP chat request to {} (model: {})",
+            self.api_endpoint,
+            model
+        );
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&self.api_endpoint)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .context("Failed to send HTTP request to models API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unknown error".to_string());
+            bail!("Models API returned error ({}): {}", status, body);
+        }
+
+        let json: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse models API response")?;
+
+        let content = json
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .context("Models API response missing expected choices[0].message.content field")?
+            .to_string();
+
+        Ok(content)
     }
 
     fn read_codebase_context(&self) -> Result<String> {
@@ -315,6 +442,11 @@ impl AgentClient {
     /// Returns `Ok(true)` when the marker file exists after the agent runs.
     pub async fn evaluate_completeness(&mut self, task: &Task) -> Result<bool> {
         self.validate_work_dir()?;
+
+        // Use direct HTTP for GithubModels provider
+        if self.model_provider == ModelProvider::GithubModels {
+            return self.evaluate_completeness_via_http(task).await;
+        }
 
         let marker_path = Path::new(&self.work_dir).join(&self.completion_marker_file);
 
@@ -586,5 +718,53 @@ mod tests {
             ".done".to_string(),
         );
         assert_eq!(client2.evaluation_mode(), EvaluationMode::AgentFile);
+    }
+
+    #[test]
+    fn github_models_provider_creates_client() {
+        let client = AgentClient::with_evaluation(
+            ModelProvider::GithubModels,
+            "https://models.github.ai/inference/chat/completions".to_string(),
+            Some("test-token".to_string()),
+            ".".to_string(),
+            None,
+            EvaluationMode::Command,
+            None,
+            ".task-complete".to_string(),
+        );
+        // GithubModels provider should not initialize a copilot client
+        assert!(client.copilot_client.is_none());
+        assert_eq!(client.model_provider, ModelProvider::GithubModels);
+    }
+
+    #[tokio::test]
+    async fn github_models_execute_task_requires_token() {
+        let dir = tempdir().unwrap();
+        init_git_repo(dir.path());
+        let mut client = AgentClient::with_evaluation(
+            ModelProvider::GithubModels,
+            "https://models.github.ai/inference/chat/completions".to_string(),
+            None, // no token
+            dir.path().to_string_lossy().to_string(),
+            None,
+            EvaluationMode::Command,
+            None,
+            ".task-complete".to_string(),
+        );
+
+        let task = Task {
+            id: "1".to_string(),
+            description: "test task".to_string(),
+            status: crate::types::TaskStatus::Pending,
+            phase: 1,
+            depends_on: vec![],
+        };
+
+        let result = client.execute_task(&task).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("API token is required"));
     }
 }
