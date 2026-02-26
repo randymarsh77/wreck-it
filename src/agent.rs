@@ -340,9 +340,13 @@ impl AgentClient {
             .await
             .context("Failed to parse models API response")?;
 
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("No response from models API")
+        let content = json
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .context("Models API response missing expected choices[0].message.content field")?
             .to_string();
 
         Ok(content)
