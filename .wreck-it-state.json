@@ -1,11 +1,12 @@
 {
   "phase": "needs_trigger",
-  "iteration": 2,
-  "current_task_id": "ideas-1",
-  "last_prompt": "Research state-of-the-art AI agent orchestration frameworks (e.g., AutoGen, CrewAI, LangGraph, OpenAI Swarm, MetaGPT) and multi-agent collaboration patterns. Document findings in docs/research-notes.md including: key architectural patterns, how they handle agent communication, task decomposition strategies, and feedback loops. Identify at least 5 concrete ideas that could be integrated into wreck-it to advance its orchestration capabilities.",
+  "iteration": 3,
+  "current_task_id": "ideas-3",
+  "last_prompt": "Based on the research documented in docs/research-notes.md, create a prioritized roadmap of new features and improvements for wreck-it. Add new task entries to dogfood-tasks.json (as additional tasks in phase 4 or higher with appropriate depends_on referencing existing eval tasks) for each proposed improvement. Focus on features that would make wreck-it a breakthrough tool: dynamic task generation by agents, inter-agent communication, intelligent task routing based on agent specialization, and self-improving loop strategies.",
   "memory": [
     "iteration 1: triggered task ideas-1",
     "iteration 2: triggered task ideas-1",
-    "iteration 2: agent evaluation failed for task Some(\"ideas-1\")"
+    "iteration 2: agent evaluation failed for task Some(\"ideas-1\")",
+    "iteration 3: triggered task ideas-3"
   ]
 }
