@@ -2,12 +2,12 @@
   {
     "id": "ideas-1",
     "description": "Research state-of-the-art AI agent orchestration frameworks (e.g., AutoGen, CrewAI, LangGraph, OpenAI Swarm, MetaGPT) and multi-agent collaboration patterns. Document findings in docs/research-notes.md including: key architectural patterns, how they handle agent communication, task decomposition strategies, and feedback loops. Identify at least 5 concrete ideas that could be integrated into wreck-it to advance its orchestration capabilities.",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "id": "ideas-2",
     "description": "Research emerging patterns in AI-driven code development tools (e.g., Devin, SWE-Agent, OpenHands, Aider, Cursor agent mode) focusing on: how they handle long-running autonomous coding sessions, self-healing/retry strategies, context management across iterations, and quality feedback mechanisms. Document findings in docs/research-notes.md and propose at least 5 actionable improvements for wreck-it's Ralph Wiggum loop.",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "id": "ideas-3",
