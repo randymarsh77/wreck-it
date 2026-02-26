@@ -5,9 +5,11 @@
 # iteratively improve the codebase.
 #
 # Required secrets:
-#   COPILOT_API_TOKEN  – GitHub Copilot API token for agent execution
-#   PAT_TOKEN          – Personal Access Token with repo + PR merge permissions
-#                        (used to push changes and merge agent PRs)
+#   PAT_TOKEN – Personal Access Token with repo + PR merge permissions
+#               (used to push changes and merge agent PRs)
+#
+# The built-in GITHUB_TOKEN with `models: read` is used for agent execution
+# via GitHub Models, so no separate Copilot API token secret is needed.
 name: Dogfood - Agent Swarm
 
 on:
@@ -24,6 +26,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  models: read
 
 jobs:
   dogfood:
@@ -66,7 +69,7 @@ jobs:
           fi
           ./target/release/wreck-it run $ARGS
         env:
-          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           MAX_ITER: ${{ inputs.max_iterations }}
 
       - name: Commit and push state changes
