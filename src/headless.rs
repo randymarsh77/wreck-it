@@ -104,7 +104,7 @@ async fn run_needs_trigger(
     // Track which tasks are pending before the loop so we can detect
     // infrastructure failures (tasks that flip from Pending to Failed without
     // the agent actually completing any work).
-    let pending_ids: std::collections::HashSet<String> = tasks
+    let pending_before_iteration: std::collections::HashSet<String> = tasks
         .iter()
         .filter(|t| t.status == crate::types::TaskStatus::Pending)
         .map(|t| t.id.clone())
@@ -126,10 +126,12 @@ async fn run_needs_trigger(
     // reset it to Pending so the headless state-machine can retry on the next
     // cron invocation.  The iteration counter + max_iterations still bounds
     // total retries.
+    // NOTE: InProgress resets are safe here because `run_iteration().await`
+    // has fully completed – no tasks are still executing at this point.
     let mut updated_tasks = load_tasks(&task_file)?;
     let mut reset_count = 0;
     for t in &mut updated_tasks {
-        if pending_ids.contains(&t.id)
+        if pending_before_iteration.contains(&t.id)
             && (t.status == crate::types::TaskStatus::Failed
                 || t.status == crate::types::TaskStatus::InProgress)
         {
