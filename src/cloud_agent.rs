@@ -96,7 +96,13 @@ impl CloudAgentClient {
             .to_string();
 
         // Assign Copilot to the issue to trigger the coding agent.
-        self.assign_copilot(issue_number).await;
+        if !self.assign_copilot(issue_number).await {
+            tracing::warn!(
+                "Copilot assignment failed for issue #{}; the issue was created but the \
+                 agent may need to be triggered manually",
+                issue_number,
+            );
+        }
 
         Ok(TriggerResult {
             issue_number,
@@ -105,7 +111,8 @@ impl CloudAgentClient {
     }
 
     /// Assign the Copilot bot to an issue, triggering the coding agent.
-    async fn assign_copilot(&self, issue_number: u64) {
+    /// Returns `true` if the assignment succeeded.
+    async fn assign_copilot(&self, issue_number: u64) -> bool {
         let url = format!(
             "{}/repos/{}/{}/issues/{}/assignees",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, issue_number,
@@ -130,6 +137,7 @@ impl CloudAgentClient {
                     "Assigned Copilot to issue #{} – coding agent triggered",
                     issue_number
                 );
+                true
             }
             Ok(resp) => {
                 tracing::warn!(
@@ -137,6 +145,7 @@ impl CloudAgentClient {
                     issue_number,
                     resp.status(),
                 );
+                false
             }
             Err(e) => {
                 tracing::warn!(
@@ -144,6 +153,7 @@ impl CloudAgentClient {
                     issue_number,
                     e,
                 );
+                false
             }
         }
     }
@@ -303,12 +313,12 @@ pub fn parse_github_remote(url: &str) -> Option<(String, String)> {
         .or_else(|| url.strip_prefix("git@github.com:"))?;
     let path = path.strip_suffix(".git").unwrap_or(path);
     let path = path.trim_end_matches('/');
-    let parts: Vec<&str> = path.splitn(3, '/').collect();
-    if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-        Some((parts[0].to_string(), parts[1].to_string()))
-    } else {
-        None
-    }
+    let mut parts = path.splitn(2, '/');
+    let owner = parts.next().filter(|s| !s.is_empty())?;
+    let repo = parts.next().filter(|s| !s.is_empty())?;
+    // Ignore any trailing path segments (e.g. ".../tree/main").
+    let repo = repo.split('/').next().unwrap_or(repo);
+    Some((owner.to_string(), repo.to_string()))
 }
 
 /// Resolve the GitHub repository owner and name.
