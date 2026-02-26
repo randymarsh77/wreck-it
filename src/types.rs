@@ -7,7 +7,7 @@ pub const DEFAULT_LLAMA_ENDPOINT: &str = "http://localhost:11434/v1";
 pub const DEFAULT_GITHUB_MODELS_ENDPOINT: &str =
     "https://models.github.ai/inference/chat/completions";
 pub const DEFAULT_LLAMA_MODEL: &str = "llama3.2";
-pub const DEFAULT_GITHUB_MODELS_MODEL: &str = "openai/gpt-4o";
+pub const DEFAULT_GITHUB_MODELS_MODEL: &str = "anthropic/claude-opus-4.6";
 pub const LLAMA_PROVIDER_TYPE: &str = "openai";
 pub const DEFAULT_COMPLETION_MARKER: &str = ".task-complete";
 
