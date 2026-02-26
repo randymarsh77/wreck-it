@@ -1,7 +1,7 @@
 use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::headless_state::{load_headless_state, save_headless_state, AgentPhase, HeadlessState};
 use crate::ralph_loop::RalphLoop;
-use crate::task_manager::load_tasks;
+use crate::task_manager::{load_tasks, save_tasks};
 use crate::types::Config;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -101,6 +101,15 @@ async fn run_needs_trigger(
         pending_task.id, pending_task.description
     );
 
+    // Track which tasks are pending before the loop so we can detect
+    // infrastructure failures (tasks that flip from Pending to Failed without
+    // the agent actually completing any work).
+    let pending_before_iteration: std::collections::HashSet<String> = tasks
+        .iter()
+        .filter(|t| t.status == crate::types::TaskStatus::Pending)
+        .map(|t| t.id.clone())
+        .collect();
+
     // Run one iteration of the ralph loop
     let mut ralph = RalphLoop::new(config.clone());
     ralph.initialize()?;
@@ -111,7 +120,36 @@ async fn run_needs_trigger(
         "iteration {}: triggered task {}",
         state.iteration, pending_task.id
     ));
-    state.phase = AgentPhase::NeedsVerification;
+
+    // Reload tasks to detect agent infrastructure failures.  If any task that
+    // was Pending before the iteration is now Failed (or stuck InProgress),
+    // reset it to Pending so the headless state-machine can retry on the next
+    // cron invocation.  The iteration counter + max_iterations still bounds
+    // total retries.
+    // NOTE: InProgress resets are safe here because `run_iteration().await`
+    // has fully completed – no tasks are still executing at this point.
+    let mut updated_tasks = load_tasks(&task_file)?;
+    let mut reset_count = 0;
+    for t in &mut updated_tasks {
+        if pending_before_iteration.contains(&t.id)
+            && (t.status == crate::types::TaskStatus::Failed
+                || t.status == crate::types::TaskStatus::InProgress)
+        {
+            t.status = crate::types::TaskStatus::Pending;
+            reset_count += 1;
+        }
+    }
+    if reset_count > 0 {
+        println!(
+            "[wreck-it] reset {} failed task(s) to pending for retry",
+            reset_count
+        );
+        save_tasks(&task_file, &updated_tasks)?;
+        // Skip verification – the agent execution itself failed.
+        state.phase = AgentPhase::NeedsTrigger;
+    } else {
+        state.phase = AgentPhase::NeedsVerification;
+    }
 
     Ok(())
 }

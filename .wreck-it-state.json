@@ -1,9 +1,4 @@
 {
   "phase": "needs_trigger",
-  "iteration": 1,
-  "current_task_id": "ideas-1",
-  "last_prompt": "Research state-of-the-art AI agent orchestration frameworks (e.g., AutoGen, CrewAI, LangGraph, OpenAI Swarm, MetaGPT) and multi-agent collaboration patterns. Document findings in docs/research-notes.md including: key architectural patterns, how they handle agent communication, task decomposition strategies, and feedback loops. Identify at least 5 concrete ideas that could be integrated into wreck-it to advance its orchestration capabilities.",
-  "memory": [
-    "iteration 1: triggered task ideas-1"
-  ]
+  "iteration": 0
 }
