@@ -260,12 +260,37 @@ async fn run_needs_verification(
 
     let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
 
+    use crate::cloud_agent::PrMergeStatus;
+
     println!("[wreck-it] checking PR #{} for merge readiness", pr_number);
 
-    // Check if the PR is mergeable before attempting the merge.
-    match client.is_pr_mergeable(pr_number).await {
-        Ok(true) => { /* proceed to merge */ }
-        Ok(false) => {
+    // Check PR status: draft, not-yet-mergeable, or ready.
+    match client.check_pr_merge_status(pr_number).await {
+        Ok(PrMergeStatus::Draft) => {
+            println!(
+                "[wreck-it] PR #{} is a draft, marking as ready for review",
+                pr_number
+            );
+            if let Err(e) = client.mark_pr_ready_for_review(pr_number).await {
+                println!(
+                    "[wreck-it] failed to mark PR #{} as ready for review: {}",
+                    pr_number, e
+                );
+                state.memory.push(format!(
+                    "iteration {}: PR #{} is a draft; failed to mark ready: {}",
+                    state.iteration, pr_number, e,
+                ));
+                return Ok(());
+            }
+            println!("[wreck-it] PR #{} marked as ready for review", pr_number);
+            state.memory.push(format!(
+                "iteration {}: marked PR #{} as ready for review",
+                state.iteration, pr_number,
+            ));
+            // Mergeability may not be immediate; retry on the next run.
+            return Ok(());
+        }
+        Ok(PrMergeStatus::NotMergeable) => {
             println!(
                 "[wreck-it] PR #{} is not yet mergeable, will retry next run",
                 pr_number
@@ -276,9 +301,10 @@ async fn run_needs_verification(
             ));
             return Ok(());
         }
+        Ok(PrMergeStatus::Mergeable) => { /* proceed to merge */ }
         Err(e) => {
             println!(
-                "[wreck-it] error checking PR #{} mergeability: {}",
+                "[wreck-it] error checking PR #{} merge status: {}",
                 pr_number, e
             );
             return Ok(());

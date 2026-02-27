@@ -14,6 +14,17 @@ pub enum CloudAgentStatus {
     CompletedNoPr,
 }
 
+/// Merge readiness of a pull request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrMergeStatus {
+    /// The PR is a draft and must be marked ready for review first.
+    Draft,
+    /// The PR is not yet mergeable (checks pending, conflicts, etc.).
+    NotMergeable,
+    /// The PR is ready to be merged.
+    Mergeable,
+}
+
 /// Result of triggering a cloud agent.
 #[derive(Debug, Clone)]
 pub struct TriggerResult {
@@ -263,8 +274,12 @@ impl CloudAgentClient {
         Ok(None)
     }
 
-    /// Check whether a PR is open and in a mergeable state.
-    pub async fn is_pr_mergeable(&self, pr_number: u64) -> Result<bool> {
+    /// Check the merge readiness of a PR in a single API call.
+    ///
+    /// Returns [`PrMergeStatus::Draft`] if the PR is still a draft,
+    /// [`PrMergeStatus::NotMergeable`] if it is not yet mergeable (e.g. checks
+    /// pending or conflicts), and [`PrMergeStatus::Mergeable`] when it is ready.
+    pub async fn check_pr_merge_status(&self, pr_number: u64) -> Result<PrMergeStatus> {
         let url = format!(
             "{}/repos/{}/{}/pulls/{}",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
@@ -281,14 +296,62 @@ impl CloudAgentClient {
             .context("Failed to fetch PR details")?;
 
         if !resp.status().is_success() {
-            return Ok(false);
+            return Ok(PrMergeStatus::NotMergeable);
         }
 
         let pr: serde_json::Value = resp.json().await?;
         let state = pr["state"].as_str().unwrap_or("unknown");
+        let draft = pr["draft"].as_bool().unwrap_or(false);
         let mergeable = pr["mergeable"].as_bool().unwrap_or(false);
 
-        Ok(state == "open" && mergeable)
+        if state != "open" {
+            return Ok(PrMergeStatus::NotMergeable);
+        }
+        if draft {
+            return Ok(PrMergeStatus::Draft);
+        }
+        if mergeable {
+            Ok(PrMergeStatus::Mergeable)
+        } else {
+            Ok(PrMergeStatus::NotMergeable)
+        }
+    }
+
+    /// Mark a draft PR as ready for review.
+    pub async fn mark_pr_ready_for_review(&self, pr_number: u64) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let body = serde_json::json!({
+            "draft": false,
+        });
+
+        let resp = self
+            .http
+            .patch(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&body)
+            .send()
+            .await
+            .context("Failed to update PR draft status")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to mark PR #{} as ready for review ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        tracing::info!("Marked PR #{} as ready for review", pr_number);
+        Ok(())
     }
 
     /// Merge a pull request using a squash merge.
@@ -440,5 +503,13 @@ mod tests {
         .unwrap();
         assert_eq!(owner, "explicit-owner");
         assert_eq!(name, "explicit-repo");
+    }
+
+    #[test]
+    fn pr_merge_status_variants() {
+        assert_eq!(PrMergeStatus::Draft, PrMergeStatus::Draft);
+        assert_eq!(PrMergeStatus::NotMergeable, PrMergeStatus::NotMergeable);
+        assert_eq!(PrMergeStatus::Mergeable, PrMergeStatus::Mergeable);
+        assert_ne!(PrMergeStatus::Draft, PrMergeStatus::Mergeable);
     }
 }
