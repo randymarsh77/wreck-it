@@ -286,9 +286,72 @@ impl CloudAgentClient {
 
         let pr: serde_json::Value = resp.json().await?;
         let state = pr["state"].as_str().unwrap_or("unknown");
+        let draft = pr["draft"].as_bool().unwrap_or(false);
         let mergeable = pr["mergeable"].as_bool().unwrap_or(false);
 
-        Ok(state == "open" && mergeable)
+        Ok(state == "open" && !draft && mergeable)
+    }
+
+    /// Check whether a PR is currently in draft mode.
+    pub async fn is_pr_draft(&self, pr_number: u64) -> Result<bool> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR details")?;
+
+        if !resp.status().is_success() {
+            bail!("Failed to fetch PR #{} ({})", pr_number, resp.status());
+        }
+
+        let pr: serde_json::Value = resp.json().await?;
+        Ok(pr["draft"].as_bool().unwrap_or(false))
+    }
+
+    /// Mark a draft PR as ready for review.
+    pub async fn mark_pr_ready_for_review(&self, pr_number: u64) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let body = serde_json::json!({
+            "draft": false,
+        });
+
+        let resp = self
+            .http
+            .patch(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&body)
+            .send()
+            .await
+            .context("Failed to update PR draft status")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to mark PR #{} as ready for review ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        tracing::info!("Marked PR #{} as ready for review", pr_number);
+        Ok(())
     }
 
     /// Merge a pull request using a squash merge.

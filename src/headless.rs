@@ -262,6 +262,39 @@ async fn run_needs_verification(
 
     println!("[wreck-it] checking PR #{} for merge readiness", pr_number);
 
+    // If the PR is still a draft, mark it as ready for review first.
+    match client.is_pr_draft(pr_number).await {
+        Ok(true) => {
+            println!(
+                "[wreck-it] PR #{} is a draft, marking as ready for review",
+                pr_number
+            );
+            if let Err(e) = client.mark_pr_ready_for_review(pr_number).await {
+                println!(
+                    "[wreck-it] failed to mark PR #{} as ready for review: {}",
+                    pr_number, e
+                );
+                state.memory.push(format!(
+                    "iteration {}: PR #{} is a draft; failed to mark ready: {}",
+                    state.iteration, pr_number, e,
+                ));
+                return Ok(());
+            }
+            println!("[wreck-it] PR #{} marked as ready for review", pr_number);
+            state.memory.push(format!(
+                "iteration {}: marked PR #{} as ready for review",
+                state.iteration, pr_number,
+            ));
+        }
+        Ok(false) => { /* not a draft, proceed */ }
+        Err(e) => {
+            println!(
+                "[wreck-it] error checking PR #{} draft status: {}",
+                pr_number, e
+            );
+        }
+    }
+
     // Check if the PR is mergeable before attempting the merge.
     match client.is_pr_mergeable(pr_number).await {
         Ok(true) => { /* proceed to merge */ }
