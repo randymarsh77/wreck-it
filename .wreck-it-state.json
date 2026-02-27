@@ -14,6 +14,7 @@
     "iteration 1: marked PR #16 as ready for review",
     "iteration 1: PR #16 is a draft; failed to mark ready: GraphQL errors marking PR #16 as ready for review: [{\"extensions\":{\"code\":\"undefinedField\",\"fieldName\":\"markPullRequestAsReadyForReview\",\"typeName\":\"Mutation\"},\"locations\":[{\"column\":24,\"line\":1}],\"message\":\"Field 'markPullRequestAsReadyForReview' doesn't exist on type 'Mutation'\",\"path\":[\"mutation\",\"markPullRequestAsReadyForReview\"]},{\"extensions\":{\"code\":\"variableNotUsed\",\"variableName\":\"prId\"},\"locations\":[{\"column\":1,\"line\":1}],\"message\":\"Variable $prId is declared by anonymous mutation but not used\",\"path\":[\"mutation\"]}]",
     "iteration 1: marked PR #16 as ready for review",
+    "iteration 1: PR #16 not yet mergeable",
     "iteration 1: PR #16 not yet mergeable"
   ]
 }
