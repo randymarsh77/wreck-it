@@ -21,7 +21,7 @@
   {
     "id": "impl-1",
     "description": "Implement a role-based agent system in wreck-it. Add a 'role' field to the Task struct in src/types.rs that can be one of: 'ideas' (research and generate tasks), 'implementer' (write code), 'evaluator' (review and validate). Update the task_manager.rs to filter and select tasks by role. Update the serialization to include the role field in tasks.json. Ensure backward compatibility: tasks without a role field default to 'implementer'. Add unit tests for the new role field.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 2,
     "depends_on": [
       "ideas-3"

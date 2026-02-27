@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 3,
-  "current_task_id": "ideas-3",
-  "issue_number": 27,
-  "pr_number": 28,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/28",
-  "last_prompt": "Based on the research documented in docs/research-notes.md (including findings on gastown and openclaw), create a prioritized roadmap of new features and improvements for wreck-it. Add new task entries to dogfood-tasks.json (as additional tasks in phase 4 or higher with appropriate depends_on referencing existing eval tasks) for each proposed improvement. Focus on features that would make wreck-it a breakthrough tool: dynamic task generation by agents, inter-agent communication, intelligent task routing based on agent specialization, self-improving loop strategies, and integration opportunities with gastown and openclaw.",
+  "phase": "agent_working",
+  "iteration": 4,
+  "current_task_id": "impl-1",
+  "issue_number": 31,
+  "last_prompt": "Implement a role-based agent system in wreck-it. Add a 'role' field to the Task struct in src/types.rs that can be one of: 'ideas' (research and generate tasks), 'implementer' (write code), 'evaluator' (review and validate). Update the task_manager.rs to filter and select tasks by role. Update the serialization to include the role field in tasks.json. Ensure backward compatibility: tasks without a role field default to 'implementer'. Add unit tests for the new role field.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
     "iteration 1: agent created PR #16 for task Some(\"ideas-1\")",
@@ -24,6 +22,8 @@
     "iteration 2: PR #25 already merged for task Some(\"ideas-2\")",
     "iteration 3: triggered cloud agent for task ideas-3 (issue #27)",
     "iteration 3: agent created PR #28 for task Some(\"ideas-3\")",
-    "iteration 3: marked PR #28 as ready for review"
+    "iteration 3: marked PR #28 as ready for review",
+    "iteration 3: PR #28 already merged for task Some(\"ideas-3\")",
+    "iteration 4: triggered cloud agent for task impl-1 (issue #31)"
   ]
 }
