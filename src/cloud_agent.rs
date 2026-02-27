@@ -127,6 +127,13 @@ impl CloudAgentClient {
             .context("Missing issue URL in response")?
             .to_string();
         let issue_node_id = issue["node_id"].as_str().map(|s| s.to_string());
+        if issue_node_id.is_none() {
+            tracing::warn!(
+                "Issue creation response for #{} did not include node_id; \
+                 will need an extra API call to resolve it",
+                issue_number,
+            );
+        }
 
         // Assign Copilot to the issue to trigger the coding agent.
         if !self
@@ -224,7 +231,22 @@ impl CloudAgentClient {
                 .await
                 .ok()
                 .and_then(|v| v["node_id"].as_str().map(|s| s.to_string())),
-            _ => None,
+            Ok(resp) => {
+                tracing::warn!(
+                    "Failed to fetch issue #{} for node_id ({})",
+                    issue_number,
+                    resp.status(),
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "HTTP error fetching issue #{} for node_id: {}",
+                    issue_number,
+                    e,
+                );
+                None
+            }
         }
     }
 
