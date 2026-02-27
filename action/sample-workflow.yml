@@ -15,8 +15,8 @@ on:
 
 permissions:
   contents: write      # push state commits
-  pull-requests: write # create / update PRs
-  issues: write        # create issues to trigger agents
+  pull-requests: write # cloud agents create PRs against the default branch
+  issues: write        # wreck-it creates issues to trigger cloud agents
 
 jobs:
   wreck-it:
