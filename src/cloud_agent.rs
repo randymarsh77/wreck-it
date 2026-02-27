@@ -23,6 +23,8 @@ pub enum PrMergeStatus {
     NotMergeable,
     /// The PR is ready to be merged.
     Mergeable,
+    /// The PR has already been merged.
+    AlreadyMerged,
 }
 
 /// Result of triggering a cloud agent.
@@ -303,7 +305,11 @@ impl CloudAgentClient {
         let state = pr["state"].as_str().unwrap_or("unknown");
         let draft = pr["draft"].as_bool().unwrap_or(false);
         let mergeable = pr["mergeable"].as_bool().unwrap_or(false);
+        let merged = pr["merged"].as_bool().unwrap_or(false);
 
+        if merged {
+            return Ok(PrMergeStatus::AlreadyMerged);
+        }
         if state != "open" {
             return Ok(PrMergeStatus::NotMergeable);
         }
@@ -571,6 +577,8 @@ mod tests {
         assert_eq!(PrMergeStatus::Draft, PrMergeStatus::Draft);
         assert_eq!(PrMergeStatus::NotMergeable, PrMergeStatus::NotMergeable);
         assert_eq!(PrMergeStatus::Mergeable, PrMergeStatus::Mergeable);
+        assert_eq!(PrMergeStatus::AlreadyMerged, PrMergeStatus::AlreadyMerged);
         assert_ne!(PrMergeStatus::Draft, PrMergeStatus::Mergeable);
+        assert_ne!(PrMergeStatus::AlreadyMerged, PrMergeStatus::NotMergeable);
     }
 }

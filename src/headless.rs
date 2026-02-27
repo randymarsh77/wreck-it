@@ -349,6 +349,29 @@ async fn run_needs_verification(
             ));
             return Ok(StepOutcome::Yield);
         }
+        Ok(PrMergeStatus::AlreadyMerged) => {
+            println!(
+                "[wreck-it] PR #{} is already merged, marking task complete",
+                pr_number
+            );
+            state.phase = AgentPhase::Completed;
+            state.memory.push(format!(
+                "iteration {}: PR #{} already merged for task {:?}",
+                state.iteration, pr_number, state.current_task_id,
+            ));
+
+            // Mark task as completed.
+            let task_file = work_dir.join(&headless_cfg.task_file);
+            let mut tasks = load_tasks(&task_file)?;
+            if let Some(task_id) = &state.current_task_id {
+                if let Some(task) = tasks.iter_mut().find(|t| &t.id == task_id) {
+                    task.status = crate::types::TaskStatus::Completed;
+                }
+            }
+            save_tasks(&task_file, &tasks)?;
+
+            return Ok(StepOutcome::Continue);
+        }
         Ok(PrMergeStatus::Mergeable) => { /* proceed to merge */ }
         Err(e) => {
             println!(
