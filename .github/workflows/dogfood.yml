@@ -97,4 +97,6 @@ jobs:
             git add -A
             git commit -m "wreck-it: dogfood iteration update"
           fi
+          # Always push: first run needs to publish the new orphan branch;
+          # subsequent no-op runs are harmless (git reports "up to date").
           git push origin wreck-it-state
