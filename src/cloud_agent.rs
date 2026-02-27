@@ -320,7 +320,7 @@ impl CloudAgentClient {
     /// Mark a draft PR as ready for review.
     ///
     /// The REST API does not support unsetting `draft`; the GraphQL mutation
-    /// `markPullRequestAsReadyForReview` is required instead.
+    /// `markPullRequestReadyForReview` is required instead.
     pub async fn mark_pr_ready_for_review(&self, pr_number: u64) -> Result<()> {
         // First, fetch the PR to obtain the GraphQL node_id.
         let pr_url = format!(
@@ -357,7 +357,7 @@ impl CloudAgentClient {
         // Use the GraphQL API to mark the PR as ready for review.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
         let query = serde_json::json!({
-            "query": "mutation($prId: ID!) { markPullRequestAsReadyForReview(input: { pullRequestId: $prId }) { pullRequest { isDraft } } }",
+            "query": "mutation($prId: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $prId }) { pullRequest { isDraft } } }",
             "variables": { "prId": node_id },
         });
 
@@ -370,7 +370,7 @@ impl CloudAgentClient {
             .json(&query)
             .send()
             .await
-            .context("Failed to call GraphQL markPullRequestAsReadyForReview")?;
+            .context("Failed to call GraphQL markPullRequestReadyForReview")?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -396,12 +396,12 @@ impl CloudAgentClient {
 
         // Verify the mutation result.
         let is_draft = gql_resp
-            .pointer("/data/markPullRequestAsReadyForReview/pullRequest/isDraft")
+            .pointer("/data/markPullRequestReadyForReview/pullRequest/isDraft")
             .and_then(|v| v.as_bool());
         match is_draft {
             Some(false) => {} // success
             Some(true) => bail!(
-                "PR #{} is still a draft after markPullRequestAsReadyForReview",
+                "PR #{} is still a draft after markPullRequestReadyForReview",
                 pr_number,
             ),
             None => bail!(
