@@ -1,14 +1,14 @@
-# Dogfood workflow: use wreck-it to develop wreck-it.
+# Ralph dogfooding workflow: use wreck-it to develop wreck-it.
 #
 # This workflow runs wreck-it in headless mode against the dogfood task list,
-# orchestrating an agent swarm of ideas/implementer/evaluator agents to
+# orchestrating a swarm of ideas/implementer/evaluator agents to
 # iteratively improve the codebase.
 #
 # Required secrets:
 #   PAT_TOKEN – Personal Access Token with repo + PR merge permissions
 #               (used to push changes, merge agent PRs, and assign Copilot
 #               to issues — the built-in GITHUB_TOKEN cannot assign Copilot)
-name: Dogfood - Agent Swarm
+name: Ralph
 
 on:
   schedule:
@@ -28,7 +28,7 @@ permissions:
   models: read
 
 jobs:
-  dogfood:
+  ralph:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
