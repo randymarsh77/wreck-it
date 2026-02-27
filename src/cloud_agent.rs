@@ -398,11 +398,17 @@ impl CloudAgentClient {
         let is_draft = gql_resp
             .pointer("/data/markPullRequestAsReadyForReview/pullRequest/isDraft")
             .and_then(|v| v.as_bool());
-        if is_draft == Some(true) {
-            bail!(
+        match is_draft {
+            Some(false) => {} // success
+            Some(true) => bail!(
                 "PR #{} is still a draft after markPullRequestAsReadyForReview",
                 pr_number,
-            );
+            ),
+            None => bail!(
+                "Unexpected GraphQL response for PR #{}: could not verify draft status: {}",
+                pr_number,
+                gql_resp,
+            ),
         }
 
         tracing::info!("Marked PR #{} as ready for review", pr_number);
