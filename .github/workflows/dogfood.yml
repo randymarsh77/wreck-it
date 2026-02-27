@@ -12,8 +12,8 @@ name: Dogfood - Agent Swarm
 
 on:
   schedule:
-    # Run every 30 minutes during active development
-    - cron: '*/30 * * * *'
+    # Run every 10 minutes during active development
+    - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       max_iterations:
@@ -48,14 +48,11 @@ jobs:
         with:
           components: clippy
 
-      - name: Cache cargo
-        uses: actions/cache@v3
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-dogfood-${{ hashFiles('**/Cargo.lock') }}
+          cache-on-failure: true
+          prefix-key: dogfood
 
       - name: Build wreck-it
         run: cargo build --release
