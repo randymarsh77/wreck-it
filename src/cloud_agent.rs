@@ -318,35 +318,90 @@ impl CloudAgentClient {
     }
 
     /// Mark a draft PR as ready for review.
+    ///
+    /// The REST API does not support unsetting `draft`; the GraphQL mutation
+    /// `markPullRequestAsReadyForReview` is required instead.
     pub async fn mark_pr_ready_for_review(&self, pr_number: u64) -> Result<()> {
-        let url = format!(
+        // First, fetch the PR to obtain the GraphQL node_id.
+        let pr_url = format!(
             "{}/repos/{}/{}/pulls/{}",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
         );
 
-        let body = serde_json::json!({
-            "draft": false,
+        let pr_resp = self
+            .http
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for node_id")?;
+
+        if !pr_resp.status().is_success() {
+            let status = pr_resp.status();
+            let body = pr_resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch PR #{} for node_id ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let pr: serde_json::Value = pr_resp.json().await?;
+        let node_id = pr["node_id"]
+            .as_str()
+            .context("Missing node_id in PR response")?;
+
+        // Use the GraphQL API to mark the PR as ready for review.
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": "mutation($prId: ID!) { markPullRequestAsReadyForReview(input: { pullRequestId: $prId }) { pullRequest { isDraft } } }",
+            "variables": { "prId": node_id },
         });
 
         let resp = self
             .http
-            .patch(&url)
+            .post(&graphql_url)
             .header("Authorization", format!("Bearer {}", self.github_token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
-            .json(&body)
+            .json(&query)
             .send()
             .await
-            .context("Failed to update PR draft status")?;
+            .context("Failed to call GraphQL markPullRequestAsReadyForReview")?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             bail!(
-                "Failed to mark PR #{} as ready for review ({}): {}",
+                "GraphQL request failed for PR #{} ({}): {}",
                 pr_number,
                 status,
                 body,
+            );
+        }
+
+        let gql_resp: serde_json::Value = resp.json().await?;
+
+        // Check for GraphQL-level errors.
+        if let Some(errors) = gql_resp.get("errors") {
+            bail!(
+                "GraphQL errors marking PR #{} as ready for review: {}",
+                pr_number,
+                errors,
+            );
+        }
+
+        // Verify the mutation result.
+        let is_draft = gql_resp
+            .pointer("/data/markPullRequestAsReadyForReview/pullRequest/isDraft")
+            .and_then(|v| v.as_bool());
+        if is_draft == Some(true) {
+            bail!(
+                "PR #{} is still a draft after markPullRequestAsReadyForReview",
+                pr_number,
             );
         }
 
