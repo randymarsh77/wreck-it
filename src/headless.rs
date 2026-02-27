@@ -1,6 +1,8 @@
 use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus};
 use crate::headless_config::{load_headless_config, HeadlessConfig};
-use crate::headless_state::{load_headless_state, save_headless_state, AgentPhase, HeadlessState};
+use crate::headless_state::{
+    load_headless_state_from_branch, save_headless_state_to_branch, AgentPhase, HeadlessState,
+};
 use crate::task_manager::{load_tasks, save_tasks};
 use crate::types::Config;
 use anyhow::{Context, Result};
@@ -55,8 +57,10 @@ pub async fn run_headless(config: Config) -> Result<()> {
         HeadlessConfig::default()
     };
 
-    let state_path = work_dir.join(&headless_cfg.state_file);
-    let mut state = load_headless_state(&state_path).context("Failed to load headless state")?;
+    let state_path = headless_cfg.state_file.clone();
+    let state_branch = headless_cfg.state_branch.clone();
+    let mut state = load_headless_state_from_branch(&work_dir, &state_branch, &state_path)
+        .context("Failed to load headless state from branch")?;
 
     let mut sync_steps: usize = 0;
 
@@ -102,7 +106,8 @@ pub async fn run_headless(config: Config) -> Result<()> {
         }
     }
 
-    save_headless_state(&state_path, &state).context("Failed to save headless state")?;
+    save_headless_state_to_branch(&work_dir, &state_branch, &state_path, &state)
+        .context("Failed to save headless state to branch")?;
 
     println!(
         "[wreck-it] saved state: phase={:?} iteration={}",
