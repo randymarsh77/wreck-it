@@ -12,10 +12,6 @@ inputs:
   verify_command:
     description: 'Shell command to verify task completion (trusted input only)'
     required: false
-  state_branch:
-    description: 'Git branch used to persist headless state (orphan branch)'
-    required: false
-    default: 'wreck-it-state'
 runs:
   using: 'docker'
   image: 'Dockerfile'
@@ -23,4 +19,3 @@ runs:
     INPUT_TASK_FILE: ${{ inputs.task_file }}
     INPUT_MAX_ITERATIONS: ${{ inputs.max_iterations }}
     INPUT_VERIFY_COMMAND: ${{ inputs.verify_command }}
-    INPUT_STATE_BRANCH: ${{ inputs.state_branch }}

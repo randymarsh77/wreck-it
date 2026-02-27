@@ -45,12 +45,6 @@ pub struct HeadlessConfig {
     /// remote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_name: Option<String>,
-
-    /// Git branch used to persist headless state.  Defaults to an orphan
-    /// branch called `wreck-it-state` so that state commits don't pollute
-    /// the project history or trigger CI pipelines.
-    #[serde(default = "default_state_branch")]
-    pub state_branch: String,
 }
 
 fn default_task_file() -> PathBuf {
@@ -69,13 +63,6 @@ fn default_completion_marker() -> PathBuf {
     PathBuf::from(crate::types::DEFAULT_COMPLETION_MARKER)
 }
 
-/// Default orphan branch name for headless state persistence.
-pub const DEFAULT_STATE_BRANCH: &str = "wreck-it-state";
-
-fn default_state_branch() -> String {
-    DEFAULT_STATE_BRANCH.to_string()
-}
-
 impl Default for HeadlessConfig {
     fn default() -> Self {
         Self {
@@ -88,7 +75,6 @@ impl Default for HeadlessConfig {
             completion_marker_file: default_completion_marker(),
             repo_owner: None,
             repo_name: None,
-            state_branch: default_state_branch(),
         }
     }
 }
@@ -140,7 +126,6 @@ state_file = ".my-state.json"
         assert_eq!(config.max_iterations, 100);
         assert!(config.verify_command.is_none());
         assert_eq!(config.state_file, PathBuf::from(".wreck-it-state.json"));
-        assert_eq!(config.state_branch, "wreck-it-state");
     }
 
     #[test]
@@ -158,7 +143,6 @@ state_file = ".my-state.json"
         );
         assert!(config.repo_owner.is_none());
         assert!(config.repo_name.is_none());
-        assert_eq!(config.state_branch, "wreck-it-state");
     }
 
     #[test]
@@ -211,31 +195,5 @@ repo_name = "hello-world"
         let config = load_headless_config(&config_file).unwrap();
         assert_eq!(config.repo_owner.as_deref(), Some("octocat"));
         assert_eq!(config.repo_name.as_deref(), Some("hello-world"));
-    }
-
-    #[test]
-    fn test_load_headless_config_with_custom_state_branch() {
-        let dir = tempdir().unwrap();
-        let config_file = dir.path().join(".wreck-it.toml");
-        fs::write(
-            &config_file,
-            r#"
-state_branch = "my-state-branch"
-"#,
-        )
-        .unwrap();
-
-        let config = load_headless_config(&config_file).unwrap();
-        assert_eq!(config.state_branch, "my-state-branch");
-    }
-
-    #[test]
-    fn test_load_headless_config_state_branch_defaults() {
-        let dir = tempdir().unwrap();
-        let config_file = dir.path().join(".wreck-it.toml");
-        fs::write(&config_file, "").unwrap();
-
-        let config = load_headless_config(&config_file).unwrap();
-        assert_eq!(config.state_branch, "wreck-it-state");
     }
 }

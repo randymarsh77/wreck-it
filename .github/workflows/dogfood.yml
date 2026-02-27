@@ -4,6 +4,11 @@
 # orchestrating an agent swarm of ideas/implementer/evaluator agents to
 # iteratively improve the codebase.
 #
+# All wreck-it artefacts (.wreck-it.toml, dogfood-tasks.json, state) live on
+# the orphan `wreck-it-state` branch so that state commits don't pollute the
+# default branch history or trigger CI.  Cloud agents are dispatched against
+# the default branch.
+#
 # Required secrets:
 #   PAT_TOKEN – Personal Access Token with repo + PR merge permissions
 #               (used to push changes, merge agent PRs, and assign Copilot
@@ -32,16 +37,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout repository
+      # ---- Build wreck-it from the default branch ----
+      - name: Checkout default branch (for build)
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
-
-      - name: Configure git for bot commits
-        run: |
-          git config user.name "wreck-it[bot]"
-          git config user.email "wreck-it[bot]@users.noreply.github.com"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -57,53 +58,43 @@ jobs:
       - name: Build wreck-it
         run: cargo build --release
 
+      - name: Stash binary
+        run: cp target/release/wreck-it /tmp/wreck-it
+
+      # ---- Switch to the state branch ----
+      - name: Checkout state branch
+        run: |
+          if git rev-parse --verify origin/wreck-it-state >/dev/null 2>&1; then
+            git checkout wreck-it-state
+          else
+            echo "State branch does not exist yet — creating orphan branch"
+            git checkout --orphan wreck-it-state
+            git rm -rf .
+            git commit --allow-empty -m "wreck-it: initialize state branch"
+          fi
+
+      - name: Configure git for bot commits
+        run: |
+          git config user.name "wreck-it[bot]"
+          git config user.email "wreck-it[bot]@users.noreply.github.com"
+
       - name: Run wreck-it headless iteration
         run: |
-          ARGS="--headless --work-dir . --task-file dogfood-tasks.json --model-provider github-models"
+          ARGS="--headless --work-dir . --model-provider github-models"
           if [ -n "$MAX_ITER" ]; then
             ARGS="$ARGS --max-iterations $MAX_ITER"
           fi
-          ./target/release/wreck-it run $ARGS
+          /tmp/wreck-it run $ARGS
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           MAX_ITER: ${{ inputs.max_iterations }}
 
       - name: Commit and push state changes
         run: |
-          STATE_BRANCH="${STATE_BRANCH:-wreck-it-state}"
-          # Push the orphan state branch (updated by wreck-it via git plumbing).
-          if git rev-parse --verify "refs/heads/${STATE_BRANCH}" >/dev/null 2>&1; then
-            echo "Pushing state branch '${STATE_BRANCH}'"
-            git push origin "${STATE_BRANCH}"
-          fi
-          # Commit any remaining working-tree changes (e.g. task file updates).
           if git diff --quiet && git diff --cached --quiet; then
             echo "No changes to commit"
           else
             git add -A
             git commit -m "wreck-it: dogfood iteration update"
-            git push
           fi
-        env:
-          # Must match state_branch in .wreck-it.toml (default: wreck-it-state)
-          STATE_BRANCH: wreck-it-state
-
-      - name: Create PR if on feature branch
-        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.PAT_TOKEN }}
-          commit-message: "wreck-it: dogfood agent swarm update"
-          title: "🤖 wreck-it dogfood: agent swarm iteration"
-          body: |
-            Automated update from the wreck-it dogfood agent swarm.
-
-            This PR contains changes made by the agent swarm during a headless
-            iteration. The swarm consists of:
-            - **Ideas agents**: Research and propose improvements
-            - **Implementer agents**: Write code and implement features
-            - **Evaluator agents**: Review and validate completeness
-
-            See `dogfood-tasks.json` for current task status.
-          branch: dogfood/agent-updates
-          base: main
+          git push origin wreck-it-state
