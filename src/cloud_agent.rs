@@ -126,9 +126,13 @@ impl CloudAgentClient {
             .as_str()
             .context("Missing issue URL in response")?
             .to_string();
+        let issue_node_id = issue["node_id"].as_str().map(|s| s.to_string());
 
         // Assign Copilot to the issue to trigger the coding agent.
-        if !self.assign_copilot(issue_number).await {
+        if !self
+            .assign_copilot(issue_number, issue_node_id.as_deref())
+            .await
+        {
             tracing::warn!(
                 "Copilot assignment failed for issue #{}; the issue was created but the \
                  agent may need to be triggered manually",
@@ -148,9 +152,9 @@ impl CloudAgentClient {
     /// If the primary token fails and a `fallback_token` is configured, the
     /// assignment is retried with the fallback token (e.g. a workflow PAT that
     /// has models:read permission).
-    async fn assign_copilot(&self, issue_number: u64) -> bool {
+    async fn assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
         if self
-            .try_assign_copilot(issue_number, &self.github_token)
+            .try_assign_copilot(issue_number, issue_node_id, &self.github_token)
             .await
         {
             return true;
@@ -161,7 +165,10 @@ impl CloudAgentClient {
                 "Retrying Copilot assignment for issue #{} with fallback token",
                 issue_number,
             );
-            if self.try_assign_copilot(issue_number, fallback).await {
+            if self
+                .try_assign_copilot(issue_number, issue_node_id, fallback)
+                .await
+            {
                 return true;
             }
         }
@@ -169,43 +176,169 @@ impl CloudAgentClient {
         false
     }
 
-    /// Attempt to assign Copilot using the given `token`.
-    /// Returns `true` when Copilot appears in the assignees after the call.
-    async fn try_assign_copilot(&self, issue_number: u64, token: &str) -> bool {
+    /// Look up a GitHub user's GraphQL node ID by login.
+    async fn get_user_node_id(&self, login: &str, token: &str) -> Option<String> {
+        let url = format!("{}/users/{}", GITHUB_API_BASE, login);
+        match self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v["node_id"].as_str().map(|s| s.to_string())),
+            Ok(resp) => {
+                tracing::warn!("Failed to look up user '{}' ({})", login, resp.status());
+                None
+            }
+            Err(e) => {
+                tracing::warn!("HTTP error looking up user '{}': {}", login, e);
+                None
+            }
+        }
+    }
+
+    /// Fetch the GraphQL node ID for an issue.
+    async fn get_issue_node_id(&self, issue_number: u64, token: &str) -> Option<String> {
         let url = format!(
-            "{}/repos/{}/{}/issues/{}/assignees",
+            "{}/repos/{}/{}/issues/{}",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, issue_number,
         );
+        match self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v["node_id"].as_str().map(|s| s.to_string())),
+            _ => None,
+        }
+    }
 
-        let body = serde_json::json!({
-            "assignees": [COPILOT_LOGIN],
+    /// Attempt to assign Copilot using the GraphQL `replaceActorsForAssignable`
+    /// mutation. Falls back to fetching the issue node ID if it was not provided.
+    /// Returns `true` when the mutation succeeds.
+    async fn try_assign_copilot(
+        &self,
+        issue_number: u64,
+        issue_node_id: Option<&str>,
+        token: &str,
+    ) -> bool {
+        // Resolve the issue's GraphQL node ID.
+        let owned_node_id;
+        let assignable_id = match issue_node_id {
+            Some(id) => id,
+            None => {
+                match self.get_issue_node_id(issue_number, token).await {
+                    Some(id) => {
+                        owned_node_id = id;
+                        owned_node_id.as_str()
+                    }
+                    None => {
+                        tracing::warn!(
+                            "Could not resolve node_id for issue #{}",
+                            issue_number,
+                        );
+                        return false;
+                    }
+                }
+            }
+        };
+
+        // Look up the Copilot bot's GraphQL node ID.
+        let actor_id = match self.get_user_node_id(COPILOT_LOGIN, token).await {
+            Some(id) => id,
+            None => {
+                tracing::warn!(
+                    "Could not look up node_id for user '{}'; \
+                     unable to assign via GraphQL",
+                    COPILOT_LOGIN,
+                );
+                return false;
+            }
+        };
+
+        // Use the GraphQL replaceActorsForAssignable mutation.
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": r#"mutation($assignableId: ID!, $actorIds: [ID!]!) {
+                replaceActorsForAssignable(input: {
+                    assignableId: $assignableId,
+                    actorIds: $actorIds
+                }) {
+                    assignable {
+                        ... on Issue {
+                            assignees(first: 10) {
+                                nodes { login }
+                            }
+                        }
+                    }
+                }
+            }"#,
+            "variables": {
+                "assignableId": assignable_id,
+                "actorIds": [actor_id],
+            },
         });
 
         match self
             .http
-            .post(&url)
+            .post(&graphql_url)
             .header("Authorization", format!("Bearer {}", token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
-            .json(&body)
+            .json(&query)
             .send()
             .await
         {
             Ok(resp) if resp.status().is_success() => {
-                // Verify that Copilot actually appears in the assignees list.
-                // The API can return 200 without actually assigning Copilot
-                // when the token lacks sufficient permissions.
-                if let Ok(issue) = resp.json::<serde_json::Value>().await {
-                    if is_copilot_in_assignees(&issue) {
+                if let Ok(gql_resp) = resp.json::<serde_json::Value>().await {
+                    // Check for GraphQL-level errors.
+                    if let Some(errors) = gql_resp.get("errors") {
+                        tracing::warn!(
+                            "GraphQL errors assigning Copilot to issue #{}: {}",
+                            issue_number,
+                            errors,
+                        );
+                        return false;
+                    }
+
+                    // Verify Copilot appears in the assignees from the mutation
+                    // response.
+                    let has_copilot = gql_resp
+                        .pointer(
+                            "/data/replaceActorsForAssignable/assignable/assignees/nodes",
+                        )
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .any(|a| a["login"].as_str() == Some(COPILOT_LOGIN))
+                        })
+                        .unwrap_or(false);
+
+                    if has_copilot {
                         tracing::info!(
-                            "Assigned Copilot to issue #{} – coding agent triggered",
-                            issue_number
+                            "Assigned Copilot to issue #{} via GraphQL – coding agent triggered",
+                            issue_number,
                         );
                         return true;
                     }
                 }
                 tracing::warn!(
-                    "Copilot not found in assignees for issue #{} after assignment; \
+                    "Copilot not found in assignees for issue #{} after GraphQL mutation; \
                      the token may lack permission to assign Copilot (a PAT may be required)",
                     issue_number,
                 );
@@ -213,7 +346,8 @@ impl CloudAgentClient {
             }
             Ok(resp) => {
                 tracing::warn!(
-                    "Failed to assign Copilot to issue #{} ({}); agent may need manual trigger",
+                    "Failed to assign Copilot to issue #{} via GraphQL ({}); \
+                     agent may need manual trigger",
                     issue_number,
                     resp.status(),
                 );
@@ -221,7 +355,7 @@ impl CloudAgentClient {
             }
             Err(e) => {
                 tracing::warn!(
-                    "HTTP error assigning Copilot to issue #{}: {}",
+                    "HTTP error assigning Copilot to issue #{} via GraphQL: {}",
                     issue_number,
                     e,
                 );
@@ -268,7 +402,7 @@ impl CloudAgentClient {
                     "Copilot is not assigned to issue #{}; attempting to reassign",
                     issue_number,
                 );
-                if self.assign_copilot(issue_number).await {
+                if self.assign_copilot(issue_number, None).await {
                     tracing::info!("Successfully reassigned Copilot to issue #{}", issue_number,);
                 } else {
                     tracing::warn!(
