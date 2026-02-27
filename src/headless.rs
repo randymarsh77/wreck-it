@@ -260,11 +260,13 @@ async fn run_needs_verification(
 
     let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
 
+    use crate::cloud_agent::PrMergeStatus;
+
     println!("[wreck-it] checking PR #{} for merge readiness", pr_number);
 
-    // If the PR is still a draft, mark it as ready for review first.
-    match client.is_pr_draft(pr_number).await {
-        Ok(true) => {
+    // Check PR status: draft, not-yet-mergeable, or ready.
+    match client.check_pr_merge_status(pr_number).await {
+        Ok(PrMergeStatus::Draft) => {
             println!(
                 "[wreck-it] PR #{} is a draft, marking as ready for review",
                 pr_number
@@ -285,20 +287,10 @@ async fn run_needs_verification(
                 "iteration {}: marked PR #{} as ready for review",
                 state.iteration, pr_number,
             ));
+            // Mergeability may not be immediate; retry on the next run.
+            return Ok(());
         }
-        Ok(false) => { /* not a draft, proceed */ }
-        Err(e) => {
-            println!(
-                "[wreck-it] error checking PR #{} draft status: {}",
-                pr_number, e
-            );
-        }
-    }
-
-    // Check if the PR is mergeable before attempting the merge.
-    match client.is_pr_mergeable(pr_number).await {
-        Ok(true) => { /* proceed to merge */ }
-        Ok(false) => {
+        Ok(PrMergeStatus::NotMergeable) => {
             println!(
                 "[wreck-it] PR #{} is not yet mergeable, will retry next run",
                 pr_number
@@ -309,9 +301,10 @@ async fn run_needs_verification(
             ));
             return Ok(());
         }
+        Ok(PrMergeStatus::Mergeable) => { /* proceed to merge */ }
         Err(e) => {
             println!(
-                "[wreck-it] error checking PR #{} mergeability: {}",
+                "[wreck-it] error checking PR #{} merge status: {}",
                 pr_number, e
             );
             return Ok(());
