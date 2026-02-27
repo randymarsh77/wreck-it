@@ -70,6 +70,13 @@ jobs:
 
       - name: Commit and push state changes
         run: |
+          STATE_BRANCH="${STATE_BRANCH:-wreck-it-state}"
+          # Push the orphan state branch (updated by wreck-it via git plumbing).
+          if git rev-parse --verify "refs/heads/${STATE_BRANCH}" >/dev/null 2>&1; then
+            echo "Pushing state branch '${STATE_BRANCH}'"
+            git push origin "${STATE_BRANCH}"
+          fi
+          # Commit any remaining working-tree changes (e.g. task file updates).
           if git diff --quiet && git diff --cached --quiet; then
             echo "No changes to commit"
           else
@@ -77,6 +84,9 @@ jobs:
             git commit -m "wreck-it: dogfood iteration update"
             git push
           fi
+        env:
+          # Must match state_branch in .wreck-it.toml (default: wreck-it-state)
+          STATE_BRANCH: wreck-it-state
 
       - name: Create PR if on feature branch
         if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
