@@ -12,7 +12,7 @@
   {
     "id": "ideas-3",
     "description": "Based on the research documented in docs/research-notes.md (including findings on gastown and openclaw), create a prioritized roadmap of new features and improvements for wreck-it. Add new task entries to dogfood-tasks.json (as additional tasks in phase 4 or higher with appropriate depends_on referencing existing eval tasks) for each proposed improvement. Focus on features that would make wreck-it a breakthrough tool: dynamic task generation by agents, inter-agent communication, intelligent task routing based on agent specialization, self-improving loop strategies, and integration opportunities with gastown and openclaw.",
-    "status": "inprogress",
+    "status": "completed",
     "depends_on": [
       "ideas-1",
       "ideas-2"
@@ -82,6 +82,101 @@
     "depends_on": [
       "eval-1",
       "eval-2"
+    ]
+  },
+  {
+    "id": "impl-5",
+    "description": "Implement LLM-powered dynamic task planning: add a 'wreck-it plan --goal \"...\"' sub-command (and an optional pre-loop planning phase in 'wreck-it run --goal \"...\"') that sends a natural-language goal to the Copilot SDK and receives back a structured task plan as a JSON array. The planner prompt must instruct the model to emit tasks with 'id', 'description', 'phase', and optional 'depends_on' fields. Validate the output against the Task schema before writing it to tasks.json. Add a 'generate_task_plan(goal: &str) -> Result<Vec<Task>>' method to AgentClient and a corresponding 'Plan' variant to the Commands enum in cli.rs. Add unit tests for the schema validation and ID-uniqueness checks.",
+    "status": "pending",
+    "phase": 4,
+    "depends_on": [
+      "eval-3"
+    ]
+  },
+  {
+    "id": "impl-6",
+    "description": "Implement a critic-actor reflection loop inspired by Openclaw and the Reflexion paper. After an actor agent completes a task and before committing, run a lightweight 'critic' prompt that reads the git diff and evaluates it against the original task description. The critic returns a structured CriticResult { score: f32, issues: Vec<String>, approved: bool }. If approved is false and there are substantive issues, re-invoke the actor with the issues as additional context (up to a configurable --reflection-rounds limit, default 2). Only after the critic approves (or rounds are exhausted) should tests run. Add 'critique_diff(diff: &str, task: &Task) -> Result<CriticResult>' and 'execute_task_with_reflection(task: &Task, rounds: u8) -> Result<()>' to AgentClient. Integrate into ralph_loop.rs. Add unit tests for the reflection round-counting logic.",
+    "status": "pending",
+    "phase": 4,
+    "depends_on": [
+      "eval-3"
+    ]
+  },
+  {
+    "id": "impl-7",
+    "description": "Implement adaptive re-planning on failure inspired by LangGraph's re-planner node and MetaGPT's iterative planning. After a configurable number of consecutive task failures (--replan-threshold, default 2), invoke a 're-planner' agent that receives: the full current task list, the failed task's description and error output, and the current git status. The re-planner may (a) rewrite the failed task's description, (b) split it into smaller sub-tasks with new IDs, or (c) inject a new prerequisite task. The modified task list must be validated (no duplicate IDs, no new circular dependencies) and persisted to the task file before the loop continues. Add a 'replan(tasks: &[Task], failed: &Task, error: &str) -> Result<Vec<Task>>' method to AgentClient. Integrate into ralph_loop.rs with the threshold check. Add unit tests for the circular-dependency guard and ID-deduplication.",
+    "status": "pending",
+    "phase": 4,
+    "depends_on": [
+      "eval-3"
+    ]
+  },
+  {
+    "id": "impl-8",
+    "description": "Implement a typed artefact store and context chain inspired by MetaGPT artefacts and CrewAI's task context field. Extend the Task struct in types.rs with optional 'inputs: Vec<String>' (referencing 'task-id/artefact-name') and 'outputs: Vec<TaskArtefact>' fields, where TaskArtefact has 'kind: ArtefactKind (file | json | summary)', 'name: String', and 'path: String'. When a task completes, persist declared output artefacts into an artefact manifest stored alongside .wreck-it-state.json. Before executing a task, resolve its 'inputs' references by reading the manifest and injecting the artefact contents into the agent's prompt context. Ensure backward compatibility: tasks without inputs/outputs fields behave identically to today. Add unit tests for artefact serialisation, resolution, and missing-artefact error handling.",
+    "status": "pending",
+    "phase": 4,
+    "depends_on": [
+      "eval-3"
+    ]
+  },
+  {
+    "id": "impl-9",
+    "description": "Implement a Gastown cloud runtime integration. Add a 'gastown' ModelProvider variant (or a separate 'runtime' field on Task) so tasks can declare 'runtime: gastown' to offload execution to a gastown cloud agent service. Implement a GastownClient in a new src/gastown_client.rs module that: (1) serialises the wreck-it task graph as a gastown-compatible workflow DAG (YAML/JSON), (2) submits the workflow to a configurable gastown endpoint, (3) polls for task completion events and updates .wreck-it-state.json accordingly. Add gastown_endpoint and gastown_token configuration fields to Config in types.rs (both optional; when absent, gastown integration is disabled). Add unit tests for DAG serialisation and status-update handling. Document the integration in docs/roadmap.md.",
+    "status": "pending",
+    "phase": 4,
+    "depends_on": [
+      "eval-3"
+    ]
+  },
+  {
+    "id": "impl-10",
+    "description": "Implement Openclaw provenance tracking integration. During task execution in ralph_loop.rs, record a provenance record for every agent invocation: { task_id, agent_role, model, prompt_hash, tool_calls: [...], git_diff_hash, timestamp, outcome }. Persist provenance records to .wreck-it-provenance/<task_id>.json. Add a 'wreck-it provenance --task <id>' sub-command that prints the human-readable provenance chain for a task. Add a 'wreck-it export-openclaw [--output path]' sub-command that serialises the full run provenance in the openclaw plan-graph JSON format for import into the openclaw visualiser. Add unit tests for provenance record serialisation and the export format. Document the integration in docs/roadmap.md.",
+    "status": "pending",
+    "phase": 4,
+    "depends_on": [
+      "eval-3"
+    ]
+  },
+  {
+    "id": "eval-4",
+    "description": "Evaluate the LLM-powered dynamic task planning (impl-5) and critic-actor reflection loop (impl-6) implementations. Verify: 1) 'wreck-it plan --goal' generates a valid tasks.json with correct schema, unique IDs, and sensible dependency structure for a realistic goal; 2) The critic prompt correctly identifies an intentionally flawed diff (e.g., missing function body, wrong file edited) and triggers a reflection round; 3) The reflection round counter is respected and the loop does not spin infinitely; 4) All new unit tests pass with 'cargo test'; 5) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
+    "status": "pending",
+    "phase": 5,
+    "depends_on": [
+      "impl-5",
+      "impl-6"
+    ]
+  },
+  {
+    "id": "eval-5",
+    "description": "Evaluate the adaptive re-planning on failure (impl-7) and typed artefact store (impl-8) implementations. Verify: 1) After exceeding the replan threshold, the re-planner agent is invoked and produces a modified task list that is persisted correctly; 2) Circular dependency and duplicate ID guards reject invalid re-planner outputs; 3) Artefact outputs are persisted after task completion and correctly injected into downstream task prompts; 4) Tasks without inputs/outputs fields behave identically to pre-impl-8 behaviour (backward compatibility); 5) All new unit tests pass with 'cargo test'; 6) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
+    "status": "pending",
+    "phase": 5,
+    "depends_on": [
+      "impl-7",
+      "impl-8"
+    ]
+  },
+  {
+    "id": "eval-6",
+    "description": "Evaluate the Gastown cloud runtime integration (impl-9) and Openclaw provenance tracking integration (impl-10). Verify: 1) The task graph is correctly serialised as a gastown-compatible workflow DAG; 2) When gastown_endpoint is absent in config, the gastown runtime is silently disabled and wreck-it falls back to local execution; 3) Provenance records are written to .wreck-it-provenance/ for each task execution; 4) 'wreck-it provenance --task <id>' correctly prints the provenance chain; 5) 'wreck-it export-openclaw' produces valid openclaw plan-graph JSON; 6) All new unit tests pass with 'cargo test'; 7) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
+    "status": "pending",
+    "phase": 5,
+    "depends_on": [
+      "impl-9",
+      "impl-10"
+    ]
+  },
+  {
+    "id": "eval-7",
+    "description": "Perform full end-to-end integration evaluation of all Horizon 2 and Horizon 3 features (impl-5 through impl-10) working together. Design a realistic scenario: provide a natural-language goal to 'wreck-it plan', let role-based routing assign specialist agents, observe critic-actor reflection improving output quality, trigger a deliberate failure to test adaptive re-planning, verify artefact chaining passes context between tasks, confirm provenance records are written for every step, and export the full run to openclaw format. Run 'cargo test --verbose' to confirm no regressions. Update docs/architecture.md to document the complete feature set. This task is the acceptance gate for the entire Horizon 2–3 roadmap.",
+    "status": "pending",
+    "phase": 6,
+    "depends_on": [
+      "eval-4",
+      "eval-5",
+      "eval-6"
     ]
   }
 ]
