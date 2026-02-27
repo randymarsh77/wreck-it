@@ -42,6 +42,7 @@ pub struct TriggerResult {
 /// create pull requests.
 pub struct CloudAgentClient {
     github_token: String,
+    fallback_token: Option<String>,
     repo_owner: String,
     repo_name: String,
     http: reqwest::Client,
@@ -59,9 +60,15 @@ fn is_copilot_in_assignees(issue: &serde_json::Value) -> bool {
 }
 
 impl CloudAgentClient {
-    pub fn new(github_token: String, repo_owner: String, repo_name: String) -> Self {
+    pub fn new(
+        github_token: String,
+        fallback_token: Option<String>,
+        repo_owner: String,
+        repo_name: String,
+    ) -> Self {
         Self {
             github_token,
+            fallback_token,
             repo_owner,
             repo_name,
             http: reqwest::Client::new(),
@@ -137,7 +144,34 @@ impl CloudAgentClient {
 
     /// Assign the Copilot bot to an issue, triggering the coding agent.
     /// Returns `true` if the assignment succeeded.
+    ///
+    /// If the primary token fails and a `fallback_token` is configured, the
+    /// assignment is retried with the fallback token (e.g. a workflow PAT that
+    /// has models:read permission).
     async fn assign_copilot(&self, issue_number: u64) -> bool {
+        if self
+            .try_assign_copilot(issue_number, &self.github_token)
+            .await
+        {
+            return true;
+        }
+
+        if let Some(ref fallback) = self.fallback_token {
+            tracing::info!(
+                "Retrying Copilot assignment for issue #{} with fallback token",
+                issue_number,
+            );
+            if self.try_assign_copilot(issue_number, fallback).await {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Attempt to assign Copilot using the given `token`.
+    /// Returns `true` when Copilot appears in the assignees after the call.
+    async fn try_assign_copilot(&self, issue_number: u64, token: &str) -> bool {
         let url = format!(
             "{}/repos/{}/{}/issues/{}/assignees",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, issue_number,
@@ -150,7 +184,7 @@ impl CloudAgentClient {
         match self
             .http
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("Authorization", format!("Bearer {}", token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
             .json(&body)
@@ -558,11 +592,25 @@ mod tests {
     fn cloud_agent_client_constructs() {
         let client = CloudAgentClient::new(
             "test-token".to_string(),
+            None,
             "owner".to_string(),
             "repo".to_string(),
         );
         assert_eq!(client.repo_owner, "owner");
         assert_eq!(client.repo_name, "repo");
+        assert!(client.fallback_token.is_none());
+    }
+
+    #[test]
+    fn cloud_agent_client_with_fallback_token() {
+        let client = CloudAgentClient::new(
+            "primary-token".to_string(),
+            Some("fallback-token".to_string()),
+            "owner".to_string(),
+            "repo".to_string(),
+        );
+        assert_eq!(client.github_token, "primary-token");
+        assert_eq!(client.fallback_token.as_deref(), Some("fallback-token"));
     }
 
     #[test]

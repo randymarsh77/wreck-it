@@ -160,13 +160,15 @@ async fn run_needs_trigger(
         .or_else(|| std::env::var("GITHUB_TOKEN").ok())
         .context("GitHub token required to trigger cloud agent")?;
 
+    let fallback_token = std::env::var("WORKFLOW_PAT").ok();
+
     let (repo_owner, repo_name) = resolve_repo_info(
         headless_cfg.repo_owner.as_deref(),
         headless_cfg.repo_name.as_deref(),
         work_dir,
     )?;
 
-    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    let client = CloudAgentClient::new(github_token, fallback_token, repo_owner, repo_name);
 
     println!(
         "[wreck-it] triggering cloud agent for task {}: {}",
@@ -228,13 +230,15 @@ async fn run_agent_working(
         .or_else(|| std::env::var("GITHUB_TOKEN").ok())
         .context("GitHub token required to check cloud agent status")?;
 
+    let fallback_token = std::env::var("WORKFLOW_PAT").ok();
+
     let (repo_owner, repo_name) = resolve_repo_info(
         headless_cfg.repo_owner.as_deref(),
         headless_cfg.repo_name.as_deref(),
         work_dir,
     )?;
 
-    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    let client = CloudAgentClient::new(github_token, fallback_token, repo_owner, repo_name);
 
     println!(
         "[wreck-it] checking cloud agent status for issue #{}",
@@ -300,13 +304,15 @@ async fn run_needs_verification(
         .or_else(|| std::env::var("GITHUB_TOKEN").ok())
         .context("GitHub token required to merge PR")?;
 
+    let fallback_token = std::env::var("WORKFLOW_PAT").ok();
+
     let (repo_owner, repo_name) = resolve_repo_info(
         headless_cfg.repo_owner.as_deref(),
         headless_cfg.repo_name.as_deref(),
         work_dir,
     )?;
 
-    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    let client = CloudAgentClient::new(github_token, fallback_token, repo_owner, repo_name);
 
     use crate::cloud_agent::PrMergeStatus;
 
