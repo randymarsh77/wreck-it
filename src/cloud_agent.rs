@@ -47,6 +47,17 @@ pub struct CloudAgentClient {
     http: reqwest::Client,
 }
 
+/// Check whether Copilot appears in an issue's assignees array.
+fn is_copilot_in_assignees(issue: &serde_json::Value) -> bool {
+    issue["assignees"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .any(|a| a["login"].as_str() == Some(COPILOT_LOGIN))
+        })
+        .unwrap_or(false)
+}
+
 impl CloudAgentClient {
     pub fn new(github_token: String, repo_owner: String, repo_name: String) -> Self {
         Self {
@@ -151,14 +162,7 @@ impl CloudAgentClient {
                 // The API can return 200 without actually assigning Copilot
                 // when the token lacks sufficient permissions.
                 if let Ok(issue) = resp.json::<serde_json::Value>().await {
-                    let assigned = issue["assignees"]
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .any(|a| a["login"].as_str() == Some(COPILOT_LOGIN))
-                        })
-                        .unwrap_or(false);
-                    if assigned {
+                    if is_copilot_in_assignees(&issue) {
                         tracing::info!(
                             "Assigned Copilot to issue #{} – coding agent triggered",
                             issue_number
@@ -220,6 +224,25 @@ impl CloudAgentClient {
             let issue: serde_json::Value = resp.json().await?;
             if issue["state"].as_str() == Some("closed") {
                 return Ok(CloudAgentStatus::CompletedNoPr);
+            }
+
+            // Verify Copilot is actually assigned to the issue.  If the token
+            // changed or lacks permissions the assignment may have been lost,
+            // leaving the issue open but with no agent working on it.
+            if !is_copilot_in_assignees(&issue) {
+                tracing::warn!(
+                    "Copilot is not assigned to issue #{}; attempting to reassign",
+                    issue_number,
+                );
+                if self.assign_copilot(issue_number).await {
+                    tracing::info!("Successfully reassigned Copilot to issue #{}", issue_number,);
+                } else {
+                    tracing::warn!(
+                        "Failed to reassign Copilot to issue #{}; \
+                         the agent may need to be triggered manually",
+                        issue_number,
+                    );
+                }
             }
         }
 
@@ -580,5 +603,43 @@ mod tests {
         assert_eq!(PrMergeStatus::AlreadyMerged, PrMergeStatus::AlreadyMerged);
         assert_ne!(PrMergeStatus::Draft, PrMergeStatus::Mergeable);
         assert_ne!(PrMergeStatus::AlreadyMerged, PrMergeStatus::NotMergeable);
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_present() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "copilot"}]
+        });
+        assert!(is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_among_others() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "user1"}, {"login": "copilot"}, {"login": "user2"}]
+        });
+        assert!(is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_missing() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "other-user"}]
+        });
+        assert!(!is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_empty() {
+        let issue = serde_json::json!({
+            "assignees": []
+        });
+        assert!(!is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_no_field() {
+        let issue = serde_json::json!({});
+        assert!(!is_copilot_in_assignees(&issue));
     }
 }
