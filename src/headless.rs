@@ -3,6 +3,7 @@ use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::headless_state::{
     load_headless_state, save_headless_state, AgentPhase, HeadlessState, TrackedPr,
 };
+use crate::state_worktree::{commit_state_worktree, ensure_state_worktree};
 use crate::task_manager::{load_tasks, save_tasks};
 use crate::types::Config;
 use anyhow::{Context, Result};
@@ -55,23 +56,42 @@ enum StepOutcome {
 /// State is persisted between invocations so subsequent cron runs pick up
 /// where the previous one left off.
 pub async fn run_headless(config: Config) -> Result<()> {
-    // Try to load repo-committed headless config for state_file path and
-    // other overrides.
+    // `work_dir` is the main checkout – agents work here.
     let work_dir = config.work_dir.clone();
-    let headless_cfg_path = work_dir.join(DEFAULT_CONFIG_FILE);
-    let headless_cfg = if headless_cfg_path.exists() {
-        load_headless_config(&headless_cfg_path).context("Failed to load .wreck-it.toml")?
+
+    // Set up the state worktree.  First, try loading a headless config from
+    // the main checkout (it may have been placed there before migration, or
+    // the user may prefer it there for bootstrapping).  Then set up the
+    // worktree and prefer the config from there if it exists.
+    let bootstrap_cfg_path = work_dir.join(DEFAULT_CONFIG_FILE);
+    let bootstrap_cfg = if bootstrap_cfg_path.exists() {
+        load_headless_config(&bootstrap_cfg_path)
+            .context("Failed to load .wreck-it.toml from work dir")?
     } else {
         HeadlessConfig::default()
     };
 
-    let state_path = work_dir.join(&headless_cfg.state_file);
+    let state_branch = bootstrap_cfg.state_branch.clone();
+    let state_dir = ensure_state_worktree(&work_dir, &state_branch)
+        .context("Failed to set up state worktree")?;
+
+    // Prefer the config from the state worktree when available.
+    let headless_cfg_path = state_dir.join(DEFAULT_CONFIG_FILE);
+    let headless_cfg = if headless_cfg_path.exists() {
+        load_headless_config(&headless_cfg_path)
+            .context("Failed to load .wreck-it.toml from state worktree")?
+    } else {
+        bootstrap_cfg
+    };
+
+    let state_path = state_dir.join(&headless_cfg.state_file);
     let mut state = load_headless_state(&state_path).context("Failed to load headless state")?;
 
     // Sweep all open PRs before entering the main state machine.  This
     // converts drafts to ready, approves pending workflow runs, and merges
     // PRs that are ready – even for tasks not currently tracked in state.
-    if let Err(e) = sweep_open_prs(&config, &headless_cfg, &mut state, &work_dir).await {
+    if let Err(e) = sweep_open_prs(&config, &headless_cfg, &mut state, &work_dir, &state_dir).await
+    {
         println!("[wreck-it] warning: sweep_open_prs failed: {}", e);
     }
 
@@ -85,13 +105,14 @@ pub async fn run_headless(config: Config) -> Result<()> {
 
         let outcome = match state.phase {
             AgentPhase::NeedsTrigger => {
-                run_needs_trigger(&config, &headless_cfg, &mut state, &work_dir).await?
+                run_needs_trigger(&config, &headless_cfg, &mut state, &work_dir, &state_dir).await?
             }
             AgentPhase::AgentWorking => {
                 run_agent_working(&config, &headless_cfg, &mut state, &work_dir).await?
             }
             AgentPhase::NeedsVerification => {
-                run_needs_verification(&config, &headless_cfg, &mut state, &work_dir).await?
+                run_needs_verification(&config, &headless_cfg, &mut state, &work_dir, &state_dir)
+                    .await?
             }
             AgentPhase::Completed => {
                 println!("[wreck-it] previous task completed, advancing to next trigger");
@@ -121,6 +142,11 @@ pub async fn run_headless(config: Config) -> Result<()> {
 
     save_headless_state(&state_path, &state).context("Failed to save headless state")?;
 
+    // Commit state changes in the worktree.
+    if let Err(e) = commit_state_worktree(&work_dir, "wreck-it: update headless state") {
+        println!("[wreck-it] warning: failed to commit state changes: {}", e);
+    }
+
     println!(
         "[wreck-it] saved state: phase={:?} iteration={}",
         state.phase, state.iteration
@@ -149,6 +175,7 @@ async fn sweep_open_prs(
     headless_cfg: &HeadlessConfig,
     state: &mut HeadlessState,
     work_dir: &Path,
+    state_dir: &Path,
 ) -> Result<()> {
     let github_token = config
         .api_token
@@ -204,7 +231,7 @@ async fn sweep_open_prs(
         open_prs.len(),
     );
 
-    let task_file = work_dir.join(&headless_cfg.task_file);
+    let task_file = state_dir.join(&headless_cfg.task_file);
 
     // Process each tracked PR.  Collect indices of PRs that have been merged
     // (to remove from the tracked list after the loop).
@@ -372,8 +399,9 @@ async fn run_needs_trigger(
     headless_cfg: &HeadlessConfig,
     state: &mut HeadlessState,
     work_dir: &Path,
+    state_dir: &Path,
 ) -> Result<StepOutcome> {
-    let task_file = work_dir.join(&headless_cfg.task_file);
+    let task_file = state_dir.join(&headless_cfg.task_file);
     let tasks = load_tasks(&task_file)?;
 
     // Build the set of completed task IDs for dependency checking.
@@ -547,6 +575,7 @@ async fn run_needs_verification(
     headless_cfg: &HeadlessConfig,
     state: &mut HeadlessState,
     work_dir: &Path,
+    state_dir: &Path,
 ) -> Result<StepOutcome> {
     let pr_number = match state.pr_number {
         Some(n) => n,
@@ -638,7 +667,7 @@ async fn run_needs_verification(
             ));
 
             // Mark task as completed.
-            let task_file = work_dir.join(&headless_cfg.task_file);
+            let task_file = state_dir.join(&headless_cfg.task_file);
             if let Some(task_id) = &state.current_task_id {
                 mark_task_complete_by_id(task_id, &task_file)?;
             }
@@ -667,7 +696,7 @@ async fn run_needs_verification(
             ));
 
             // Mark task as completed.
-            let task_file = work_dir.join(&headless_cfg.task_file);
+            let task_file = state_dir.join(&headless_cfg.task_file);
             if let Some(task_id) = &state.current_task_id {
                 mark_task_complete_by_id(task_id, &task_file)?;
             }
