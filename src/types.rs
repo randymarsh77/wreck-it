@@ -2,19 +2,6 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// The role an agent should adopt when executing a task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentRole {
-    /// Research and generate new tasks or ideas.
-    Ideas,
-    /// Write code to complete a feature or fix.
-    #[default]
-    Implementer,
-    /// Review, validate, or evaluate completed work.
-    Evaluator,
-}
-
 pub const DEFAULT_COPILOT_ENDPOINT: &str = "https://api.githubcopilot.com";
 pub const DEFAULT_LLAMA_ENDPOINT: &str = "http://localhost:11434/v1";
 pub const DEFAULT_GITHUB_MODELS_ENDPOINT: &str =
@@ -131,12 +118,33 @@ impl Default for Config {
     }
 }
 
+/// The role of the agent assigned to execute this task.
+///
+/// When absent in a JSON task file the field defaults to [`AgentRole::Implementer`]
+/// so that pre-existing task files continue to work without modification.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentRole {
+    /// Research and generate new tasks.
+    Ideas,
+    /// Write code / implement the work (default).
+    #[default]
+    Implementer,
+    /// Review and validate completed work.
+    Evaluator,
+}
+
 /// A task to be completed by the agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
     pub description: String,
     pub status: TaskStatus,
+
+    /// Agent role responsible for this task.  Defaults to `implementer` for
+    /// backward compatibility with task files that pre-date this field.
+    #[serde(default, skip_serializing_if = "is_default_role")]
+    pub role: AgentRole,
 
     /// Execution phase (tasks in the same phase may run in parallel).
     /// Tasks in a lower phase run before tasks in a higher phase.
@@ -153,7 +161,10 @@ pub struct Task {
     pub priority: u32,
 
     /// Estimated complexity on a 1–10 scale (lower = quicker win).  Defaults to 1.
-    #[serde(default = "default_complexity", skip_serializing_if = "is_default_complexity")]
+    #[serde(
+        default = "default_complexity",
+        skip_serializing_if = "is_default_complexity"
+    )]
     pub complexity: u32,
 
     /// Number of previous failed execution attempts.
@@ -163,11 +174,10 @@ pub struct Task {
     /// Unix timestamp (seconds) of the most recent execution attempt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_attempt_at: Option<u64>,
+}
 
-    /// Role of the agent that should execute this task.
-    /// Defaults to `implementer` when not present (backward compatible).
-    #[serde(default, skip_serializing_if = "is_default_role")]
-    pub role: AgentRole,
+fn is_default_role(r: &AgentRole) -> bool {
+    *r == AgentRole::Implementer
 }
 
 fn default_phase() -> u32 {
@@ -188,10 +198,6 @@ fn is_default_complexity(v: &u32) -> bool {
 
 fn is_zero_u32(v: &u32) -> bool {
     *v == 0
-}
-
-fn is_default_role(v: &AgentRole) -> bool {
-    *v == AgentRole::Implementer
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -294,13 +300,13 @@ mod tests {
             id: id.to_string(),
             description: format!("task {}", id),
             status,
+            role: AgentRole::default(),
             phase,
             depends_on: depends_on.into_iter().map(String::from).collect(),
             priority: 0,
             complexity: 1,
             failed_attempts: 0,
             last_attempt_at: None,
-            role: AgentRole::default(),
         }
     }
 
@@ -401,43 +407,49 @@ mod tests {
         assert_eq!(loaded.model_provider, ModelProvider::GithubModels);
     }
 
-    // ── AgentRole tests ──────────────────────────────────────────────────────
+    // ---- AgentRole tests ----
 
     #[test]
-    fn agent_role_default_is_implementer() {
-        assert_eq!(AgentRole::default(), AgentRole::Implementer);
-    }
-
-    #[test]
-    fn task_without_role_field_defaults_to_implementer() {
-        // Tasks serialized before the role field was added should still parse.
+    fn task_role_defaults_to_implementer_when_absent() {
+        // Backward compat: old task files have no "role" field.
         let json = r#"{"id":"x","description":"d","status":"pending"}"#;
         let task: Task = serde_json::from_str(json).unwrap();
         assert_eq!(task.role, AgentRole::Implementer);
     }
 
     #[test]
-    fn task_role_roundtrip_ideas() {
-        let json = r#"{"id":"x","description":"d","status":"pending","role":"ideas"}"#;
-        let task: Task = serde_json::from_str(json).unwrap();
-        assert_eq!(task.role, AgentRole::Ideas);
-        // Re-serializing keeps the role field since it is non-default.
-        let out = serde_json::to_string(&task).unwrap();
-        assert!(out.contains("\"role\":\"ideas\""));
-    }
-
-    #[test]
     fn task_role_implementer_is_omitted_in_serialization() {
-        // The default role must be skipped so old readers ignore it.
+        // The default role must NOT be written to the JSON (backward compat).
         let task = make_task("x", TaskStatus::Pending, 1, vec![]);
         let json = serde_json::to_string(&task).unwrap();
-        assert!(!json.contains("\"role\""));
+        assert!(!json.contains("\"role\""), "default role should be omitted");
     }
 
     #[test]
-    fn task_role_evaluator_roundtrip() {
-        let json = r#"{"id":"x","description":"d","status":"pending","role":"evaluator"}"#;
-        let task: Task = serde_json::from_str(json).unwrap();
-        assert_eq!(task.role, AgentRole::Evaluator);
+    fn task_role_non_default_is_serialized() {
+        let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        task.role = AgentRole::Ideas;
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(json.contains("\"role\":\"ideas\""));
+    }
+
+    #[test]
+    fn task_role_roundtrip_all_variants() {
+        for role in [
+            AgentRole::Ideas,
+            AgentRole::Implementer,
+            AgentRole::Evaluator,
+        ] {
+            let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+            task.role = role;
+            let json = serde_json::to_string(&task).unwrap();
+            let loaded: Task = serde_json::from_str(&json).unwrap();
+            assert_eq!(loaded.role, role);
+        }
+    }
+
+    #[test]
+    fn agent_role_default_is_implementer() {
+        assert_eq!(AgentRole::default(), AgentRole::Implementer);
     }
 }
