@@ -17,8 +17,7 @@ const config: Config = {
   organizationName: 'randymarsh77',
   projectName: 'wreck-it',
 
-  onBrokenLinks: 'warn',
-  onBrokenMarkdownLinks: 'warn',
+  onBrokenLinks: 'throw',
 
   i18n: {
     defaultLocale: 'en',
