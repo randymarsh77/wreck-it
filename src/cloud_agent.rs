@@ -508,12 +508,10 @@ impl CloudAgentClient {
         }
     }
 
-    /// Mark a draft PR as ready for review and approve it so workflows run.
+    /// Mark a draft PR as ready for review.
     ///
     /// The REST API does not support unsetting `draft`; the GraphQL mutation
-    /// `markPullRequestReadyForReview` is required instead.  In the same
-    /// request we also submit an approving review via `addPullRequestReview`
-    /// so that any branch-protection or workflow-approval gates are satisfied.
+    /// `markPullRequestReadyForReview` is required instead.
     pub async fn mark_pr_ready_for_review(&self, pr_number: u64) -> Result<()> {
         // First, fetch the PR to obtain the GraphQL node_id.
         let pr_url = format!(
@@ -547,18 +545,10 @@ impl CloudAgentClient {
             .as_str()
             .context("Missing node_id in PR response")?;
 
-        // Use the GraphQL API to mark the PR as ready for review and approve
-        // it in a single request so that workflow-approval gates are satisfied.
+        // Use the GraphQL API to mark the PR as ready for review.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
         let query = serde_json::json!({
-            "query": r#"mutation($prId: ID!) {
-                markPullRequestReadyForReview(input: { pullRequestId: $prId }) {
-                    pullRequest { isDraft }
-                }
-                addPullRequestReview(input: { pullRequestId: $prId, event: APPROVE }) {
-                    pullRequestReview { state }
-                }
-            }"#,
+            "query": "mutation($prId: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $prId }) { pullRequest { isDraft } } }",
             "variables": { "prId": node_id },
         });
 
@@ -571,7 +561,7 @@ impl CloudAgentClient {
             .json(&query)
             .send()
             .await
-            .context("Failed to call GraphQL markPullRequestReadyForReview + addPullRequestReview")?;
+            .context("Failed to call GraphQL markPullRequestReadyForReview")?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -612,25 +602,138 @@ impl CloudAgentClient {
             ),
         }
 
-        // Verify the approval was recorded.
-        let review_state = gql_resp
-            .pointer("/data/addPullRequestReview/pullRequestReview/state")
-            .and_then(|v| v.as_str());
-        match review_state {
-            Some("APPROVED") => {} // success
-            Some(other) => tracing::warn!(
-                "PR #{} review state is '{}' instead of APPROVED",
+        tracing::info!("Marked PR #{} as ready for review", pr_number);
+        Ok(())
+    }
+
+    /// Approve any pending workflow runs for a pull request.
+    ///
+    /// When a repo requires approval for Actions (e.g. first-time contributors
+    /// or fork PRs), workflow runs sit in `action_required` status until
+    /// explicitly approved.  This method fetches the PR's head SHA, lists
+    /// workflow runs for that commit, and approves every run that is waiting.
+    pub async fn approve_pending_workflow_runs(&self, pr_number: u64) -> Result<()> {
+        // Fetch the PR to obtain the head SHA.
+        let pr_url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let pr_resp = self
+            .http
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for head SHA")?;
+
+        if !pr_resp.status().is_success() {
+            let status = pr_resp.status();
+            let body = pr_resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch PR #{} for head SHA ({}): {}",
                 pr_number,
-                other,
-            ),
-            None => tracing::warn!(
-                "Could not verify approval for PR #{}: {}",
-                pr_number,
-                gql_resp,
-            ),
+                status,
+                body,
+            );
         }
 
-        tracing::info!("Marked PR #{} as ready for review and approved", pr_number);
+        let pr: serde_json::Value = pr_resp.json().await?;
+        let head_sha = pr
+            .pointer("/head/sha")
+            .and_then(|v| v.as_str())
+            .context("Missing head SHA in PR response")?;
+
+        // List workflow runs for the head SHA that need approval.
+        let runs_url = format!(
+            "{}/repos/{}/{}/actions/runs?head_sha={}&status=action_required",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, head_sha,
+        );
+
+        let runs_resp = self
+            .http
+            .get(&runs_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to list workflow runs")?;
+
+        if !runs_resp.status().is_success() {
+            tracing::warn!(
+                "Failed to list workflow runs for PR #{} ({})",
+                pr_number,
+                runs_resp.status(),
+            );
+            return Ok(());
+        }
+
+        let runs: serde_json::Value = runs_resp.json().await?;
+        let run_ids: Vec<u64> = match runs["workflow_runs"].as_array() {
+            Some(arr) => arr.iter().filter_map(|r| r["id"].as_u64()).collect(),
+            None => {
+                tracing::warn!(
+                    "Unexpected workflow runs response for PR #{}: missing workflow_runs array",
+                    pr_number,
+                );
+                return Ok(());
+            }
+        };
+
+        if run_ids.is_empty() {
+            tracing::debug!("No workflow runs awaiting approval for PR #{}", pr_number);
+            return Ok(());
+        }
+
+        for run_id in &run_ids {
+            let approve_url = format!(
+                "{}/repos/{}/{}/actions/runs/{}/approve",
+                GITHUB_API_BASE, self.repo_owner, self.repo_name, run_id,
+            );
+
+            match self
+                .http
+                .post(&approve_url)
+                .header("Authorization", format!("Bearer {}", self.github_token))
+                .header("User-Agent", "wreck-it")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!(
+                        "Approved workflow run {} for PR #{}",
+                        run_id,
+                        pr_number,
+                    );
+                }
+                Ok(resp) => {
+                    tracing::warn!(
+                        "Failed to approve workflow run {} for PR #{} ({})",
+                        run_id,
+                        pr_number,
+                        resp.status(),
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "HTTP error approving workflow run {} for PR #{}: {}",
+                        run_id,
+                        pr_number,
+                        e,
+                    );
+                }
+            }
+        }
+
+        tracing::info!(
+            "Approved {} pending workflow run(s) for PR #{}",
+            run_ids.len(),
+            pr_number,
+        );
         Ok(())
     }
 
