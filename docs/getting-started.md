@@ -243,5 +243,5 @@ wreck-it run --task-file refactor-c.json
 ## Next Steps
 
 - Read [Architecture](architecture.md) to understand how it works
-- Check out the [Contributing Guide](../CONTRIBUTING.md) if you want to help
+- Check out the [GitHub repository](https://github.com/randymarsh77/wreck-it) if you want to help
 - Join discussions in GitHub Issues
