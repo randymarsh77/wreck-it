@@ -160,11 +160,86 @@ Terminal UI for monitoring:
 - Works within single repository
 - Respects max iterations limit
 
+## Agent Swarm Capabilities
+
+The following features extend the base Ralph Wiggum Loop into a full agent
+swarm orchestrator.  All features work together and are exercised by the
+end-to-end integration test in `src/integration_eval.rs`.
+
+### Role-Based Routing
+
+Each task carries an `AgentRole` field that determines which type of agent
+should handle it:
+
+| Role | Purpose |
+|------|---------|
+| `ideas` | Research, explore, and generate follow-up tasks |
+| `implementer` (default) | Write code and make changes |
+| `evaluator` | Review and validate completed work |
+
+Tasks without a `role` field default to `implementer` for backward
+compatibility.  The `filter_tasks_by_role` helper routes tasks to the
+appropriate agent pool.
+
+### Dynamic Task Generation
+
+An `ideas` (or any) agent can append new tasks to the task file at runtime:
+
+- `generate_task_id(tasks, prefix)` – produces a unique `<prefix>N` ID.
+- `append_task(path, task)` – validates and appends a task, enforcing:
+  - Duplicate-ID rejection.
+  - Circular-dependency detection (DFS).
+  - A safety cap of `MAX_TASKS` (500) to prevent runaway generation.
+
+### Intelligent Scheduling (`TaskScheduler`)
+
+`TaskScheduler::schedule` replaces the simple first-pending scan with a
+multi-factor scoring algorithm.  Tasks are ordered from highest to lowest
+score before each iteration:
+
+| Factor | Effect |
+|--------|--------|
+| `priority` (×10) | Higher-priority tasks run sooner |
+| `complexity` (×2, inverted) | Simpler tasks are preferred (quick wins) |
+| Dependency fan-out (×5) | Tasks that unblock more work run first |
+| `failed_attempts` (×3, penalty) | Repeatedly-failing tasks back off |
+| Time since last attempt (≤60 pts) | Idle tasks avoid starvation |
+
+Only tasks whose `depends_on` list is fully satisfied (all dependencies in
+`Completed` status) are eligible.
+
+### Agent Memory Persistence
+
+`HeadlessState.memory` is a free-form string log that grows across cron
+invocations.  Each phase handler appends a line describing what happened
+(task triggered, PR created, merge result, etc.).  Because `HeadlessState`
+is serialised to `.wreck-it-state.json` after every run, subsequent
+invocations start with full knowledge of previous actions.
+
+### Headless / Cloud-Agent Mode
+
+In CI environments the loop does not run a local AI model.  Instead it
+drives a cloud coding-agent state machine:
+
+```
+NeedsTrigger → create GitHub issue → assign Copilot
+AgentWorking → poll for linked PR
+NeedsVerification → merge PR when checks pass
+Completed → mark task done, advance to next
+```
+
+State is persisted between cron invocations so the machine resumes
+correctly after each scheduled run.
+
+### Parallel Task Execution
+
+When `TaskScheduler::schedule` returns more than one ready task, the loop
+spawns a separate `AgentClient` per task and executes them concurrently via
+`tokio::spawn`.  Results are merged back into the shared `LoopState` once
+all handles complete.
+
 ## Future Enhancements
 
-- Parallel task execution
-- Task dependencies
 - Custom test commands
-- Integration with CI/CD
-- Task generation from issues
-- Smart retry logic
+- Integration with CI/CD webhooks
+- Plugin hooks for custom role types
