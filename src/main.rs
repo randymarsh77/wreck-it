@@ -5,6 +5,8 @@ mod config_manager;
 mod headless;
 mod headless_config;
 mod headless_state;
+#[cfg(test)]
+mod integration_eval;
 mod ralph_loop;
 mod task_manager;
 mod tui;
