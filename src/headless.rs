@@ -1,4 +1,4 @@
-use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus};
+use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus, PrMergeStatus};
 use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::headless_state::{load_headless_state, save_headless_state, AgentPhase, HeadlessState};
 use crate::task_manager::{load_tasks, save_tasks};
@@ -58,6 +58,13 @@ pub async fn run_headless(config: Config) -> Result<()> {
     let state_path = work_dir.join(&headless_cfg.state_file);
     let mut state = load_headless_state(&state_path).context("Failed to load headless state")?;
 
+    // Sweep all open PRs before entering the main state machine.  This
+    // converts drafts to ready, approves pending workflow runs, and merges
+    // PRs that are ready – even for tasks not currently tracked in state.
+    if let Err(e) = sweep_open_prs(&config, &headless_cfg, &mut state, &work_dir).await {
+        println!("[wreck-it] warning: sweep_open_prs failed: {}", e);
+    }
+
     let mut sync_steps: usize = 0;
 
     loop {
@@ -108,6 +115,144 @@ pub async fn run_headless(config: Config) -> Result<()> {
         "[wreck-it] saved state: phase={:?} iteration={}",
         state.phase, state.iteration
     );
+
+    Ok(())
+}
+
+/// Sweep all open PRs in the repository.
+///
+/// For each open PR:
+/// - If it is a draft → mark it ready for review and approve pending workflows.
+/// - If it is not yet mergeable → approve pending workflow runs so CI can start.
+/// - If it is mergeable → merge it.
+/// - If it was already merged → update task status.
+///
+/// When a merged PR corresponds to the currently tracked task in `state`, the
+/// headless state is advanced to [`AgentPhase::Completed`] so the next
+/// invocation can pick up a new task.
+async fn sweep_open_prs(
+    config: &Config,
+    headless_cfg: &HeadlessConfig,
+    state: &mut HeadlessState,
+    work_dir: &Path,
+) -> Result<()> {
+    let github_token = config
+        .api_token
+        .clone()
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .context("GitHub token required to sweep open PRs")?;
+
+    let (repo_owner, repo_name) = resolve_repo_info(
+        headless_cfg.repo_owner.as_deref(),
+        headless_cfg.repo_name.as_deref(),
+        work_dir,
+    )?;
+
+    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+
+    let open_prs = client.list_open_prs().await?;
+    if open_prs.is_empty() {
+        println!("[wreck-it] sweep: no open PRs found");
+        return Ok(());
+    }
+
+    println!(
+        "[wreck-it] sweep: found {} open PR(s), processing…",
+        open_prs.len()
+    );
+
+    let task_file = work_dir.join(&headless_cfg.task_file);
+
+    for pr in &open_prs {
+        println!(
+            "[wreck-it] sweep: PR #{} – \"{}\" (draft={})",
+            pr.number, pr.title, pr.draft
+        );
+
+        match client.check_pr_merge_status(pr.number).await {
+            Ok(PrMergeStatus::Draft) => {
+                println!(
+                    "[wreck-it] sweep: PR #{} is a draft, marking ready for review",
+                    pr.number
+                );
+                if let Err(e) = client.mark_pr_ready_for_review(pr.number).await {
+                    println!(
+                        "[wreck-it] sweep: failed to mark PR #{} ready: {}",
+                        pr.number, e
+                    );
+                }
+                if let Err(e) = client.approve_pending_workflow_runs(pr.number).await {
+                    println!(
+                        "[wreck-it] sweep: failed to approve workflows for PR #{}: {}",
+                        pr.number, e
+                    );
+                }
+                state.memory.push(format!(
+                    "sweep: marked PR #{} as ready for review",
+                    pr.number,
+                ));
+            }
+            Ok(PrMergeStatus::NotMergeable) => {
+                println!(
+                    "[wreck-it] sweep: PR #{} not yet mergeable, approving workflows",
+                    pr.number
+                );
+                if let Err(e) = client.approve_pending_workflow_runs(pr.number).await {
+                    println!(
+                        "[wreck-it] sweep: failed to approve workflows for PR #{}: {}",
+                        pr.number, e
+                    );
+                }
+            }
+            Ok(PrMergeStatus::Mergeable) => {
+                println!("[wreck-it] sweep: PR #{} is mergeable, merging", pr.number);
+                match client.merge_pr(pr.number).await {
+                    Ok(()) => {
+                        println!("[wreck-it] sweep: merged PR #{}", pr.number);
+                        state
+                            .memory
+                            .push(format!("sweep: merged PR #{}", pr.number,));
+                        // If this PR was the one tracked by state, advance phase.
+                        if state.pr_number == Some(pr.number) {
+                            mark_current_task_complete(state, &task_file)?;
+                        }
+                    }
+                    Err(e) => {
+                        println!("[wreck-it] sweep: failed to merge PR #{}: {}", pr.number, e);
+                    }
+                }
+            }
+            Ok(PrMergeStatus::AlreadyMerged) => {
+                println!("[wreck-it] sweep: PR #{} already merged", pr.number);
+                if state.pr_number == Some(pr.number) {
+                    mark_current_task_complete(state, &task_file)?;
+                }
+            }
+            Err(e) => {
+                println!("[wreck-it] sweep: error checking PR #{}: {}", pr.number, e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Mark the current task as completed and advance the headless state.
+fn mark_current_task_complete(state: &mut HeadlessState, task_file: &Path) -> Result<()> {
+    state.phase = AgentPhase::Completed;
+    state.memory.push(format!(
+        "sweep: current task {:?} completed via PR #{}",
+        state.current_task_id,
+        state.pr_number.unwrap_or(0),
+    ));
+
+    let mut tasks = load_tasks(task_file)?;
+    if let Some(task_id) = &state.current_task_id {
+        if let Some(task) = tasks.iter_mut().find(|t| &t.id == task_id) {
+            task.status = crate::types::TaskStatus::Completed;
+        }
+    }
+    save_tasks(task_file, &tasks)?;
 
     Ok(())
 }
@@ -480,5 +625,70 @@ mod tests {
         // Ensure the constant exists and is reasonable.
         assert!(MAX_SYNC_STEPS > 0);
         assert!(MAX_SYNC_STEPS <= 100);
+    }
+
+    #[test]
+    fn mark_current_task_complete_advances_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+
+        // Write a sample task file with one in-progress task.
+        let tasks = vec![crate::types::Task {
+            id: "t1".to_string(),
+            description: "task one".to_string(),
+            status: crate::types::TaskStatus::InProgress,
+            role: crate::types::AgentRole::default(),
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
+        }];
+        save_tasks(&task_file, &tasks).unwrap();
+
+        let mut state = HeadlessState {
+            phase: AgentPhase::AgentWorking,
+            iteration: 3,
+            current_task_id: Some("t1".to_string()),
+            issue_number: Some(1),
+            pr_number: Some(10),
+            pr_url: None,
+            last_prompt: None,
+            memory: vec![],
+        };
+
+        mark_current_task_complete(&mut state, &task_file).unwrap();
+
+        assert_eq!(state.phase, AgentPhase::Completed);
+        assert!(!state.memory.is_empty());
+
+        // Verify the task was marked completed on disk.
+        let reloaded = load_tasks(&task_file).unwrap();
+        assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
+    }
+
+    #[test]
+    fn mark_current_task_complete_tolerates_missing_task_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+
+        let tasks: Vec<crate::types::Task> = vec![];
+        save_tasks(&task_file, &tasks).unwrap();
+
+        let mut state = HeadlessState {
+            phase: AgentPhase::AgentWorking,
+            iteration: 1,
+            current_task_id: None, // no current task
+            issue_number: None,
+            pr_number: None,
+            pr_url: None,
+            last_prompt: None,
+            memory: vec![],
+        };
+
+        // Should not error even with no current task.
+        mark_current_task_complete(&mut state, &task_file).unwrap();
+        assert_eq!(state.phase, AgentPhase::Completed);
     }
 }
