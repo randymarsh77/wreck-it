@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 5,
-  "current_task_id": "impl-2",
-  "issue_number": 37,
-  "last_prompt": "Implement dynamic task generation capability: allow agents to programmatically add new tasks to the task file during execution. Add a method to TaskManager that appends new tasks to the JSON file with proper ID generation (using a prefix + incrementing number pattern). Add a mechanism in the ralph_loop.rs to detect newly added tasks after each iteration and incorporate them into the task queue. Include safeguards: max total tasks limit, validation of task structure, and prevention of circular dependencies. Add unit tests.",
+  "iteration": 6,
+  "current_task_id": "impl-3",
+  "issue_number": 39,
+  "last_prompt": "Implement an agent context/memory system that persists across iterations. Create a new src/agent_memory.rs module that maintains a per-task context file (.wreck-it-memory/{task_id}.md) containing: previous attempts and their outcomes, key decisions made, relevant code locations discovered, and learnings from failed attempts. Integrate this with the AgentClient so context is included in agent prompts. This enables agents to learn from previous iterations rather than starting fresh each time. Add unit tests.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
     "iteration 1: agent created PR #16 for task Some(\"ideas-1\")",
@@ -27,6 +27,9 @@
     "iteration 4: triggered cloud agent for task impl-1 (issue #31)",
     "iteration 4: agent created PR #36 for task Some(\"impl-1\")",
     "iteration 4: PR #36 already merged for task Some(\"impl-1\")",
-    "iteration 5: triggered cloud agent for task impl-2 (issue #37)"
+    "iteration 5: triggered cloud agent for task impl-2 (issue #37)",
+    "iteration 5: agent created PR #38 for task Some(\"impl-2\")",
+    "iteration 5: PR #38 already merged for task Some(\"impl-2\")",
+    "iteration 6: triggered cloud agent for task impl-3 (issue #39)"
   ]
 }

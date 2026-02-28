@@ -30,7 +30,7 @@
   {
     "id": "impl-2",
     "description": "Implement dynamic task generation capability: allow agents to programmatically add new tasks to the task file during execution. Add a method to TaskManager that appends new tasks to the JSON file with proper ID generation (using a prefix + incrementing number pattern). Add a mechanism in the ralph_loop.rs to detect newly added tasks after each iteration and incorporate them into the task queue. Include safeguards: max total tasks limit, validation of task structure, and prevention of circular dependencies. Add unit tests.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-3"
@@ -39,7 +39,7 @@
   {
     "id": "impl-3",
     "description": "Implement an agent context/memory system that persists across iterations. Create a new src/agent_memory.rs module that maintains a per-task context file (.wreck-it-memory/{task_id}.md) containing: previous attempts and their outcomes, key decisions made, relevant code locations discovered, and learnings from failed attempts. Integrate this with the AgentClient so context is included in agent prompts. This enables agents to learn from previous iterations rather than starting fresh each time. Add unit tests.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 2,
     "depends_on": [
       "ideas-3"
