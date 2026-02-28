@@ -1,3 +1,4 @@
+use crate::agent_memory::AgentMemory;
 use crate::types::{
     EvaluationMode, ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
     LLAMA_PROVIDER_TYPE,
@@ -194,14 +195,22 @@ impl AgentClient {
 
         // Prepare the prompt with task and context
         let context = self.read_codebase_context()?;
+        let memory = AgentMemory::new(&self.work_dir);
+        let prior_context = memory.load_context(&task.id).unwrap_or_default();
+        let memory_section = if prior_context.is_empty() {
+            String::new()
+        } else {
+            format!("\nPrior attempts for this task:\n{}\n", prior_context)
+        };
+        let iteration = memory.attempt_count(&task.id) + 1;
         let prompt = format!(
             "You are an AI coding agent working on a task in a git repository.\n\
              Working directory: {}\n\n\
              Task: {}\n\n\
-             Context:\n{}\n\n\
+             Context:\n{}\n{}\
              Please implement the necessary code changes to complete this task. \
              Be specific and provide complete, working code.",
-            self.work_dir, task.description, context
+            self.work_dir, task.description, context, memory_section
         );
 
         // Send the message and wait for response
@@ -214,21 +223,37 @@ impl AgentClient {
                 },
                 Some(120_000), // 2 minute timeout
             )
-            .await
-            .context("Failed to get response from Copilot")?;
+            .await;
 
-        // Extract the response content
-        let result = if let Some(event) = response {
-            event
-                .assistant_message_content()
-                .unwrap_or("Task completed")
-                .to_string()
-        } else {
-            "No response from Copilot agent".to_string()
-        };
-
-        // Clean up the session
+        // Clean up the session regardless of outcome
         session.destroy().await.ok();
+
+        // Record this attempt in memory before propagating any error.
+        let (outcome, summary) = match &response {
+            Ok(Some(event)) => (
+                "Success",
+                event
+                    .assistant_message_content()
+                    .unwrap_or("Task completed")
+                    .to_string(),
+            ),
+            Ok(None) => ("Success", "No response from Copilot agent".to_string()),
+            Err(e) => ("Failure", e.to_string()),
+        };
+        memory
+            .record_attempt(&task.id, iteration, outcome, &summary)
+            .ok();
+
+        // Extract the response content (or propagate the error)
+        let result = response
+            .context("Failed to get response from Copilot")?
+            .map(|event| {
+                event
+                    .assistant_message_content()
+                    .unwrap_or("Task completed")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "No response from Copilot agent".to_string());
 
         Ok(result)
     }
@@ -236,17 +261,36 @@ impl AgentClient {
     /// Execute a task via direct HTTP to the GitHub Models API (OpenAI-compatible).
     async fn execute_task_via_http(&self, task: &Task) -> Result<String> {
         let context = self.read_codebase_context()?;
+        let memory = AgentMemory::new(&self.work_dir);
+        let prior_context = memory.load_context(&task.id).unwrap_or_default();
+        let memory_section = if prior_context.is_empty() {
+            String::new()
+        } else {
+            format!("\nPrior attempts for this task:\n{}\n", prior_context)
+        };
+        let iteration = memory.attempt_count(&task.id) + 1;
         let prompt = format!(
             "You are an AI coding agent working on a task in a git repository.\n\
              Working directory: {}\n\n\
              Task: {}\n\n\
-             Context:\n{}\n\n\
+             Context:\n{}\n{}\
              Please implement the necessary code changes to complete this task. \
              Be specific and provide complete, working code.",
-            self.work_dir, task.description, context
+            self.work_dir, task.description, context, memory_section
         );
 
-        self.chat_via_http(&prompt).await
+        let response = self.chat_via_http(&prompt).await;
+
+        // Record this attempt in memory before propagating any error.
+        let (outcome, summary) = match &response {
+            Ok(text) => ("Success", text.clone()),
+            Err(e) => ("Failure", e.to_string()),
+        };
+        memory
+            .record_attempt(&task.id, iteration, outcome, &summary)
+            .ok();
+
+        response
     }
 
     /// Evaluate task completeness via direct HTTP to the GitHub Models API.
@@ -756,9 +800,13 @@ mod tests {
             id: "1".to_string(),
             description: "test task".to_string(),
             status: crate::types::TaskStatus::Pending,
+            role: crate::types::AgentRole::default(),
             phase: 1,
             depends_on: vec![],
-            ..Task::default()
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
         };
 
         let result = client.execute_task(&task).await;

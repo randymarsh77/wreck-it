@@ -29,3 +29,9 @@ tasks/
 
 # Test artifacts
 test-e2e.sh
+
+# Site build artifacts
+site/docs/node_modules/
+site/docs/build/
+site/docs/.docusaurus/
+site/output/

@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 6,
-  "current_task_id": "impl-3",
-  "issue_number": 39,
-  "pr_number": 41,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/41",
-  "last_prompt": "Implement an agent context/memory system that persists across iterations. Create a new src/agent_memory.rs module that maintains a per-task context file (.wreck-it-memory/{task_id}.md) containing: previous attempts and their outcomes, key decisions made, relevant code locations discovered, and learnings from failed attempts. Integrate this with the AgentClient so context is included in agent prompts. This enables agents to learn from previous iterations rather than starting fresh each time. Add unit tests.",
+  "phase": "agent_working",
+  "iteration": 10,
+  "current_task_id": "eval-3",
+  "issue_number": 56,
+  "last_prompt": "Perform end-to-end integration evaluation of all new features working together. Create a small test scenario with a mix of ideas, implementer, and evaluator tasks that exercise: role-based routing, dynamic task generation, agent memory persistence, and intelligent scheduling. Verify the complete workflow runs without errors in headless mode. Run the full test suite with 'cargo test --verbose'. Update docs/architecture.md to reflect the new agent swarm capabilities. Mark this task complete only if all systems work together correctly.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
     "iteration 1: agent created PR #16 for task Some(\"ideas-1\")",
@@ -38,6 +36,20 @@
     "iteration 6: PR #41 not yet mergeable",
     "iteration 6: PR #41 not yet mergeable",
     "iteration 6: PR #41 not yet mergeable",
-    "iteration 6: PR #41 not yet mergeable"
+    "iteration 6: PR #41 not yet mergeable",
+    "iteration 6: PR #41 already merged for task Some(\"impl-3\")",
+    "iteration 7: triggered cloud agent for task impl-4 (issue #44)",
+    "iteration 7: agent created PR #45 for task Some(\"impl-4\")",
+    "iteration 7: marked PR #45 as ready for review",
+    "iteration 7: PR #45 already merged for task Some(\"impl-4\")",
+    "iteration 8: triggered cloud agent for task eval-1 (issue #48)",
+    "iteration 8: agent created PR #49 for task Some(\"eval-1\")",
+    "iteration 8: marked PR #49 as ready for review",
+    "iteration 8: PR #49 already merged for task Some(\"eval-1\")",
+    "iteration 9: triggered cloud agent for task eval-2 (issue #53)",
+    "iteration 9: agent created PR #54 for task Some(\"eval-2\")",
+    "iteration 9: marked PR #54 as ready for review",
+    "iteration 9: merged PR #54 for task Some(\"eval-2\")",
+    "iteration 10: triggered cloud agent for task eval-3 (issue #56)"
   ]
 }

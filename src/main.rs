@@ -1,4 +1,5 @@
 mod agent;
+mod agent_memory;
 mod cli;
 mod cloud_agent;
 mod config_manager;
@@ -109,25 +110,37 @@ async fn main() -> Result<()> {
                     id: "1".to_string(),
                     description: "First task - implement feature X".to_string(),
                     status: TaskStatus::Pending,
+                    role: types::AgentRole::default(),
                     phase: 1,
                     depends_on: vec![],
-                    ..Task::default()
+                    priority: 0,
+                    complexity: 1,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
                 },
                 Task {
                     id: "2".to_string(),
                     description: "Second task - add tests for feature X".to_string(),
                     status: TaskStatus::Pending,
+                    role: types::AgentRole::default(),
                     phase: 1,
                     depends_on: vec![],
-                    ..Task::default()
+                    priority: 0,
+                    complexity: 1,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
                 },
                 Task {
                     id: "3".to_string(),
                     description: "Third task - update documentation".to_string(),
                     status: TaskStatus::Pending,
+                    role: types::AgentRole::default(),
                     phase: 2,
                     depends_on: vec!["1".to_string(), "2".to_string()],
-                    ..Task::default()
+                    priority: 0,
+                    complexity: 1,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
                 },
             ];
 

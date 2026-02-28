@@ -118,12 +118,33 @@ impl Default for Config {
     }
 }
 
+/// The role of the agent assigned to execute this task.
+///
+/// When absent in a JSON task file the field defaults to [`AgentRole::Implementer`]
+/// so that pre-existing task files continue to work without modification.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentRole {
+    /// Research and generate new tasks.
+    Ideas,
+    /// Write code / implement the work (default).
+    #[default]
+    Implementer,
+    /// Review and validate completed work.
+    Evaluator,
+}
+
 /// A task to be completed by the agent
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
     pub description: String,
     pub status: TaskStatus,
+
+    /// Agent role responsible for this task.  Defaults to `implementer` for
+    /// backward compatibility with task files that pre-date this field.
+    #[serde(default, skip_serializing_if = "is_default_role")]
+    pub role: AgentRole,
 
     /// Execution phase (tasks in the same phase may run in parallel).
     /// Tasks in a lower phase run before tasks in a higher phase.
@@ -135,37 +156,28 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
 
-    /// Task urgency (0–10, higher = more urgent). Defaults to 5.
-    #[serde(default = "default_priority", skip_serializing_if = "is_default_priority")]
+    /// Scheduling priority (higher = run sooner).  Defaults to 0.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub priority: u32,
 
-    /// Estimated task complexity (0–10, higher = more complex). Defaults to 5.
-    #[serde(default = "default_complexity", skip_serializing_if = "is_default_complexity")]
+    /// Estimated complexity on a 1–10 scale (lower = quicker win).  Defaults to 1.
+    #[serde(
+        default = "default_complexity",
+        skip_serializing_if = "is_default_complexity"
+    )]
     pub complexity: u32,
 
-    /// Number of failed execution attempts; updated at runtime and persisted.
+    /// Number of previous failed execution attempts.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub failed_attempts: u32,
 
     /// Unix timestamp (seconds) of the most recent execution attempt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_attempted_at: Option<u64>,
+    pub last_attempt_at: Option<u64>,
 }
 
-impl Default for Task {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            description: String::new(),
-            status: TaskStatus::Pending,
-            phase: default_phase(),
-            depends_on: Vec::new(),
-            priority: default_priority(),
-            complexity: default_complexity(),
-            failed_attempts: 0,
-            last_attempted_at: None,
-        }
-    }
+fn is_default_role(r: &AgentRole) -> bool {
+    *r == AgentRole::Implementer
 }
 
 fn default_phase() -> u32 {
@@ -176,20 +188,12 @@ fn is_default_phase(v: &u32) -> bool {
     *v == 1
 }
 
-fn default_priority() -> u32 {
-    5
-}
-
-fn is_default_priority(v: &u32) -> bool {
-    *v == 5
-}
-
 fn default_complexity() -> u32 {
-    5
+    1
 }
 
 fn is_default_complexity(v: &u32) -> bool {
-    *v == 5
+    *v == 1
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -246,6 +250,10 @@ impl LoopState {
     /// Return indices of all tasks in the lowest pending phase whose
     /// dependencies have been satisfied.  These tasks can be executed in
     /// parallel.
+    ///
+    /// This method is preserved for backward compatibility and use in tests.
+    /// The main loop uses [`TaskScheduler::schedule`] for smarter ordering.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn ready_task_indices(&self) -> Vec<usize> {
         // Build a set of completed task IDs.
         let completed_ids: std::collections::HashSet<&str> = self
@@ -292,9 +300,13 @@ mod tests {
             id: id.to_string(),
             description: format!("task {}", id),
             status,
+            role: AgentRole::default(),
             phase,
             depends_on: depends_on.into_iter().map(String::from).collect(),
-            ..Task::default()
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
         }
     }
 
@@ -393,5 +405,51 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.model_provider, ModelProvider::GithubModels);
+    }
+
+    // ---- AgentRole tests ----
+
+    #[test]
+    fn task_role_defaults_to_implementer_when_absent() {
+        // Backward compat: old task files have no "role" field.
+        let json = r#"{"id":"x","description":"d","status":"pending"}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert_eq!(task.role, AgentRole::Implementer);
+    }
+
+    #[test]
+    fn task_role_implementer_is_omitted_in_serialization() {
+        // The default role must NOT be written to the JSON (backward compat).
+        let task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(!json.contains("\"role\""), "default role should be omitted");
+    }
+
+    #[test]
+    fn task_role_non_default_is_serialized() {
+        let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        task.role = AgentRole::Ideas;
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(json.contains("\"role\":\"ideas\""));
+    }
+
+    #[test]
+    fn task_role_roundtrip_all_variants() {
+        for role in [
+            AgentRole::Ideas,
+            AgentRole::Implementer,
+            AgentRole::Evaluator,
+        ] {
+            let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+            task.role = role;
+            let json = serde_json::to_string(&task).unwrap();
+            let loaded: Task = serde_json::from_str(&json).unwrap();
+            assert_eq!(loaded.role, role);
+        }
+    }
+
+    #[test]
+    fn agent_role_default_is_implementer() {
+        assert_eq!(AgentRole::default(), AgentRole::Implementer);
     }
 }

@@ -1,109 +1,19 @@
 use crate::agent::AgentClient;
-use crate::task_manager::{load_tasks, save_tasks};
+use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{Config, EvaluationMode, LoopState, Task, TaskStatus};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-// ---------------------------------------------------------------------------
-// Scoring weights
-// ---------------------------------------------------------------------------
-
-/// Weights used by [`TaskScheduler`] when computing per-task scores.
-pub struct ScoringWeights {
-    /// Multiplier applied to `task.priority`.  Higher → more urgent tasks
-    /// rise to the top.
-    pub priority_weight: f64,
-    /// Penalty applied to `task.complexity`.  Simpler tasks are preferred
-    /// when scores are otherwise equal.
-    pub complexity_weight: f64,
-    /// Penalty per failed attempt.  Tasks that keep failing are
-    /// deprioritised.
-    pub failed_attempts_penalty: f64,
-    /// Maximum bonus awarded for not having been attempted recently.
-    pub recency_bonus_max: f64,
-    /// Half-life (seconds) for the recency bonus.  After this many seconds
-    /// the bonus reaches half of `recency_bonus_max`.
-    pub recency_half_life_secs: f64,
-}
-
-impl Default for ScoringWeights {
-    fn default() -> Self {
-        Self {
-            priority_weight: 10.0,
-            complexity_weight: 0.5,
-            failed_attempts_penalty: 5.0,
-            recency_bonus_max: 20.0,
-            recency_half_life_secs: 300.0,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// TaskScheduler
-// ---------------------------------------------------------------------------
-
-/// Selects and orders ready tasks using a multi-factor scoring algorithm.
-///
-/// Factors considered (in order of typical influence):
-/// - **Priority** (`task.priority`): higher-priority tasks score higher.
-/// - **Complexity** (`task.complexity`): more complex tasks score slightly
-///   lower, so simpler work is preferred when priorities are equal.
-/// - **Failed attempts** (`task.failed_attempts`): tasks that have failed
-///   many times are deprioritised to avoid spinning on a broken task.
-/// - **Time since last attempt** (`task.last_attempted_at`): tasks that
-///   have not been tried recently receive a growing bonus, giving previously
-///   failing tasks another chance after a cool-down period.
-/// - **Dependency satisfaction**: only tasks whose `depends_on` ids are all
-///   `Completed` are included in the result at all.
-pub struct TaskScheduler {
-    weights: ScoringWeights,
-}
+/// Intelligent task scheduler that scores ready tasks across multiple factors
+/// and returns them ordered from highest to lowest priority.
+pub struct TaskScheduler;
 
 impl TaskScheduler {
-    /// Create a scheduler with default scoring weights.
-    pub fn new() -> Self {
-        Self {
-            weights: ScoringWeights::default(),
-        }
-    }
-
-    /// Create a scheduler with custom scoring weights.
-    pub fn with_weights(weights: ScoringWeights) -> Self {
-        Self { weights }
-    }
-
-    /// Compute a scalar score for a single task (higher = run sooner).
-    fn score(&self, task: &Task, now_secs: u64) -> f64 {
-        let priority_score = task.priority as f64 * self.weights.priority_weight;
-        let complexity_penalty = task.complexity as f64 * self.weights.complexity_weight;
-        let failure_penalty = task.failed_attempts as f64 * self.weights.failed_attempts_penalty;
-        let recency_bonus = match task.last_attempted_at {
-            // Never attempted → full recency bonus.
-            None => self.weights.recency_bonus_max,
-            Some(last) => {
-                let elapsed = now_secs.saturating_sub(last) as f64;
-                // Exponential approach: reaches ~50 % of the maximum after
-                // `recency_half_life_secs` and approaches the maximum
-                // asymptotically.  Formula: max * (1 - e^(-t/half_life)).
-                self.weights.recency_bonus_max
-                    * (1.0 - (-elapsed / self.weights.recency_half_life_secs).exp())
-            }
-        };
-        priority_score - complexity_penalty - failure_penalty + recency_bonus
-    }
-
-    /// Return the indices of all ready tasks ordered by score (highest first).
-    ///
-    /// A task is *ready* when its `status` is `Pending` and every id listed
-    /// in `depends_on` belongs to a `Completed` task.
-    pub fn scheduled_task_indices(&self, tasks: &[Task]) -> Vec<usize> {
-        self.scheduled_task_indices_at(tasks, current_unix_secs())
-    }
-
-    /// Like [`scheduled_task_indices`] but accepts the current time (seconds
-    /// since the Unix epoch) explicitly, making the result deterministic in
-    /// unit tests.
-    pub fn scheduled_task_indices_at(&self, tasks: &[Task], now_secs: u64) -> Vec<usize> {
+    /// Return an ordered list of task indices that are ready to execute
+    /// (status `Pending` with all dependencies satisfied), sorted from
+    /// highest scheduling score to lowest.
+    pub fn schedule(tasks: &[Task]) -> Vec<usize> {
         let completed_ids: HashSet<&str> = tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Completed)
@@ -119,39 +29,66 @@ impl TaskScheduler {
                         .iter()
                         .all(|dep| completed_ids.contains(dep.as_str()))
             })
-            .map(|(i, t)| (i, self.score(t, now_secs)))
+            .map(|(i, t)| (i, Self::score(t, tasks)))
             .collect();
 
-        // Stable sort descending by score.
-        ready.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // Descending score order; stable sort preserves original order on ties.
+        ready.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
         ready.into_iter().map(|(i, _)| i).collect()
     }
-}
 
-impl Default for TaskScheduler {
-    fn default() -> Self {
-        Self::new()
+    /// Compute a scheduling score for a single task.  Higher is better.
+    ///
+    /// Factors (all additive):
+    /// - **Priority** (×10): higher `priority` field → run sooner.
+    /// - **Complexity** (×2, inverted): lower complexity → quicker win.
+    /// - **Dependency fan-out** (×5): tasks that unblock more downstream work
+    ///   run sooner.
+    /// - **Failed attempts** (×3, penalty): back off from repeatedly-failing
+    ///   tasks.
+    /// - **Time since last attempt** (up to +60): tasks idle longer get a
+    ///   recency bonus to avoid starvation.
+    fn score(task: &Task, all_tasks: &[Task]) -> f64 {
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Factor 1: priority
+        let priority_score = task.priority as f64 * 10.0;
+
+        // Factor 2: complexity (clamped 1–10; lower = better)
+        let clamped_complexity = task.complexity.clamp(1, 10);
+        let complexity_score = (11 - clamped_complexity) as f64 * 2.0;
+
+        // Factor 3: number of tasks directly waiting on this one
+        let unblocks = all_tasks
+            .iter()
+            .filter(|t| t.depends_on.contains(&task.id))
+            .count();
+        let dependency_score = unblocks as f64 * 5.0;
+
+        // Factor 4: failure penalty
+        let failure_penalty = task.failed_attempts as f64 * 3.0;
+
+        // Factor 5: recency bonus – capped at 60 points (1 hour of idle time)
+        let recency_score = match task.last_attempt_at {
+            None => 0.0,
+            Some(ts) => {
+                let elapsed = now_secs.saturating_sub(ts);
+                elapsed.min(3600) as f64 / 60.0
+            }
+        };
+
+        priority_score + complexity_score + dependency_score - failure_penalty + recency_score
     }
 }
-
-/// Return the current time as seconds since the Unix epoch.
-fn current_unix_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-// ---------------------------------------------------------------------------
-// RalphLoop
-// ---------------------------------------------------------------------------
 
 /// The Ralph Wiggum Loop - a bash-style loop that continuously executes tasks
 pub struct RalphLoop {
     config: Config,
     state: LoopState,
     agent: AgentClient,
-    scheduler: TaskScheduler,
 }
 
 impl RalphLoop {
@@ -172,7 +109,6 @@ impl RalphLoop {
             config,
             state: LoopState::new(max_iterations),
             agent,
-            scheduler: TaskScheduler::new(),
         }
     }
 
@@ -201,6 +137,30 @@ impl RalphLoop {
             return Ok(false);
         }
 
+        // Re-read the task file so that tasks dynamically appended by agents
+        // during a previous iteration are incorporated into the queue.
+        // We merge by updating in-memory entries with the on-disk version for
+        // any ID that exists in both (preserving live InProgress status), and
+        // appending any IDs that only exist on disk.
+        if let Ok(disk_tasks) = load_tasks(&self.config.task_file) {
+            for disk_task in disk_tasks {
+                match self.state.tasks.iter().position(|t| t.id == disk_task.id) {
+                    Some(idx) => {
+                        // Keep the in-memory status (may be InProgress); refresh
+                        // everything else (description, role, deps, etc.).
+                        let current_status = self.state.tasks[idx].status;
+                        self.state.tasks[idx] = disk_task;
+                        self.state.tasks[idx].status = current_status;
+                    }
+                    None => {
+                        self.state
+                            .add_log(format!("Discovered new task: {}", disk_task.id));
+                        self.state.tasks.push(disk_task);
+                    }
+                }
+            }
+        }
+
         // Check if all tasks are complete
         if self.state.all_tasks_complete() {
             self.state.add_log("All tasks completed!".to_string());
@@ -213,15 +173,19 @@ impl RalphLoop {
             return Ok(false);
         }
 
-        // Use the scheduler to obtain an ordered list of ready tasks.
-        let ready = self.scheduler.scheduled_task_indices(&self.state.tasks);
-
+        // Determine whether we can run tasks in parallel.
+        let ready = TaskScheduler::schedule(&self.state.tasks);
         if ready.len() > 1 {
             return self.run_parallel_tasks(ready).await;
         }
 
-        // Single (or zero) ready task – run it sequentially.
-        let task_idx = match ready.into_iter().next() {
+        // Single-task execution: use scheduler result when available, fall back
+        // to the simple first-pending scan.
+        let task_idx = match ready
+            .into_iter()
+            .next()
+            .or_else(|| get_next_task(&self.state.tasks))
+        {
             Some(idx) => idx,
             None => {
                 self.state.add_log("No more tasks to process".to_string());
@@ -236,7 +200,12 @@ impl RalphLoop {
     async fn run_single_task(&mut self, task_idx: usize) -> Result<bool> {
         self.state.current_task = Some(task_idx);
         self.state.tasks[task_idx].status = TaskStatus::InProgress;
-        self.state.tasks[task_idx].last_attempted_at = Some(current_unix_secs());
+        self.state.tasks[task_idx].last_attempt_at = Some(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        );
 
         let task_desc = self.state.tasks[task_idx].description.clone();
         self.state.add_log(format!("Starting task: {}", task_desc));
@@ -265,9 +234,6 @@ impl RalphLoop {
             }
             Ok(false) => {
                 self.state.add_log("Tests failed".to_string());
-                if self.state.tasks[task_idx].status != TaskStatus::Failed {
-                    self.state.tasks[task_idx].failed_attempts += 1;
-                }
                 self.state.tasks[task_idx].status = TaskStatus::Failed;
             }
             Err(e) => {
@@ -306,16 +272,20 @@ impl RalphLoop {
     /// Results are collected and applied back to the shared state.
     async fn run_parallel_tasks(&mut self, indices: Vec<usize>) -> Result<bool> {
         self.state.add_log(format!(
-            "Running {} tasks in parallel",
+            "Running {} tasks in parallel (phase {})",
             indices.len(),
+            self.state.tasks[indices[0]].phase,
         ));
 
-        // Mark all as in-progress and record attempt time.
-        let now = current_unix_secs();
+        // Mark all as in-progress and collect task data.
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         let mut task_data: Vec<(usize, crate::types::Task)> = Vec::new();
         for &idx in &indices {
             self.state.tasks[idx].status = TaskStatus::InProgress;
-            self.state.tasks[idx].last_attempted_at = Some(now);
+            self.state.tasks[idx].last_attempt_at = Some(now_secs);
             task_data.push((idx, self.state.tasks[idx].clone()));
         }
 
@@ -380,7 +350,6 @@ impl RalphLoop {
                             "Task [{}] evaluation failed",
                             self.state.tasks[idx].id
                         ));
-                        self.state.tasks[idx].failed_attempts += 1;
                         self.state.tasks[idx].status = TaskStatus::Failed;
                     }
                     Err(e) => {
@@ -448,218 +417,194 @@ impl RalphLoop {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Unit tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Task, TaskStatus};
+    use crate::types::Task;
 
-    fn make_task(id: &str, status: TaskStatus, depends_on: Vec<&str>) -> Task {
-        Task {
-            id: id.to_string(),
-            description: format!("task {}", id),
-            status,
-            depends_on: depends_on.into_iter().map(String::from).collect(),
-            ..Task::default()
-        }
-    }
-
-    fn make_task_with(
+    fn make_task(
         id: &str,
         status: TaskStatus,
         priority: u32,
         complexity: u32,
         failed_attempts: u32,
-        last_attempted_at: Option<u64>,
+        depends_on: Vec<&str>,
     ) -> Task {
         Task {
             id: id.to_string(),
             description: format!("task {}", id),
             status,
+            role: crate::types::AgentRole::default(),
+            phase: 1,
+            depends_on: depends_on.into_iter().map(String::from).collect(),
             priority,
             complexity,
             failed_attempts,
-            last_attempted_at,
-            ..Task::default()
+            last_attempt_at: None,
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Dependency filtering
-    // -----------------------------------------------------------------------
+    #[test]
+    fn scheduler_empty_when_no_pending() {
+        let tasks = vec![make_task("a", TaskStatus::Completed, 0, 1, 0, vec![])];
+        assert!(TaskScheduler::schedule(&tasks).is_empty());
+    }
 
     #[test]
-    fn scheduler_excludes_tasks_with_unmet_deps() {
-        let scheduler = TaskScheduler::new();
+    fn scheduler_respects_dependencies() {
         let tasks = vec![
-            make_task("a", TaskStatus::Pending, vec![]),
-            make_task("b", TaskStatus::Pending, vec!["a"]),
+            make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]),
+            // b depends on a which is still Pending → not ready
+            make_task("b", TaskStatus::Pending, 0, 1, 0, vec!["a"]),
         ];
-        // b depends on a which is still Pending, so only a is ready.
-        let ready = scheduler.scheduled_task_indices_at(&tasks, 1_000);
+        let ready = TaskScheduler::schedule(&tasks);
         assert_eq!(ready, vec![0]);
     }
 
     #[test]
-    fn scheduler_includes_task_when_dep_completed() {
-        let scheduler = TaskScheduler::new();
+    fn scheduler_unblocks_after_dependency_completes() {
         let tasks = vec![
-            make_task("a", TaskStatus::Completed, vec![]),
-            make_task("b", TaskStatus::Pending, vec!["a"]),
+            make_task("a", TaskStatus::Completed, 0, 1, 0, vec![]),
+            make_task("b", TaskStatus::Pending, 0, 1, 0, vec!["a"]),
         ];
-        let ready = scheduler.scheduled_task_indices_at(&tasks, 1_000);
+        let ready = TaskScheduler::schedule(&tasks);
         assert_eq!(ready, vec![1]);
     }
 
     #[test]
-    fn scheduler_excludes_failed_dep() {
-        let scheduler = TaskScheduler::new();
+    fn scheduler_orders_by_priority() {
         let tasks = vec![
-            make_task("a", TaskStatus::Failed, vec![]),
-            make_task("b", TaskStatus::Pending, vec!["a"]),
+            make_task("low", TaskStatus::Pending, 1, 1, 0, vec![]),
+            make_task("high", TaskStatus::Pending, 5, 1, 0, vec![]),
         ];
-        // Failed ≠ Completed, so b is blocked.
-        let ready = scheduler.scheduled_task_indices_at(&tasks, 1_000);
-        assert!(ready.is_empty());
-    }
-
-    #[test]
-    fn scheduler_empty_when_all_complete() {
-        let scheduler = TaskScheduler::new();
-        let tasks = vec![make_task("a", TaskStatus::Completed, vec![])];
-        assert!(scheduler.scheduled_task_indices_at(&tasks, 0).is_empty());
-    }
-
-    // -----------------------------------------------------------------------
-    // Priority ordering
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn higher_priority_task_ranked_first() {
-        let scheduler = TaskScheduler::new();
-        // Task b has higher priority than a (same everything else).
-        let tasks = vec![
-            make_task_with("a", TaskStatus::Pending, 3, 5, 0, None),
-            make_task_with("b", TaskStatus::Pending, 8, 5, 0, None),
-        ];
-        let ready = scheduler.scheduled_task_indices_at(&tasks, 1_000);
-        // b (index 1) should come before a (index 0).
+        let ready = TaskScheduler::schedule(&tasks);
+        // high-priority task should be first
         assert_eq!(ready[0], 1);
         assert_eq!(ready[1], 0);
     }
 
-    // -----------------------------------------------------------------------
-    // Complexity penalty
-    // -----------------------------------------------------------------------
-
     #[test]
-    fn lower_complexity_task_ranked_first_when_priority_equal() {
-        let scheduler = TaskScheduler::new();
-        // Task b has lower complexity than a (same priority).
+    fn scheduler_penalizes_failed_attempts() {
+        // "retried" has 10 failures → penalty of 30; "fresh" penalty 0
         let tasks = vec![
-            make_task_with("a", TaskStatus::Pending, 5, 8, 0, None),
-            make_task_with("b", TaskStatus::Pending, 5, 2, 0, None),
+            make_task("fresh", TaskStatus::Pending, 0, 1, 0, vec![]),
+            make_task("retried", TaskStatus::Pending, 0, 1, 10, vec![]),
         ];
-        let ready = scheduler.scheduled_task_indices_at(&tasks, 1_000);
-        assert_eq!(ready[0], 1); // b (lower complexity) first
-    }
-
-    // -----------------------------------------------------------------------
-    // Failed-attempts penalty
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn more_failed_attempts_lowers_score() {
-        let scheduler = TaskScheduler::new();
-        // Task a has many failed attempts; b is fresh.
-        let tasks = vec![
-            make_task_with("a", TaskStatus::Pending, 5, 5, 10, None),
-            make_task_with("b", TaskStatus::Pending, 5, 5, 0, None),
-        ];
-        let ready = scheduler.scheduled_task_indices_at(&tasks, 1_000);
-        assert_eq!(ready[0], 1); // b (no failures) first
-    }
-
-    // -----------------------------------------------------------------------
-    // Recency bonus
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn never_attempted_task_gets_full_recency_bonus() {
-        let weights = ScoringWeights {
-            priority_weight: 0.0,
-            complexity_weight: 0.0,
-            failed_attempts_penalty: 0.0,
-            recency_bonus_max: 20.0,
-            recency_half_life_secs: 300.0,
-        };
-        let scheduler = TaskScheduler::with_weights(weights);
-        // Task a was attempted just now; b has never been attempted.
-        let now = 1_000_u64;
-        let tasks = vec![
-            make_task_with("a", TaskStatus::Pending, 5, 5, 0, Some(now)),
-            make_task_with("b", TaskStatus::Pending, 5, 5, 0, None),
-        ];
-        let ready = scheduler.scheduled_task_indices_at(&tasks, now);
-        assert_eq!(ready[0], 1); // b (never tried) gets full bonus
+        let ready = TaskScheduler::schedule(&tasks);
+        assert_eq!(ready[0], 0); // fresh scores higher
     }
 
     #[test]
-    fn older_attempt_scores_higher_than_recent() {
-        let weights = ScoringWeights {
-            priority_weight: 0.0,
-            complexity_weight: 0.0,
-            failed_attempts_penalty: 0.0,
-            recency_bonus_max: 20.0,
-            recency_half_life_secs: 300.0,
-        };
-        let scheduler = TaskScheduler::with_weights(weights);
-        let now = 10_000_u64;
-        // a was attempted 1 second ago; b was attempted 600 seconds ago.
+    fn scheduler_prefers_lower_complexity() {
         let tasks = vec![
-            make_task_with("a", TaskStatus::Pending, 5, 5, 0, Some(now - 1)),
-            make_task_with("b", TaskStatus::Pending, 5, 5, 0, Some(now - 600)),
+            make_task("complex", TaskStatus::Pending, 0, 10, 0, vec![]),
+            make_task("simple", TaskStatus::Pending, 0, 1, 0, vec![]),
         ];
-        let ready = scheduler.scheduled_task_indices_at(&tasks, now);
-        assert_eq!(ready[0], 1); // b (longer ago) scores higher
+        let ready = TaskScheduler::schedule(&tasks);
+        assert_eq!(ready[0], 1); // simple first
     }
 
-    // -----------------------------------------------------------------------
-    // Combined scoring
-    // -----------------------------------------------------------------------
-
     #[test]
-    fn combined_score_orders_tasks_correctly() {
-        let scheduler = TaskScheduler::new();
-        let now = 1_000_u64;
-        // c: high priority, low complexity, no failures → should be first.
-        // a: low priority, high complexity, failures → should be last.
-        // b: medium → should be in the middle.
+    fn scheduler_rewards_dependency_fanout() {
+        // "a" is depended on by both "b" and "c" → higher fan-out score than "d"
         let tasks = vec![
-            make_task_with("a", TaskStatus::Pending, 2, 8, 3, Some(now - 1)),
-            make_task_with("b", TaskStatus::Pending, 5, 5, 1, Some(now - 60)),
-            make_task_with("c", TaskStatus::Pending, 9, 1, 0, None),
+            make_task("d", TaskStatus::Pending, 0, 1, 0, vec![]),
+            make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]),
+            make_task("b", TaskStatus::Pending, 0, 1, 0, vec!["a"]),
+            make_task("c", TaskStatus::Pending, 0, 1, 0, vec!["a"]),
         ];
-        let ready = scheduler.scheduled_task_indices_at(&tasks, now);
-        assert_eq!(ready[0], 2); // c first
-        assert_eq!(ready[2], 0); // a last
+        // only "d" (idx 0) and "a" (idx 1) are ready; "a" unblocks 2 tasks
+        let ready = TaskScheduler::schedule(&tasks);
+        assert_eq!(ready.len(), 2);
+        assert_eq!(ready[0], 1); // "a" scores higher
     }
 
-    // -----------------------------------------------------------------------
-    // InProgress tasks are not re-scheduled
-    // -----------------------------------------------------------------------
+    #[test]
+    fn scheduler_recency_bonus_for_older_attempt() {
+        let old_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .saturating_sub(7200); // 2 hours ago → capped at 60 pts
+
+        let recent_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .saturating_sub(10); // 10 seconds ago → ~0.17 pts
+
+        let tasks = vec![
+            Task {
+                id: "recent".to_string(),
+                description: "recent".to_string(),
+                status: TaskStatus::Pending,
+                role: crate::types::AgentRole::default(),
+                phase: 1,
+                depends_on: vec![],
+                priority: 0,
+                complexity: 1,
+                failed_attempts: 0,
+                last_attempt_at: Some(recent_ts),
+            },
+            Task {
+                id: "old".to_string(),
+                description: "old".to_string(),
+                status: TaskStatus::Pending,
+                role: crate::types::AgentRole::default(),
+                phase: 1,
+                depends_on: vec![],
+                priority: 0,
+                complexity: 1,
+                failed_attempts: 0,
+                last_attempt_at: Some(old_ts),
+            },
+        ];
+        let ready = TaskScheduler::schedule(&tasks);
+        // "old" should win due to larger recency bonus
+        assert_eq!(ready[0], 1);
+    }
 
     #[test]
-    fn in_progress_tasks_are_not_returned() {
-        let scheduler = TaskScheduler::new();
+    fn scheduler_never_attempted_has_no_recency_bonus() {
+        // A task never attempted (None) scores no recency bonus; a task
+        // attempted 2 hours ago scores up to 60 pts.
+        let old_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .saturating_sub(7200);
+
         let tasks = vec![
-            make_task("a", TaskStatus::InProgress, vec![]),
-            make_task("b", TaskStatus::Pending, vec![]),
+            make_task("never", TaskStatus::Pending, 0, 1, 0, vec![]),
+            Task {
+                id: "old".to_string(),
+                description: "old".to_string(),
+                status: TaskStatus::Pending,
+                role: crate::types::AgentRole::default(),
+                phase: 1,
+                depends_on: vec![],
+                priority: 0,
+                complexity: 1,
+                failed_attempts: 0,
+                last_attempt_at: Some(old_ts),
+            },
         ];
-        let ready = scheduler.scheduled_task_indices_at(&tasks, 1_000);
-        assert_eq!(ready, vec![1]);
+        let ready = TaskScheduler::schedule(&tasks);
+        // "old" has recency bonus, "never" does not
+        assert_eq!(ready[0], 1);
+    }
+
+    #[test]
+    fn scheduler_returns_empty_for_empty_task_list() {
+        assert!(TaskScheduler::schedule(&[]).is_empty());
+    }
+
+    #[test]
+    fn scheduler_returns_empty_when_all_tasks_failed() {
+        let tasks = vec![
+            make_task("a", TaskStatus::Failed, 0, 1, 1, vec![]),
+            make_task("b", TaskStatus::Failed, 0, 1, 3, vec![]),
+        ];
+        assert!(TaskScheduler::schedule(&tasks).is_empty());
     }
 }
