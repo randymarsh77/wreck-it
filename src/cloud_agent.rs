@@ -1,7 +1,9 @@
 use anyhow::{bail, Context, Result};
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
-const COPILOT_LOGIN: &str = "copilot";
+/// Known coding agent logins to search for via the `suggestedActors` GraphQL
+/// query. Agents are tried in order; the first match wins.
+const KNOWN_AGENT_LOGINS: &[&str] = &["copilot-swe-agent", "copilot", "claude", "codex"];
 
 /// Status of a cloud agent session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +25,19 @@ pub enum PrMergeStatus {
     NotMergeable,
     /// The PR is ready to be merged.
     Mergeable,
+    /// The PR has already been merged.
+    AlreadyMerged,
+}
+
+/// Summary of an open pull request, returned by [`CloudAgentClient::list_open_prs`].
+#[derive(Debug, Clone)]
+pub struct OpenPr {
+    pub number: u64,
+    pub title: String,
+    /// Whether the PR is currently a draft.  Stored for informational purposes;
+    /// the sweep logic re-checks draft status via [`CloudAgentClient::check_pr_merge_status`].
+    #[allow(dead_code)]
+    pub draft: bool,
 }
 
 /// Result of triggering a cloud agent.
@@ -30,6 +45,29 @@ pub enum PrMergeStatus {
 pub struct TriggerResult {
     pub issue_number: u64,
     pub issue_url: String,
+}
+
+/// Build the GitHub issue body for a cloud agent trigger.
+///
+/// Appends a "Previous Context" section when `memory` is non-empty so that
+/// the coding agent has visibility into earlier iterations.  Each memory
+/// entry is formatted as a bullet point and should be a complete, self-
+/// contained description (e.g. "iteration 3: merged PR #7 for task setup").
+pub(crate) fn build_issue_body(task_id: &str, task_description: &str, memory: &[String]) -> String {
+    let memory_section = if memory.is_empty() {
+        String::new()
+    } else {
+        let bullets = memory
+            .iter()
+            .map(|m| format!("- {}", m))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("\n\n## Previous Context\n\n{}", bullets)
+    };
+    format!(
+        "{}{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
+        task_description, memory_section, task_id,
+    )
 }
 
 /// Client for interacting with cloud coding agents via the GitHub API.
@@ -43,6 +81,21 @@ pub struct CloudAgentClient {
     repo_owner: String,
     repo_name: String,
     http: reqwest::Client,
+}
+
+/// Check whether any known coding agent appears in an issue's assignees array.
+fn is_copilot_in_assignees(issue: &serde_json::Value) -> bool {
+    issue["assignees"]
+        .as_array()
+        .map(|arr| {
+            arr.iter().any(|a| {
+                a["login"]
+                    .as_str()
+                    .map(|login| KNOWN_AGENT_LOGINS.contains(&login))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 impl CloudAgentClient {
@@ -60,15 +113,16 @@ impl CloudAgentClient {
     /// Creates a GitHub issue with the task description and assigns Copilot to
     /// it, which triggers the Copilot coding agent to work on the task
     /// autonomously and create a pull request.
+    ///
+    /// `memory_context` is a slice of freeform notes from previous iterations
+    /// that is appended to the issue body so the agent has historical context.
     pub async fn trigger_agent(
         &self,
         task_id: &str,
         task_description: &str,
+        memory_context: &[String],
     ) -> Result<TriggerResult> {
-        let issue_body = format!(
-            "{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
-            task_description, task_id,
-        );
+        let issue_body = build_issue_body(task_id, task_description, memory_context);
 
         let create_body = serde_json::json!({
             "title": format!("[wreck-it] {}", task_id),
@@ -106,9 +160,20 @@ impl CloudAgentClient {
             .as_str()
             .context("Missing issue URL in response")?
             .to_string();
+        let issue_node_id = issue["node_id"].as_str().map(|s| s.to_string());
+        if issue_node_id.is_none() {
+            tracing::warn!(
+                "Issue creation response for #{} did not include node_id; \
+                 will need an extra API call to resolve it",
+                issue_number,
+            );
+        }
 
         // Assign Copilot to the issue to trigger the coding agent.
-        if !self.assign_copilot(issue_number).await {
+        if !self
+            .assign_copilot(issue_number, issue_node_id.as_deref())
+            .await
+        {
             tracing::warn!(
                 "Copilot assignment failed for issue #{}; the issue was created but the \
                  agent may need to be triggered manually",
@@ -124,56 +189,281 @@ impl CloudAgentClient {
 
     /// Assign the Copilot bot to an issue, triggering the coding agent.
     /// Returns `true` if the assignment succeeded.
-    async fn assign_copilot(&self, issue_number: u64) -> bool {
+    async fn assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
+        self.try_assign_copilot(issue_number, issue_node_id).await
+    }
+
+    /// Find an available coding agent via the `suggestedActors` GraphQL query.
+    ///
+    /// Returns `(agent_node_id, agent_login)` of the first known agent found,
+    /// or `None` if no agent could be discovered.
+    async fn get_agent_from_suggested_actors(&self) -> Option<(String, String)> {
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": r#"query($owner: String!, $name: String!) {
+                repository(owner: $owner, name: $name) {
+                    suggestedActors(capabilities: [CAN_BE_ASSIGNED], first: 100) {
+                        nodes {
+                            login
+                            __typename
+                            ... on Bot { id }
+                            ... on User { id }
+                        }
+                    }
+                }
+            }"#,
+            "variables": {
+                "owner": self.repo_owner,
+                "name": self.repo_name,
+            },
+        });
+
+        let resp = match self
+            .http
+            .post(&graphql_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&query)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("HTTP error querying suggestedActors: {}", e);
+                return None;
+            }
+        };
+
+        if !resp.status().is_success() {
+            tracing::warn!("suggestedActors query failed ({})", resp.status(),);
+            return None;
+        }
+
+        let body: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("Failed to parse suggestedActors response: {}", e);
+                return None;
+            }
+        };
+
+        if let Some(errors) = body.get("errors") {
+            tracing::warn!("GraphQL errors in suggestedActors query: {}", errors);
+            return None;
+        }
+
+        let nodes = body
+            .pointer("/data/repository/suggestedActors/nodes")
+            .and_then(|v| v.as_array());
+
+        let nodes = match nodes {
+            Some(n) => n,
+            None => {
+                tracing::warn!("No suggestedActors nodes returned");
+                return None;
+            }
+        };
+
+        // Search for the first known agent login in priority order.
+        for &known_login in KNOWN_AGENT_LOGINS {
+            for node in nodes {
+                if node["login"].as_str() == Some(known_login) {
+                    if let Some(id) = node["id"].as_str() {
+                        tracing::info!(
+                            "Found coding agent '{}' (id: {}) via suggestedActors",
+                            known_login,
+                            id,
+                        );
+                        return Some((id.to_string(), known_login.to_string()));
+                    }
+                }
+            }
+        }
+
+        tracing::warn!(
+            "No known coding agent found in suggestedActors (searched for {:?}). \
+             This feature may require a GitHub Enterprise account or Copilot for \
+             Pull Requests and Issues to be enabled in the repository settings.",
+            KNOWN_AGENT_LOGINS,
+        );
+        None
+    }
+
+    /// Fetch the GraphQL node ID for an issue.
+    async fn get_issue_node_id(&self, issue_number: u64) -> Option<String> {
         let url = format!(
-            "{}/repos/{}/{}/issues/{}/assignees",
+            "{}/repos/{}/{}/issues/{}",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, issue_number,
         );
+        match self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v["node_id"].as_str().map(|s| s.to_string())),
+            Ok(resp) => {
+                tracing::warn!(
+                    "Failed to fetch issue #{} for node_id ({})",
+                    issue_number,
+                    resp.status(),
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "HTTP error fetching issue #{} for node_id: {}",
+                    issue_number,
+                    e,
+                );
+                None
+            }
+        }
+    }
 
-        let body = serde_json::json!({
-            "assignees": [COPILOT_LOGIN],
+    /// Attempt to assign a coding agent using the GraphQL
+    /// `addAssigneesToAssignable` mutation. Discovers the agent via
+    /// `suggestedActors` and falls back to fetching the issue node ID if it was
+    /// not provided. Returns `true` when the mutation succeeds.
+    async fn try_assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
+        // Resolve the issue's GraphQL node ID.
+        let owned_node_id;
+        let assignable_id = match issue_node_id {
+            Some(id) => id,
+            None => match self.get_issue_node_id(issue_number).await {
+                Some(id) => {
+                    owned_node_id = id;
+                    owned_node_id.as_str()
+                }
+                None => {
+                    tracing::warn!("Could not resolve node_id for issue #{}", issue_number,);
+                    return false;
+                }
+            },
+        };
+
+        // Discover a coding agent via the suggestedActors GraphQL query.
+        let (agent_id, agent_login) = match self.get_agent_from_suggested_actors().await {
+            Some(pair) => pair,
+            None => return false,
+        };
+
+        // Use the GraphQL addAssigneesToAssignable mutation.
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!) {
+                addAssigneesToAssignable(input: {
+                    assignableId: $assignableId,
+                    assigneeIds: $assigneeIds
+                }) {
+                    assignable {
+                        ... on Issue {
+                            assignees(first: 10) {
+                                nodes { login }
+                            }
+                        }
+                    }
+                }
+            }"#,
+            "variables": {
+                "assignableId": assignable_id,
+                "assigneeIds": [agent_id],
+            },
         });
 
         match self
             .http
-            .post(&url)
+            .post(&graphql_url)
             .header("Authorization", format!("Bearer {}", self.github_token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
-            .json(&body)
+            .header(
+                "GraphQL-Features",
+                "issues_copilot_assignment_api_support,coding_agent_model_selection",
+            )
+            .json(&query)
             .send()
             .await
         {
             Ok(resp) if resp.status().is_success() => {
-                // Verify that Copilot actually appears in the assignees list.
-                // The API can return 200 without actually assigning Copilot
-                // when the token lacks sufficient permissions.
-                if let Ok(issue) = resp.json::<serde_json::Value>().await {
-                    let assigned = issue["assignees"]
-                        .as_array()
+                if let Ok(gql_resp) = resp.json::<serde_json::Value>().await {
+                    // Check for GraphQL-level errors.
+                    if let Some(errors) = gql_resp.get("errors") {
+                        tracing::warn!(
+                            "GraphQL errors assigning '{}' to issue #{}: {}",
+                            agent_login,
+                            issue_number,
+                            errors,
+                        );
+                        return false;
+                    }
+
+                    // Verify the agent appears in the assignees from the
+                    // mutation response.
+                    let has_agent = gql_resp
+                        .pointer("/data/addAssigneesToAssignable/assignable/assignees/nodes")
+                        .and_then(|v| v.as_array())
                         .map(|arr| {
-                            arr.iter()
-                                .any(|a| a["login"].as_str() == Some(COPILOT_LOGIN))
+                            arr.iter().any(|a| {
+                                a["login"]
+                                    .as_str()
+                                    .map(|l| KNOWN_AGENT_LOGINS.contains(&l))
+                                    .unwrap_or(false)
+                            })
                         })
                         .unwrap_or(false);
-                    if assigned {
+
+                    if has_agent {
                         tracing::info!(
-                            "Assigned Copilot to issue #{} – coding agent triggered",
-                            issue_number
+                            "Assigned '{}' to issue #{} via GraphQL – coding agent triggered",
+                            agent_login,
+                            issue_number,
                         );
                         return true;
                     }
                 }
+
+                // The mutation response didn't include the agent in
+                // assignees, but there can be a propagation delay. Poll
+                // the REST API a few times before giving up.
+                tracing::debug!(
+                    "Agent not immediately visible in mutation response for issue #{}; \
+                     polling REST API to confirm",
+                    issue_number,
+                );
+                if self
+                    .poll_assignee_with_retries(issue_number, 3, std::time::Duration::from_secs(2))
+                    .await
+                {
+                    tracing::info!(
+                        "Confirmed '{}' assigned to issue #{} after polling REST API",
+                        agent_login,
+                        issue_number,
+                    );
+                    return true;
+                }
+
                 tracing::warn!(
-                    "Copilot not found in assignees for issue #{} after assignment; \
-                     the token may lack permission to assign Copilot (a PAT may be required)",
+                    "Agent not found in assignees for issue #{} after GraphQL mutation \
+                     and REST polling; the token may lack permission or a GitHub \
+                     Enterprise account may be required",
                     issue_number,
                 );
                 false
             }
             Ok(resp) => {
                 tracing::warn!(
-                    "Failed to assign Copilot to issue #{} ({}); agent may need manual trigger",
+                    "Failed to assign '{}' to issue #{} via GraphQL ({}); \
+                     agent may need manual trigger",
+                    agent_login,
                     issue_number,
                     resp.status(),
                 );
@@ -181,13 +471,76 @@ impl CloudAgentClient {
             }
             Err(e) => {
                 tracing::warn!(
-                    "HTTP error assigning Copilot to issue #{}: {}",
+                    "HTTP error assigning '{}' to issue #{} via GraphQL: {}",
+                    agent_login,
                     issue_number,
                     e,
                 );
                 false
             }
         }
+    }
+
+    /// Poll the REST API to check whether a known coding agent appears in an
+    /// issue's assignees. Retries up to `max_retries` times, sleeping
+    /// `delay` between each attempt.
+    async fn poll_assignee_with_retries(
+        &self,
+        issue_number: u64,
+        max_retries: u32,
+        delay: std::time::Duration,
+    ) -> bool {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, issue_number,
+        );
+        for attempt in 1..=max_retries {
+            tokio::time::sleep(delay).await;
+            match self
+                .http
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", self.github_token))
+                .header("User-Agent", "wreck-it")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<serde_json::Value>().await {
+                        Ok(issue) if is_copilot_in_assignees(&issue) => return true,
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::debug!(
+                                "REST poll attempt {}/{} for issue #{}: JSON parse error: {}",
+                                attempt,
+                                max_retries,
+                                issue_number,
+                                e,
+                            );
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    tracing::debug!(
+                        "REST poll attempt {}/{} for issue #{} returned {}",
+                        attempt,
+                        max_retries,
+                        issue_number,
+                        resp.status(),
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "REST poll attempt {}/{} for issue #{} failed: {}",
+                        attempt,
+                        max_retries,
+                        issue_number,
+                        e,
+                    );
+                }
+            }
+        }
+        false
     }
 
     /// Check the status of an agent session by looking for PRs that reference
@@ -218,6 +571,25 @@ impl CloudAgentClient {
             let issue: serde_json::Value = resp.json().await?;
             if issue["state"].as_str() == Some("closed") {
                 return Ok(CloudAgentStatus::CompletedNoPr);
+            }
+
+            // Verify Copilot is actually assigned to the issue.  If the token
+            // changed or lacks permissions the assignment may have been lost,
+            // leaving the issue open but with no agent working on it.
+            if !is_copilot_in_assignees(&issue) {
+                tracing::warn!(
+                    "Copilot is not assigned to issue #{}; attempting to reassign",
+                    issue_number,
+                );
+                if self.assign_copilot(issue_number, None).await {
+                    tracing::info!("Successfully reassigned Copilot to issue #{}", issue_number,);
+                } else {
+                    tracing::warn!(
+                        "Failed to reassign Copilot to issue #{}; \
+                         the agent may need to be triggered manually",
+                        issue_number,
+                    );
+                }
             }
         }
 
@@ -303,7 +675,11 @@ impl CloudAgentClient {
         let state = pr["state"].as_str().unwrap_or("unknown");
         let draft = pr["draft"].as_bool().unwrap_or(false);
         let mergeable = pr["mergeable"].as_bool().unwrap_or(false);
+        let merged = pr["merged"].as_bool().unwrap_or(false);
 
+        if merged {
+            return Ok(PrMergeStatus::AlreadyMerged);
+        }
         if state != "open" {
             return Ok(PrMergeStatus::NotMergeable);
         }
@@ -415,6 +791,133 @@ impl CloudAgentClient {
         Ok(())
     }
 
+    /// Approve any pending workflow runs for a pull request.
+    ///
+    /// When a repo requires approval for Actions (e.g. first-time contributors
+    /// or fork PRs), workflow runs sit in `action_required` status until
+    /// explicitly approved.  This method fetches the PR's head SHA, lists
+    /// workflow runs for that commit, and approves every run that is waiting.
+    pub async fn approve_pending_workflow_runs(&self, pr_number: u64) -> Result<()> {
+        // Fetch the PR to obtain the head SHA.
+        let pr_url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let pr_resp = self
+            .http
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for head SHA")?;
+
+        if !pr_resp.status().is_success() {
+            let status = pr_resp.status();
+            let body = pr_resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch PR #{} for head SHA ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let pr: serde_json::Value = pr_resp.json().await?;
+        let head_sha = pr
+            .pointer("/head/sha")
+            .and_then(|v| v.as_str())
+            .context("Missing head SHA in PR response")?;
+
+        // List workflow runs for the head SHA that need approval.
+        let runs_url = format!(
+            "{}/repos/{}/{}/actions/runs?head_sha={}&status=action_required",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, head_sha,
+        );
+
+        let runs_resp = self
+            .http
+            .get(&runs_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to list workflow runs")?;
+
+        if !runs_resp.status().is_success() {
+            tracing::warn!(
+                "Failed to list workflow runs for PR #{} ({})",
+                pr_number,
+                runs_resp.status(),
+            );
+            return Ok(());
+        }
+
+        let runs: serde_json::Value = runs_resp.json().await?;
+        let run_ids: Vec<u64> = match runs["workflow_runs"].as_array() {
+            Some(arr) => arr.iter().filter_map(|r| r["id"].as_u64()).collect(),
+            None => {
+                tracing::warn!(
+                    "Unexpected workflow runs response for PR #{}: missing workflow_runs array",
+                    pr_number,
+                );
+                return Ok(());
+            }
+        };
+
+        if run_ids.is_empty() {
+            tracing::debug!("No workflow runs awaiting approval for PR #{}", pr_number);
+            return Ok(());
+        }
+
+        for run_id in &run_ids {
+            let approve_url = format!(
+                "{}/repos/{}/{}/actions/runs/{}/approve",
+                GITHUB_API_BASE, self.repo_owner, self.repo_name, run_id,
+            );
+
+            match self
+                .http
+                .post(&approve_url)
+                .header("Authorization", format!("Bearer {}", self.github_token))
+                .header("User-Agent", "wreck-it")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!("Approved workflow run {} for PR #{}", run_id, pr_number,);
+                }
+                Ok(resp) => {
+                    tracing::warn!(
+                        "Failed to approve workflow run {} for PR #{} ({})",
+                        run_id,
+                        pr_number,
+                        resp.status(),
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "HTTP error approving workflow run {} for PR #{}: {}",
+                        run_id,
+                        pr_number,
+                        e,
+                    );
+                }
+            }
+        }
+
+        tracing::info!(
+            "Approved {} pending workflow run(s) for PR #{}",
+            run_ids.len(),
+            pr_number,
+        );
+        Ok(())
+    }
+
     /// Merge a pull request using a squash merge.
     pub async fn merge_pr(&self, pr_number: u64) -> Result<()> {
         let url = format!(
@@ -445,6 +948,57 @@ impl CloudAgentClient {
 
         tracing::info!("Merged PR #{}", pr_number);
         Ok(())
+    }
+
+    /// List all open pull requests in the repository.
+    pub async fn list_open_prs(&self) -> Result<Vec<OpenPr>> {
+        let mut prs = Vec::new();
+        let mut page = 1u32;
+
+        loop {
+            let url = format!(
+                "{}/repos/{}/{}/pulls?state=open&per_page=100&page={}",
+                GITHUB_API_BASE, self.repo_owner, self.repo_name, page,
+            );
+
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", self.github_token))
+                .header("User-Agent", "wreck-it")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+                .context("Failed to list open PRs")?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                bail!("Failed to list open PRs ({}): {}", status, body);
+            }
+
+            let items: Vec<serde_json::Value> = resp.json().await?;
+            if items.is_empty() {
+                break;
+            }
+
+            for item in &items {
+                if let Some(number) = item["number"].as_u64() {
+                    prs.push(OpenPr {
+                        number,
+                        title: item["title"].as_str().unwrap_or("").to_string(),
+                        draft: item["draft"].as_bool().unwrap_or(false),
+                    });
+                }
+            }
+
+            if items.len() < 100 {
+                break;
+            }
+            page += 1;
+        }
+
+        Ok(prs)
     }
 }
 
@@ -532,6 +1086,7 @@ mod tests {
             "owner".to_string(),
             "repo".to_string(),
         );
+        assert_eq!(client.github_token, "test-token");
         assert_eq!(client.repo_owner, "owner");
         assert_eq!(client.repo_name, "repo");
     }
@@ -571,6 +1126,139 @@ mod tests {
         assert_eq!(PrMergeStatus::Draft, PrMergeStatus::Draft);
         assert_eq!(PrMergeStatus::NotMergeable, PrMergeStatus::NotMergeable);
         assert_eq!(PrMergeStatus::Mergeable, PrMergeStatus::Mergeable);
+        assert_eq!(PrMergeStatus::AlreadyMerged, PrMergeStatus::AlreadyMerged);
         assert_ne!(PrMergeStatus::Draft, PrMergeStatus::Mergeable);
+        assert_ne!(PrMergeStatus::AlreadyMerged, PrMergeStatus::NotMergeable);
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_present() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "copilot"}]
+        });
+        assert!(is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_among_others() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "user1"}, {"login": "copilot"}, {"login": "user2"}]
+        });
+        assert!(is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_missing() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "other-user"}]
+        });
+        assert!(!is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_empty() {
+        let issue = serde_json::json!({
+            "assignees": []
+        });
+        assert!(!is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_no_field() {
+        let issue = serde_json::json!({});
+        assert!(!is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_copilot_swe_agent() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "copilot-swe-agent"}]
+        });
+        assert!(is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_claude() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "claude"}]
+        });
+        assert!(is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_codex() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "codex"}]
+        });
+        assert!(is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn known_agent_logins_contains_expected_entries() {
+        assert!(KNOWN_AGENT_LOGINS.contains(&"copilot-swe-agent"));
+        assert!(KNOWN_AGENT_LOGINS.contains(&"copilot"));
+        assert!(KNOWN_AGENT_LOGINS.contains(&"claude"));
+        assert!(KNOWN_AGENT_LOGINS.contains(&"codex"));
+    }
+
+    // ---- build_issue_body tests ----
+
+    #[test]
+    fn build_issue_body_without_memory() {
+        let body = build_issue_body("task-1", "Implement feature X", &[]);
+        assert!(body.contains("Implement feature X"));
+        assert!(body.contains("task `task-1`"));
+        assert!(!body.contains("Previous Context"));
+    }
+
+    #[test]
+    fn build_issue_body_with_memory() {
+        let memory = vec![
+            "iteration 1: triggered cloud agent for task setup (issue #10)".to_string(),
+            "iteration 2: agent created PR #5 for task setup".to_string(),
+        ];
+        let body = build_issue_body("task-2", "Add test coverage", &memory);
+        assert!(body.contains("Add test coverage"));
+        assert!(body.contains("task `task-2`"));
+        assert!(body.contains("Previous Context"));
+        assert!(body.contains("iteration 1: triggered cloud agent for task setup (issue #10)"));
+        assert!(body.contains("iteration 2: agent created PR #5 for task setup"));
+    }
+
+    #[test]
+    fn build_issue_body_memory_placed_before_footer() {
+        let memory = vec!["some context".to_string()];
+        let body = build_issue_body("t", "desc", &memory);
+        let context_pos = body.find("Previous Context").unwrap();
+        let footer_pos = body.find("Triggered by wreck-it").unwrap();
+        assert!(
+            context_pos < footer_pos,
+            "memory context should appear before the footer"
+        );
+    }
+
+    #[test]
+    fn open_pr_struct_stores_fields() {
+        let pr = OpenPr {
+            number: 42,
+            title: "Fix the thing".to_string(),
+            draft: true,
+        };
+        assert_eq!(pr.number, 42);
+        assert_eq!(pr.title, "Fix the thing");
+        assert!(pr.draft);
+    }
+
+    #[test]
+    fn open_pr_clone() {
+        let pr = OpenPr {
+            number: 1,
+            title: "PR title".to_string(),
+            draft: false,
+        };
+        let cloned = pr.clone();
+        assert_eq!(cloned.number, pr.number);
+        assert_eq!(cloned.title, pr.title);
+        assert_eq!(cloned.draft, pr.draft);
     }
 }

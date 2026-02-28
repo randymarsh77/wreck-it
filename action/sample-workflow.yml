@@ -1,10 +1,5 @@
 # Sample workflow: run wreck-it on a cron schedule.
 # Copy this file to .github/workflows/ in your project and customise as needed.
-#
-# All wreck-it artefacts (.wreck-it.toml, tasks.json, .wreck-it-state.json)
-# live on an orphan "wreck-it-state" branch so that state commits don't
-# pollute the default branch history or trigger CI pipelines.
-# Cloud agents are still dispatched against the default branch.
 name: wreck-it loop
 
 on:
@@ -15,18 +10,19 @@ on:
 
 permissions:
   contents: write      # push state commits
-  pull-requests: write # cloud agents create PRs against the default branch
-  issues: write        # wreck-it creates issues to trigger cloud agents
+  pull-requests: write # create / update PRs
 
 jobs:
   wreck-it:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: wreck-it-state  # checkout the state branch
 
       - name: Run wreck-it headless iteration
         uses: randymarsh77/wreck-it/action@main
+        with:
+          task_file: tasks.json
+          max_iterations: '100'
+          verify_command: 'cargo test'
         env:
           COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}

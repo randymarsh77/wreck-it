@@ -1,6 +1,10 @@
 # wreck-it 🔧
 
-A TUI agent harness that uses the Copilot SDK to perform Ralph Wiggum loops.
+**Ralph Wiggum. Cloud Scale.**
+
+A TUI agent harness that uses the Copilot SDK to perform Ralph Wiggum loops — autonomous AI agent orchestration for your codebase.
+
+🌐 **[wreckit.app](https://wreckit.app)** · 📖 **[Documentation](https://wreckit.app/docs/)**
 
 ## What is a Ralph Wiggum Loop?
 
@@ -19,6 +23,9 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 🧪 **Automatic Testing**: Runs tests after each task execution
 - 💾 **Git Integration**: Automatically commits successful changes
 - 🔒 **Safety Limits**: Configurable max iterations to prevent runaway costs
+- 🤖 **Headless Mode**: Run without TUI for CI/CD automation
+- ☁️ **Cloud Agents**: GitHub Models integration for cloud-scale agent execution
+- 🐕 **Dogfooding**: wreck-it develops itself via scheduled agent swarms
 
 ## Installation
 
@@ -140,6 +147,16 @@ This project includes GitHub Actions workflows for:
 - Running tests
 - Clippy linting
 - Format checking
+- **Site deployment** to [wreckit.app](https://wreckit.app) via Cloudflare Pages on push to master
+- **Dogfooding** via scheduled agent swarms (ralph.yml)
+
+## Documentation
+
+Full documentation is available at [wreckit.app/docs/](https://wreckit.app/docs/), covering:
+- [Getting Started](https://wreckit.app/docs/getting-started)
+- [Architecture](https://wreckit.app/docs/architecture)
+- [Roadmap](https://wreckit.app/docs/roadmap)
+- [Research Notes](https://wreckit.app/docs/research-notes)
 
 ## License
 

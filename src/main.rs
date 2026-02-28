@@ -1,10 +1,13 @@
 mod agent;
+mod agent_memory;
 mod cli;
 mod cloud_agent;
 mod config_manager;
 mod headless;
 mod headless_config;
 mod headless_state;
+#[cfg(test)]
+mod integration_eval;
 mod ralph_loop;
 mod task_manager;
 mod tui;
@@ -109,22 +112,37 @@ async fn main() -> Result<()> {
                     id: "1".to_string(),
                     description: "First task - implement feature X".to_string(),
                     status: TaskStatus::Pending,
+                    role: types::AgentRole::default(),
                     phase: 1,
                     depends_on: vec![],
+                    priority: 0,
+                    complexity: 1,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
                 },
                 Task {
                     id: "2".to_string(),
                     description: "Second task - add tests for feature X".to_string(),
                     status: TaskStatus::Pending,
+                    role: types::AgentRole::default(),
                     phase: 1,
                     depends_on: vec![],
+                    priority: 0,
+                    complexity: 1,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
                 },
                 Task {
                     id: "3".to_string(),
                     description: "Third task - update documentation".to_string(),
                     status: TaskStatus::Pending,
+                    role: types::AgentRole::default(),
                     phase: 2,
                     depends_on: vec!["1".to_string(), "2".to_string()],
+                    priority: 0,
+                    complexity: 1,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
                 },
             ];
 
