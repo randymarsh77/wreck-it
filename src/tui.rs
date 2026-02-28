@@ -145,8 +145,8 @@ impl TuiApp {
             Span::styled("STOPPED", Style::default().fg(Color::Red))
         };
 
-        let header =
-            Paragraph::new(title).block(Block::default().borders(Borders::ALL).title(vec![status]));
+        let header = Paragraph::new(title)
+            .block(Block::default().borders(Borders::ALL).title(vec![status]));
         f.render_widget(header, area);
     }
 

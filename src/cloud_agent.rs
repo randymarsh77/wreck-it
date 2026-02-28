@@ -42,7 +42,11 @@ pub struct TriggerResult {
 /// the coding agent has visibility into earlier iterations.  Each memory
 /// entry is formatted as a bullet point and should be a complete, self-
 /// contained description (e.g. "iteration 3: merged PR #7 for task setup").
-pub(crate) fn build_issue_body(task_id: &str, task_description: &str, memory: &[String]) -> String {
+pub(crate) fn build_issue_body(
+    task_id: &str,
+    task_description: &str,
+    memory: &[String],
+) -> String {
     let memory_section = if memory.is_empty() {
         String::new()
     } else {
