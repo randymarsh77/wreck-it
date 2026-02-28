@@ -471,9 +471,17 @@ impl CloudAgentClient {
                 .await
             {
                 Ok(resp) if resp.status().is_success() => {
-                    if let Ok(issue) = resp.json::<serde_json::Value>().await {
-                        if is_copilot_in_assignees(&issue) {
-                            return true;
+                    match resp.json::<serde_json::Value>().await {
+                        Ok(issue) if is_copilot_in_assignees(&issue) => return true,
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::debug!(
+                                "REST poll attempt {}/{} for issue #{}: JSON parse error: {}",
+                                attempt,
+                                max_retries,
+                                issue_number,
+                                e,
+                            );
                         }
                     }
                 }
