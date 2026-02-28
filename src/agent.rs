@@ -758,6 +758,7 @@ mod tests {
             status: crate::types::TaskStatus::Pending,
             phase: 1,
             depends_on: vec![],
+            ..Task::default()
         };
 
         let result = client.execute_task(&task).await;

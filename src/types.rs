@@ -134,6 +134,38 @@ pub struct Task {
     /// IDs of tasks that must complete before this task can start.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
+
+    /// Task urgency (0–10, higher = more urgent). Defaults to 5.
+    #[serde(default = "default_priority", skip_serializing_if = "is_default_priority")]
+    pub priority: u32,
+
+    /// Estimated task complexity (0–10, higher = more complex). Defaults to 5.
+    #[serde(default = "default_complexity", skip_serializing_if = "is_default_complexity")]
+    pub complexity: u32,
+
+    /// Number of failed execution attempts; updated at runtime and persisted.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub failed_attempts: u32,
+
+    /// Unix timestamp (seconds) of the most recent execution attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_attempted_at: Option<u64>,
+}
+
+impl Default for Task {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            description: String::new(),
+            status: TaskStatus::Pending,
+            phase: default_phase(),
+            depends_on: Vec::new(),
+            priority: default_priority(),
+            complexity: default_complexity(),
+            failed_attempts: 0,
+            last_attempted_at: None,
+        }
+    }
 }
 
 fn default_phase() -> u32 {
@@ -142,6 +174,26 @@ fn default_phase() -> u32 {
 
 fn is_default_phase(v: &u32) -> bool {
     *v == 1
+}
+
+fn default_priority() -> u32 {
+    5
+}
+
+fn is_default_priority(v: &u32) -> bool {
+    *v == 5
+}
+
+fn default_complexity() -> u32 {
+    5
+}
+
+fn is_default_complexity(v: &u32) -> bool {
+    *v == 5
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,6 +294,7 @@ mod tests {
             status,
             phase,
             depends_on: depends_on.into_iter().map(String::from).collect(),
+            ..Task::default()
         }
     }
 

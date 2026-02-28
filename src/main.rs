@@ -111,6 +111,7 @@ async fn main() -> Result<()> {
                     status: TaskStatus::Pending,
                     phase: 1,
                     depends_on: vec![],
+                    ..Task::default()
                 },
                 Task {
                     id: "2".to_string(),
@@ -118,6 +119,7 @@ async fn main() -> Result<()> {
                     status: TaskStatus::Pending,
                     phase: 1,
                     depends_on: vec![],
+                    ..Task::default()
                 },
                 Task {
                     id: "3".to_string(),
@@ -125,6 +127,7 @@ async fn main() -> Result<()> {
                     status: TaskStatus::Pending,
                     phase: 2,
                     depends_on: vec!["1".to_string(), "2".to_string()],
+                    ..Task::default()
                 },
             ];
 

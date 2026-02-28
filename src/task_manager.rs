@@ -46,6 +46,7 @@ mod tests {
             status: TaskStatus::Pending,
             phase: 1,
             depends_on: vec![],
+            ..Task::default()
         }];
 
         save_tasks(&task_file, &tasks).unwrap();
@@ -64,6 +65,7 @@ mod tests {
                 status: TaskStatus::Completed,
                 phase: 1,
                 depends_on: vec![],
+                ..Task::default()
             },
             Task {
                 id: "2".to_string(),
@@ -71,6 +73,7 @@ mod tests {
                 status: TaskStatus::Pending,
                 phase: 1,
                 depends_on: vec![],
+                ..Task::default()
             },
         ];
 
