@@ -47,6 +47,29 @@ pub struct TriggerResult {
     pub issue_url: String,
 }
 
+/// Build the GitHub issue body for a cloud agent trigger.
+///
+/// Appends a "Previous Context" section when `memory` is non-empty so that
+/// the coding agent has visibility into earlier iterations.  Each memory
+/// entry is formatted as a bullet point and should be a complete, self-
+/// contained description (e.g. "iteration 3: merged PR #7 for task setup").
+pub(crate) fn build_issue_body(task_id: &str, task_description: &str, memory: &[String]) -> String {
+    let memory_section = if memory.is_empty() {
+        String::new()
+    } else {
+        let bullets = memory
+            .iter()
+            .map(|m| format!("- {}", m))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("\n\n## Previous Context\n\n{}", bullets)
+    };
+    format!(
+        "{}{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
+        task_description, memory_section, task_id,
+    )
+}
+
 /// Client for interacting with cloud coding agents via the GitHub API.
 ///
 /// Instead of running AI chat completions locally and trying to interpret text
@@ -90,15 +113,16 @@ impl CloudAgentClient {
     /// Creates a GitHub issue with the task description and assigns Copilot to
     /// it, which triggers the Copilot coding agent to work on the task
     /// autonomously and create a pull request.
+    ///
+    /// `memory_context` is a slice of freeform notes from previous iterations
+    /// that is appended to the issue body so the agent has historical context.
     pub async fn trigger_agent(
         &self,
         task_id: &str,
         task_description: &str,
+        memory_context: &[String],
     ) -> Result<TriggerResult> {
-        let issue_body = format!(
-            "{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
-            task_description, task_id,
-        );
+        let issue_body = build_issue_body(task_id, task_description, memory_context);
 
         let create_body = serde_json::json!({
             "title": format!("[wreck-it] {}", task_id),
@@ -1175,6 +1199,42 @@ mod tests {
         assert!(KNOWN_AGENT_LOGINS.contains(&"copilot"));
         assert!(KNOWN_AGENT_LOGINS.contains(&"claude"));
         assert!(KNOWN_AGENT_LOGINS.contains(&"codex"));
+    }
+
+    // ---- build_issue_body tests ----
+
+    #[test]
+    fn build_issue_body_without_memory() {
+        let body = build_issue_body("task-1", "Implement feature X", &[]);
+        assert!(body.contains("Implement feature X"));
+        assert!(body.contains("task `task-1`"));
+        assert!(!body.contains("Previous Context"));
+    }
+
+    #[test]
+    fn build_issue_body_with_memory() {
+        let memory = vec![
+            "iteration 1: triggered cloud agent for task setup (issue #10)".to_string(),
+            "iteration 2: agent created PR #5 for task setup".to_string(),
+        ];
+        let body = build_issue_body("task-2", "Add test coverage", &memory);
+        assert!(body.contains("Add test coverage"));
+        assert!(body.contains("task `task-2`"));
+        assert!(body.contains("Previous Context"));
+        assert!(body.contains("iteration 1: triggered cloud agent for task setup (issue #10)"));
+        assert!(body.contains("iteration 2: agent created PR #5 for task setup"));
+    }
+
+    #[test]
+    fn build_issue_body_memory_placed_before_footer() {
+        let memory = vec!["some context".to_string()];
+        let body = build_issue_body("t", "desc", &memory);
+        let context_pos = body.find("Previous Context").unwrap();
+        let footer_pos = body.find("Triggered by wreck-it").unwrap();
+        assert!(
+            context_pos < footer_pos,
+            "memory context should appear before the footer"
+        );
     }
 
     #[test]

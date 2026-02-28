@@ -219,7 +219,6 @@ async fn sweep_open_prs(
 
         // If the PR is no longer in the open list, check if it was merged.
         if !open_pr_numbers.contains(&pr_number) {
-            // PR is no longer open — check if it was merged.
             match client.check_pr_merge_status(pr_number).await {
                 Ok(PrMergeStatus::AlreadyMerged) => {
                     println!(
@@ -360,23 +359,6 @@ fn mark_task_complete_by_id(task_id: &str, task_file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Mark the current task as completed and advance the headless state.
-#[cfg(test)]
-fn mark_current_task_complete(state: &mut HeadlessState, task_file: &Path) -> Result<()> {
-    state.phase = AgentPhase::Completed;
-    state.memory.push(format!(
-        "sweep: current task {:?} completed via PR #{}",
-        state.current_task_id,
-        state.pr_number.unwrap_or(0),
-    ));
-
-    if let Some(task_id) = &state.current_task_id {
-        mark_task_complete_by_id(task_id, task_file)?;
-    }
-
-    Ok(())
-}
-
 /// Phase: NeedsTrigger – pick the next task and trigger a cloud coding agent.
 ///
 /// Instead of running a local AI chat loop, this creates a GitHub issue with
@@ -449,7 +431,7 @@ async fn run_needs_trigger(
     );
 
     let result = client
-        .trigger_agent(&pending_task.id, &pending_task.description)
+        .trigger_agent(&pending_task.id, &pending_task.description, &state.memory)
         .await?;
 
     state.issue_number = Some(result.issue_number);
@@ -756,73 +738,6 @@ mod tests {
         // Ensure the constant exists and is reasonable.
         assert!(MAX_SYNC_STEPS > 0);
         assert!(MAX_SYNC_STEPS <= 100);
-    }
-
-    #[test]
-    fn mark_current_task_complete_advances_state() {
-        let dir = tempfile::tempdir().unwrap();
-        let task_file = dir.path().join("tasks.json");
-
-        // Write a sample task file with one in-progress task.
-        let tasks = vec![crate::types::Task {
-            id: "t1".to_string(),
-            description: "task one".to_string(),
-            status: crate::types::TaskStatus::InProgress,
-            role: crate::types::AgentRole::default(),
-            phase: 1,
-            depends_on: vec![],
-            priority: 0,
-            complexity: 1,
-            failed_attempts: 0,
-            last_attempt_at: None,
-        }];
-        save_tasks(&task_file, &tasks).unwrap();
-
-        let mut state = HeadlessState {
-            phase: AgentPhase::AgentWorking,
-            iteration: 3,
-            current_task_id: Some("t1".to_string()),
-            issue_number: Some(1),
-            pr_number: Some(10),
-            pr_url: None,
-            last_prompt: None,
-            memory: vec![],
-            tracked_prs: vec![],
-        };
-
-        mark_current_task_complete(&mut state, &task_file).unwrap();
-
-        assert_eq!(state.phase, AgentPhase::Completed);
-        assert!(!state.memory.is_empty());
-
-        // Verify the task was marked completed on disk.
-        let reloaded = load_tasks(&task_file).unwrap();
-        assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
-    }
-
-    #[test]
-    fn mark_current_task_complete_tolerates_missing_task_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let task_file = dir.path().join("tasks.json");
-
-        let tasks: Vec<crate::types::Task> = vec![];
-        save_tasks(&task_file, &tasks).unwrap();
-
-        let mut state = HeadlessState {
-            phase: AgentPhase::AgentWorking,
-            iteration: 1,
-            current_task_id: None, // no current task
-            issue_number: None,
-            pr_number: None,
-            pr_url: None,
-            last_prompt: None,
-            memory: vec![],
-            tracked_prs: vec![],
-        };
-
-        // Should not error even with no current task.
-        mark_current_task_complete(&mut state, &task_file).unwrap();
-        assert_eq!(state.phase, AgentPhase::Completed);
     }
 
     #[test]
