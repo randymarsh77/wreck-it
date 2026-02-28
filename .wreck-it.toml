@@ -1,10 +1,6 @@
 # wreck-it headless configuration for dogfooding
 # This file configures wreck-it to run its own development tasks
 # using an agent swarm of ideas/implementer/evaluator agents.
-#
-# This file lives on the wreck-it-state orphan branch together with the
-# task file and persistent state.  Cloud agents are dispatched against the
-# default branch.
 
 task_file = "dogfood-tasks.json"
 max_iterations = 50

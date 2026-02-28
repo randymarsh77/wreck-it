@@ -11,11 +11,9 @@ wreck-it run --headless \
   ${INPUT_MAX_ITERATIONS:+--max-iterations "$INPUT_MAX_ITERATIONS"} \
   ${INPUT_VERIFY_COMMAND:+--verify-command "$INPUT_VERIFY_COMMAND"}
 
-# Commit all changes (state, tasks, config) back to the current branch.
-# The workflow is expected to check out the state branch before running
-# this action, so all wreck-it artefacts live there.
+# Commit state changes back to the repo so the next cron run can pick up.
 if git diff --quiet && git diff --cached --quiet; then
-  echo "[wreck-it] no changes to commit"
+  echo "[wreck-it] no state changes to commit"
 else
   git config user.name "wreck-it[bot]"
   git config user.email "wreck-it[bot]@users.noreply.github.com"
