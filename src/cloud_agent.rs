@@ -59,11 +59,7 @@ fn is_copilot_in_assignees(issue: &serde_json::Value) -> bool {
 }
 
 impl CloudAgentClient {
-    pub fn new(
-        github_token: String,
-        repo_owner: String,
-        repo_name: String,
-    ) -> Self {
+    pub fn new(github_token: String, repo_owner: String, repo_name: String) -> Self {
         Self {
             github_token,
             repo_owner,
@@ -226,30 +222,21 @@ impl CloudAgentClient {
     /// Attempt to assign Copilot using the GraphQL `replaceActorsForAssignable`
     /// mutation. Falls back to fetching the issue node ID if it was not provided.
     /// Returns `true` when the mutation succeeds.
-    async fn try_assign_copilot(
-        &self,
-        issue_number: u64,
-        issue_node_id: Option<&str>,
-    ) -> bool {
+    async fn try_assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
         // Resolve the issue's GraphQL node ID.
         let owned_node_id;
         let assignable_id = match issue_node_id {
             Some(id) => id,
-            None => {
-                match self.get_issue_node_id(issue_number).await {
-                    Some(id) => {
-                        owned_node_id = id;
-                        owned_node_id.as_str()
-                    }
-                    None => {
-                        tracing::warn!(
-                            "Could not resolve node_id for issue #{}",
-                            issue_number,
-                        );
-                        return false;
-                    }
+            None => match self.get_issue_node_id(issue_number).await {
+                Some(id) => {
+                    owned_node_id = id;
+                    owned_node_id.as_str()
                 }
-            }
+                None => {
+                    tracing::warn!("Could not resolve node_id for issue #{}", issue_number,);
+                    return false;
+                }
+            },
         };
 
         // Look up the Copilot bot's GraphQL node ID.
@@ -313,9 +300,7 @@ impl CloudAgentClient {
                     // Verify Copilot appears in the assignees from the mutation
                     // response.
                     let has_copilot = gql_resp
-                        .pointer(
-                            "/data/replaceActorsForAssignable/assignable/assignees/nodes",
-                        )
+                        .pointer("/data/replaceActorsForAssignable/assignable/assignees/nodes")
                         .and_then(|v| v.as_array())
                         .map(|arr| {
                             arr.iter()
