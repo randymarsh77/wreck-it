@@ -39,7 +39,7 @@
   {
     "id": "impl-3",
     "description": "Implement an agent context/memory system that persists across iterations. Create a new src/agent_memory.rs module that maintains a per-task context file (.wreck-it-memory/{task_id}.md) containing: previous attempts and their outcomes, key decisions made, relevant code locations discovered, and learnings from failed attempts. Integrate this with the AgentClient so context is included in agent prompts. This enables agents to learn from previous iterations rather than starting fresh each time. Add unit tests.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-3"
@@ -48,7 +48,7 @@
   {
     "id": "impl-4",
     "description": "Implement intelligent task routing and scheduling in ralph_loop.rs. Instead of simple phase-based ordering, add a scoring system that considers: task priority, estimated complexity, dependency satisfaction, number of previous failed attempts, and time since last attempt. Add a TaskScheduler struct that encapsulates this logic and returns an ordered list of ready tasks. This replaces the simple ready_task_indices method with a smarter selection strategy. Add unit tests.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 2,
     "depends_on": [
       "impl-1"

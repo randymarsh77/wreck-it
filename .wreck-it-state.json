@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 6,
-  "current_task_id": "impl-3",
-  "issue_number": 39,
-  "pr_number": 41,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/41",
-  "last_prompt": "Implement an agent context/memory system that persists across iterations. Create a new src/agent_memory.rs module that maintains a per-task context file (.wreck-it-memory/{task_id}.md) containing: previous attempts and their outcomes, key decisions made, relevant code locations discovered, and learnings from failed attempts. Integrate this with the AgentClient so context is included in agent prompts. This enables agents to learn from previous iterations rather than starting fresh each time. Add unit tests.",
+  "phase": "agent_working",
+  "iteration": 7,
+  "current_task_id": "impl-4",
+  "issue_number": 44,
+  "last_prompt": "Implement intelligent task routing and scheduling in ralph_loop.rs. Instead of simple phase-based ordering, add a scoring system that considers: task priority, estimated complexity, dependency satisfaction, number of previous failed attempts, and time since last attempt. Add a TaskScheduler struct that encapsulates this logic and returns an ordered list of ready tasks. This replaces the simple ready_task_indices method with a smarter selection strategy. Add unit tests.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
     "iteration 1: agent created PR #16 for task Some(\"ideas-1\")",
@@ -38,6 +36,8 @@
     "iteration 6: PR #41 not yet mergeable",
     "iteration 6: PR #41 not yet mergeable",
     "iteration 6: PR #41 not yet mergeable",
-    "iteration 6: PR #41 not yet mergeable"
+    "iteration 6: PR #41 not yet mergeable",
+    "iteration 6: PR #41 already merged for task Some(\"impl-3\")",
+    "iteration 7: triggered cloud agent for task impl-4 (issue #44)"
   ]
 }
