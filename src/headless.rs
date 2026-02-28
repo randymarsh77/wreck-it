@@ -17,6 +17,13 @@ const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
 /// repeatedly transitions through synchronous phases.
 const MAX_SYNC_STEPS: usize = 20;
 
+/// Sentinel value returned by [`infer_task_id_from_title`] when no task ID
+/// can be determined from the PR title.
+const UNKNOWN_TASK_ID: &str = "unknown";
+
+/// Known task-ID prefixes used by the wreck-it agent swarm.
+const TASK_ID_PREFIXES: &[&str] = &["ideas-", "impl-", "eval-"];
+
 /// Outcome of a single headless phase step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StepOutcome {
@@ -324,7 +331,7 @@ async fn sweep_open_prs(
 /// Agent-created PRs often reference the triggering issue whose title is
 /// `[wreck-it] <task_id>`.  PR titles may contain the issue number (e.g.
 /// "Fixes #42") or quote the task ID directly.  This is a best-effort
-/// extraction; returns `"unknown"` when no ID can be inferred.
+/// extraction; returns [`UNKNOWN_TASK_ID`] when no ID can be inferred.
 fn infer_task_id_from_title(title: &str) -> String {
     // Look for "[wreck-it] <task_id>" pattern.
     if let Some(rest) = title.strip_prefix("[wreck-it] ") {
@@ -332,16 +339,15 @@ fn infer_task_id_from_title(title: &str) -> String {
     }
     // Check if the title itself is a known wreck-it task ID pattern.
     let trimmed = title.trim();
-    if trimmed.starts_with("ideas-") || trimmed.starts_with("impl-") || trimmed.starts_with("eval-")
-    {
+    if TASK_ID_PREFIXES.iter().any(|p| trimmed.starts_with(p)) {
         return trimmed.to_string();
     }
-    "unknown".to_string()
+    UNKNOWN_TASK_ID.to_string()
 }
 
 /// Mark a task as completed by its ID in the task file.
 fn mark_task_complete_by_id(task_id: &str, task_file: &Path) -> Result<()> {
-    if task_id == "unknown" {
+    if task_id == UNKNOWN_TASK_ID {
         return Ok(());
     }
     let mut tasks = load_tasks(task_file)?;
@@ -834,7 +840,10 @@ mod tests {
 
     #[test]
     fn infer_task_id_unknown_for_unrecognized_title() {
-        assert_eq!(infer_task_id_from_title("Fix some random bug"), "unknown");
+        assert_eq!(
+            infer_task_id_from_title("Fix some random bug"),
+            UNKNOWN_TASK_ID
+        );
     }
 
     #[test]
@@ -881,8 +890,8 @@ mod tests {
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
-        // "unknown" task IDs are skipped.
-        mark_task_complete_by_id("unknown", &task_file).unwrap();
+        // UNKNOWN_TASK_ID task IDs are skipped.
+        mark_task_complete_by_id(UNKNOWN_TASK_ID, &task_file).unwrap();
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Pending);

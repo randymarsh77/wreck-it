@@ -31,10 +31,12 @@ pub enum PrMergeStatus {
 
 /// Summary of an open pull request, returned by [`CloudAgentClient::list_open_prs`].
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct OpenPr {
     pub number: u64,
     pub title: String,
+    /// Whether the PR is currently a draft.  Stored for informational purposes;
+    /// the sweep logic re-checks draft status via [`CloudAgentClient::check_pr_merge_status`].
+    #[allow(dead_code)]
     pub draft: bool,
 }
 
