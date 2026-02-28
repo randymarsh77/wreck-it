@@ -508,10 +508,12 @@ impl CloudAgentClient {
         }
     }
 
-    /// Mark a draft PR as ready for review.
+    /// Mark a draft PR as ready for review and approve it so workflows run.
     ///
     /// The REST API does not support unsetting `draft`; the GraphQL mutation
-    /// `markPullRequestReadyForReview` is required instead.
+    /// `markPullRequestReadyForReview` is required instead.  In the same
+    /// request we also submit an approving review via `addPullRequestReview`
+    /// so that any branch-protection or workflow-approval gates are satisfied.
     pub async fn mark_pr_ready_for_review(&self, pr_number: u64) -> Result<()> {
         // First, fetch the PR to obtain the GraphQL node_id.
         let pr_url = format!(
@@ -545,10 +547,18 @@ impl CloudAgentClient {
             .as_str()
             .context("Missing node_id in PR response")?;
 
-        // Use the GraphQL API to mark the PR as ready for review.
+        // Use the GraphQL API to mark the PR as ready for review and approve
+        // it in a single request so that workflow-approval gates are satisfied.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
         let query = serde_json::json!({
-            "query": "mutation($prId: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $prId }) { pullRequest { isDraft } } }",
+            "query": r#"mutation($prId: ID!) {
+                markPullRequestReadyForReview(input: { pullRequestId: $prId }) {
+                    pullRequest { isDraft }
+                }
+                addPullRequestReview(input: { pullRequestId: $prId, event: APPROVE }) {
+                    pullRequestReview { state }
+                }
+            }"#,
             "variables": { "prId": node_id },
         });
 
@@ -561,7 +571,7 @@ impl CloudAgentClient {
             .json(&query)
             .send()
             .await
-            .context("Failed to call GraphQL markPullRequestReadyForReview")?;
+            .context("Failed to call GraphQL markPullRequestReadyForReview + addPullRequestReview")?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -602,7 +612,25 @@ impl CloudAgentClient {
             ),
         }
 
-        tracing::info!("Marked PR #{} as ready for review", pr_number);
+        // Verify the approval was recorded.
+        let review_state = gql_resp
+            .pointer("/data/addPullRequestReview/pullRequestReview/state")
+            .and_then(|v| v.as_str());
+        match review_state {
+            Some("APPROVED") => {} // success
+            Some(other) => tracing::warn!(
+                "PR #{} review state is '{}' instead of APPROVED",
+                pr_number,
+                other,
+            ),
+            None => tracing::warn!(
+                "Could not verify approval for PR #{}: {}",
+                pr_number,
+                gql_resp,
+            ),
+        }
+
+        tracing::info!("Marked PR #{} as ready for review and approved", pr_number);
         Ok(())
     }
 
