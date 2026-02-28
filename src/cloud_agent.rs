@@ -395,10 +395,31 @@ impl CloudAgentClient {
                         return true;
                     }
                 }
+
+                // The mutation response didn't include the agent in
+                // assignees, but there can be a propagation delay. Poll
+                // the REST API a few times before giving up.
+                tracing::debug!(
+                    "Agent not immediately visible in mutation response for issue #{}; \
+                     polling REST API to confirm",
+                    issue_number,
+                );
+                if self
+                    .poll_assignee_with_retries(issue_number, 3, std::time::Duration::from_secs(2))
+                    .await
+                {
+                    tracing::info!(
+                        "Confirmed '{}' assigned to issue #{} after polling REST API",
+                        agent_login,
+                        issue_number,
+                    );
+                    return true;
+                }
+
                 tracing::warn!(
-                    "Agent not found in assignees for issue #{} after GraphQL mutation; \
-                     the token may lack permission or a GitHub Enterprise account may be \
-                     required",
+                    "Agent not found in assignees for issue #{} after GraphQL mutation \
+                     and REST polling; the token may lack permission or a GitHub \
+                     Enterprise account may be required",
                     issue_number,
                 );
                 false
@@ -423,6 +444,60 @@ impl CloudAgentClient {
                 false
             }
         }
+    }
+
+    /// Poll the REST API to check whether a known coding agent appears in an
+    /// issue's assignees. Retries up to `max_retries` times, sleeping
+    /// `delay` between each attempt.
+    async fn poll_assignee_with_retries(
+        &self,
+        issue_number: u64,
+        max_retries: u32,
+        delay: std::time::Duration,
+    ) -> bool {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, issue_number,
+        );
+        for attempt in 1..=max_retries {
+            tokio::time::sleep(delay).await;
+            match self
+                .http
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", self.github_token))
+                .header("User-Agent", "wreck-it")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    if let Ok(issue) = resp.json::<serde_json::Value>().await {
+                        if is_copilot_in_assignees(&issue) {
+                            return true;
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    tracing::debug!(
+                        "REST poll attempt {}/{} for issue #{} returned {}",
+                        attempt,
+                        max_retries,
+                        issue_number,
+                        resp.status(),
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "REST poll attempt {}/{} for issue #{} failed: {}",
+                        attempt,
+                        max_retries,
+                        issue_number,
+                        e,
+                    );
+                }
+            }
+        }
+        false
     }
 
     /// Check the status of an agent session by looking for PRs that reference
