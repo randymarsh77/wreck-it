@@ -137,6 +137,30 @@ impl RalphLoop {
             return Ok(false);
         }
 
+        // Re-read the task file so that tasks dynamically appended by agents
+        // during a previous iteration are incorporated into the queue.
+        // We merge by updating in-memory entries with the on-disk version for
+        // any ID that exists in both (preserving live InProgress status), and
+        // appending any IDs that only exist on disk.
+        if let Ok(disk_tasks) = load_tasks(&self.config.task_file) {
+            for disk_task in disk_tasks {
+                match self.state.tasks.iter().position(|t| t.id == disk_task.id) {
+                    Some(idx) => {
+                        // Keep the in-memory status (may be InProgress); refresh
+                        // everything else (description, role, deps, etc.).
+                        let current_status = self.state.tasks[idx].status;
+                        self.state.tasks[idx] = disk_task;
+                        self.state.tasks[idx].status = current_status;
+                    }
+                    None => {
+                        self.state
+                            .add_log(format!("Discovered new task: {}", disk_task.id));
+                        self.state.tasks.push(disk_task);
+                    }
+                }
+            }
+        }
+
         // Check if all tasks are complete
         if self.state.all_tasks_complete() {
             self.state.add_log("All tasks completed!".to_string());
@@ -410,6 +434,7 @@ mod tests {
             id: id.to_string(),
             description: format!("task {}", id),
             status,
+            role: crate::types::AgentRole::default(),
             phase: 1,
             depends_on: depends_on.into_iter().map(String::from).collect(),
             priority,
@@ -513,6 +538,7 @@ mod tests {
                 id: "recent".to_string(),
                 description: "recent".to_string(),
                 status: TaskStatus::Pending,
+                role: crate::types::AgentRole::default(),
                 phase: 1,
                 depends_on: vec![],
                 priority: 0,
@@ -524,6 +550,7 @@ mod tests {
                 id: "old".to_string(),
                 description: "old".to_string(),
                 status: TaskStatus::Pending,
+                role: crate::types::AgentRole::default(),
                 phase: 1,
                 depends_on: vec![],
                 priority: 0,
@@ -553,6 +580,7 @@ mod tests {
                 id: "old".to_string(),
                 description: "old".to_string(),
                 status: TaskStatus::Pending,
+                role: crate::types::AgentRole::default(),
                 phase: 1,
                 depends_on: vec![],
                 priority: 0,
