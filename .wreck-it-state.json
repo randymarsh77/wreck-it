@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 7,
   "current_task_id": "impl-4",
   "issue_number": 44,
+  "pr_number": 45,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/45",
   "last_prompt": "Implement intelligent task routing and scheduling in ralph_loop.rs. Instead of simple phase-based ordering, add a scoring system that considers: task priority, estimated complexity, dependency satisfaction, number of previous failed attempts, and time since last attempt. Add a TaskScheduler struct that encapsulates this logic and returns an ordered list of ready tasks. This replaces the simple ready_task_indices method with a smarter selection strategy. Add unit tests.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
@@ -38,6 +40,8 @@
     "iteration 6: PR #41 not yet mergeable",
     "iteration 6: PR #41 not yet mergeable",
     "iteration 6: PR #41 already merged for task Some(\"impl-3\")",
-    "iteration 7: triggered cloud agent for task impl-4 (issue #44)"
+    "iteration 7: triggered cloud agent for task impl-4 (issue #44)",
+    "iteration 7: agent created PR #45 for task Some(\"impl-4\")",
+    "iteration 7: marked PR #45 as ready for review"
   ]
 }
