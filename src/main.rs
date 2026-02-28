@@ -111,6 +111,10 @@ async fn main() -> Result<()> {
                     status: TaskStatus::Pending,
                     phase: 1,
                     depends_on: vec![],
+                    priority: 0,
+                    complexity: 1,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
                 },
                 Task {
                     id: "2".to_string(),
@@ -118,6 +122,10 @@ async fn main() -> Result<()> {
                     status: TaskStatus::Pending,
                     phase: 1,
                     depends_on: vec![],
+                    priority: 0,
+                    complexity: 1,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
                 },
                 Task {
                     id: "3".to_string(),
@@ -125,6 +133,10 @@ async fn main() -> Result<()> {
                     status: TaskStatus::Pending,
                     phase: 2,
                     depends_on: vec!["1".to_string(), "2".to_string()],
+                    priority: 0,
+                    complexity: 1,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
                 },
             ];
 

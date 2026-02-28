@@ -46,6 +46,10 @@ mod tests {
             status: TaskStatus::Pending,
             phase: 1,
             depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
         }];
 
         save_tasks(&task_file, &tasks).unwrap();
@@ -64,6 +68,10 @@ mod tests {
                 status: TaskStatus::Completed,
                 phase: 1,
                 depends_on: vec![],
+                priority: 0,
+                complexity: 1,
+                failed_attempts: 0,
+                last_attempt_at: None,
             },
             Task {
                 id: "2".to_string(),
@@ -71,6 +79,10 @@ mod tests {
                 status: TaskStatus::Pending,
                 phase: 1,
                 depends_on: vec![],
+                priority: 0,
+                complexity: 1,
+                failed_attempts: 0,
+                last_attempt_at: None,
             },
         ];
 

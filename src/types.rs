@@ -134,6 +134,22 @@ pub struct Task {
     /// IDs of tasks that must complete before this task can start.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<String>,
+
+    /// Scheduling priority (higher = run sooner).  Defaults to 0.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub priority: u32,
+
+    /// Estimated complexity on a 1–10 scale (lower = quicker win).  Defaults to 1.
+    #[serde(default = "default_complexity", skip_serializing_if = "is_default_complexity")]
+    pub complexity: u32,
+
+    /// Number of previous failed execution attempts.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub failed_attempts: u32,
+
+    /// Unix timestamp (seconds) of the most recent execution attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_attempt_at: Option<u64>,
 }
 
 fn default_phase() -> u32 {
@@ -142,6 +158,18 @@ fn default_phase() -> u32 {
 
 fn is_default_phase(v: &u32) -> bool {
     *v == 1
+}
+
+fn default_complexity() -> u32 {
+    1
+}
+
+fn is_default_complexity(v: &u32) -> bool {
+    *v == 1
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,6 +222,10 @@ impl LoopState {
     /// Return indices of all tasks in the lowest pending phase whose
     /// dependencies have been satisfied.  These tasks can be executed in
     /// parallel.
+    ///
+    /// This method is preserved for backward compatibility and use in tests.
+    /// The main loop uses [`TaskScheduler::schedule`] for smarter ordering.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn ready_task_indices(&self) -> Vec<usize> {
         // Build a set of completed task IDs.
         let completed_ids: std::collections::HashSet<&str> = self
@@ -242,6 +274,10 @@ mod tests {
             status,
             phase,
             depends_on: depends_on.into_iter().map(String::from).collect(),
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
         }
     }
 
