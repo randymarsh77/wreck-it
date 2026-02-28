@@ -1,5 +1,5 @@
 use crate::agent::AgentClient;
-use crate::task_manager::{get_next_task, load_tasks, save_tasks};
+use crate::task_manager::{get_next_task, has_circular_dependencies, load_tasks, save_tasks};
 use crate::types::{Config, EvaluationMode, LoopState, Task, TaskStatus};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
@@ -120,9 +120,41 @@ impl RalphLoop {
         // Load tasks from file
         let tasks = load_tasks(&self.config.task_file).context("Failed to load tasks")?;
 
+        if has_circular_dependencies(&tasks) {
+            anyhow::bail!(
+                "Task file contains circular dependencies: {}",
+                self.config.task_file.display()
+            );
+        }
+
         self.state.tasks = tasks;
         self.state
             .add_log(format!("Loaded {} tasks", self.state.tasks.len()));
+
+        Ok(())
+    }
+
+    /// Reload the task file and incorporate any tasks that were dynamically
+    /// added since the last iteration.  Existing in-memory tasks are preserved
+    /// (their live status/state takes priority over the on-disk copy).
+    fn reload_dynamic_tasks(&mut self) -> Result<()> {
+        let on_disk = load_tasks(&self.config.task_file).context("Failed to reload task file")?;
+
+        let known_ids: std::collections::HashSet<&str> =
+            self.state.tasks.iter().map(|t| t.id.as_str()).collect();
+
+        let new_tasks: Vec<_> = on_disk
+            .into_iter()
+            .filter(|t| !known_ids.contains(t.id.as_str()))
+            .collect();
+
+        if !new_tasks.is_empty() {
+            self.state.add_log(format!(
+                "Detected {} dynamically added task(s)",
+                new_tasks.len()
+            ));
+            self.state.tasks.extend(new_tasks);
+        }
 
         Ok(())
     }
@@ -136,6 +168,10 @@ impl RalphLoop {
             self.state.add_log("Max iterations reached".to_string());
             return Ok(false);
         }
+
+        // Pick up any tasks that were dynamically added to the file since
+        // the last iteration (e.g. by an agent calling append_tasks).
+        self.reload_dynamic_tasks()?;
 
         // Check if all tasks are complete
         if self.state.all_tasks_complete() {
@@ -396,7 +432,7 @@ impl RalphLoop {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Task;
+    use crate::types::{AgentRole, Task};
 
     fn make_task(
         id: &str,
@@ -416,6 +452,7 @@ mod tests {
             complexity,
             failed_attempts,
             last_attempt_at: None,
+            role: AgentRole::default(),
         }
     }
 
@@ -519,6 +556,7 @@ mod tests {
                 complexity: 1,
                 failed_attempts: 0,
                 last_attempt_at: Some(recent_ts),
+                role: AgentRole::default(),
             },
             Task {
                 id: "old".to_string(),
@@ -530,6 +568,7 @@ mod tests {
                 complexity: 1,
                 failed_attempts: 0,
                 last_attempt_at: Some(old_ts),
+                role: AgentRole::default(),
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -559,6 +598,7 @@ mod tests {
                 complexity: 1,
                 failed_attempts: 0,
                 last_attempt_at: Some(old_ts),
+                role: AgentRole::default(),
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);

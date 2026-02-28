@@ -18,8 +18,8 @@ use ralph_loop::RalphLoop;
 use std::env;
 use tui::TuiApp;
 use types::{
-    ModelProvider, Task, TaskStatus, DEFAULT_COPILOT_ENDPOINT, DEFAULT_GITHUB_MODELS_ENDPOINT,
-    DEFAULT_LLAMA_ENDPOINT,
+    AgentRole, ModelProvider, Task, TaskStatus, DEFAULT_COPILOT_ENDPOINT,
+    DEFAULT_GITHUB_MODELS_ENDPOINT, DEFAULT_LLAMA_ENDPOINT,
 };
 
 #[tokio::main]
@@ -115,6 +115,7 @@ async fn main() -> Result<()> {
                     complexity: 1,
                     failed_attempts: 0,
                     last_attempt_at: None,
+                    role: AgentRole::default(),
                 },
                 Task {
                     id: "2".to_string(),
@@ -126,6 +127,7 @@ async fn main() -> Result<()> {
                     complexity: 1,
                     failed_attempts: 0,
                     last_attempt_at: None,
+                    role: AgentRole::default(),
                 },
                 Task {
                     id: "3".to_string(),
@@ -137,6 +139,7 @@ async fn main() -> Result<()> {
                     complexity: 1,
                     failed_attempts: 0,
                     last_attempt_at: None,
+                    role: AgentRole::default(),
                 },
             ];
 

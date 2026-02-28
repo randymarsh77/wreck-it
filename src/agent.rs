@@ -762,6 +762,7 @@ mod tests {
             complexity: 1,
             failed_attempts: 0,
             last_attempt_at: None,
+            role: crate::types::AgentRole::default(),
         };
 
         let result = client.execute_task(&task).await;
