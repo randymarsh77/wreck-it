@@ -295,7 +295,7 @@ impl CloudAgentClient {
     }
 
     /// Attempt to assign a coding agent using the GraphQL
-    /// `assignCopilotAgentToAssignable` mutation. Discovers the agent via
+    /// `addAssigneesToAssignable` mutation. Discovers the agent via
     /// `suggestedActors` and falls back to fetching the issue node ID if it was
     /// not provided. Returns `true` when the mutation succeeds.
     async fn try_assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
@@ -321,13 +321,13 @@ impl CloudAgentClient {
             None => return false,
         };
 
-        // Use the GraphQL assignCopilotAgentToAssignable mutation.
+        // Use the GraphQL addAssigneesToAssignable mutation.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
         let query = serde_json::json!({
-            "query": r#"mutation($assignableId: ID!, $agentId: ID!) {
-                assignCopilotAgentToAssignable(input: {
+            "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!) {
+                addAssigneesToAssignable(input: {
                     assignableId: $assignableId,
-                    agentId: $agentId
+                    assigneeIds: $assigneeIds
                 }) {
                     assignable {
                         ... on Issue {
@@ -340,7 +340,7 @@ impl CloudAgentClient {
             }"#,
             "variables": {
                 "assignableId": assignable_id,
-                "agentId": agent_id,
+                "assigneeIds": [agent_id],
             },
         });
 
@@ -350,6 +350,10 @@ impl CloudAgentClient {
             .header("Authorization", format!("Bearer {}", self.github_token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
+            .header(
+                "GraphQL-Features",
+                "issues_copilot_assignment_api_support,coding_agent_model_selection",
+            )
             .json(&query)
             .send()
             .await
@@ -370,7 +374,7 @@ impl CloudAgentClient {
                     // Verify the agent appears in the assignees from the
                     // mutation response.
                     let has_agent = gql_resp
-                        .pointer("/data/assignCopilotAgentToAssignable/assignable/assignees/nodes")
+                        .pointer("/data/addAssigneesToAssignable/assignable/assignees/nodes")
                         .and_then(|v| v.as_array())
                         .map(|arr| {
                             arr.iter().any(|a| {
