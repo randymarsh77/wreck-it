@@ -45,6 +45,12 @@ pub struct HeadlessConfig {
     /// remote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repo_name: Option<String>,
+
+    /// Git branch used to persist wreck-it state (config, tasks, state file).
+    /// Defaults to `wreck-it-state`.  Locally, a git worktree is checked out
+    /// to this branch so state I/O never touches the main working tree.
+    #[serde(default = "default_state_branch")]
+    pub state_branch: String,
 }
 
 fn default_task_file() -> PathBuf {
@@ -63,6 +69,10 @@ fn default_completion_marker() -> PathBuf {
     PathBuf::from(crate::types::DEFAULT_COMPLETION_MARKER)
 }
 
+fn default_state_branch() -> String {
+    crate::state_worktree::DEFAULT_STATE_BRANCH.to_string()
+}
+
 impl Default for HeadlessConfig {
     fn default() -> Self {
         Self {
@@ -75,6 +85,7 @@ impl Default for HeadlessConfig {
             completion_marker_file: default_completion_marker(),
             repo_owner: None,
             repo_name: None,
+            state_branch: default_state_branch(),
         }
     }
 }
@@ -143,6 +154,7 @@ state_file = ".my-state.json"
         );
         assert!(config.repo_owner.is_none());
         assert!(config.repo_name.is_none());
+        assert_eq!(config.state_branch, "wreck-it-state");
     }
 
     #[test]
