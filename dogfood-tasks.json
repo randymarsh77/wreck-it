@@ -21,7 +21,7 @@
   {
     "id": "impl-1",
     "description": "Implement a role-based agent system in wreck-it. Add a 'role' field to the Task struct in src/types.rs that can be one of: 'ideas' (research and generate tasks), 'implementer' (write code), 'evaluator' (review and validate). Update the task_manager.rs to filter and select tasks by role. Update the serialization to include the role field in tasks.json. Ensure backward compatibility: tasks without a role field default to 'implementer'. Add unit tests for the new role field.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-3"
@@ -30,7 +30,7 @@
   {
     "id": "impl-2",
     "description": "Implement dynamic task generation capability: allow agents to programmatically add new tasks to the task file during execution. Add a method to TaskManager that appends new tasks to the JSON file with proper ID generation (using a prefix + incrementing number pattern). Add a mechanism in the ralph_loop.rs to detect newly added tasks after each iteration and incorporate them into the task queue. Include safeguards: max total tasks limit, validation of task structure, and prevention of circular dependencies. Add unit tests.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 2,
     "depends_on": [
       "ideas-3"

@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 4,
-  "current_task_id": "impl-1",
-  "issue_number": 31,
-  "last_prompt": "Implement a role-based agent system in wreck-it. Add a 'role' field to the Task struct in src/types.rs that can be one of: 'ideas' (research and generate tasks), 'implementer' (write code), 'evaluator' (review and validate). Update the task_manager.rs to filter and select tasks by role. Update the serialization to include the role field in tasks.json. Ensure backward compatibility: tasks without a role field default to 'implementer'. Add unit tests for the new role field.",
+  "iteration": 5,
+  "current_task_id": "impl-2",
+  "issue_number": 37,
+  "last_prompt": "Implement dynamic task generation capability: allow agents to programmatically add new tasks to the task file during execution. Add a method to TaskManager that appends new tasks to the JSON file with proper ID generation (using a prefix + incrementing number pattern). Add a mechanism in the ralph_loop.rs to detect newly added tasks after each iteration and incorporate them into the task queue. Include safeguards: max total tasks limit, validation of task structure, and prevention of circular dependencies. Add unit tests.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
     "iteration 1: agent created PR #16 for task Some(\"ideas-1\")",
@@ -24,6 +24,9 @@
     "iteration 3: agent created PR #28 for task Some(\"ideas-3\")",
     "iteration 3: marked PR #28 as ready for review",
     "iteration 3: PR #28 already merged for task Some(\"ideas-3\")",
-    "iteration 4: triggered cloud agent for task impl-1 (issue #31)"
+    "iteration 4: triggered cloud agent for task impl-1 (issue #31)",
+    "iteration 4: agent created PR #36 for task Some(\"impl-1\")",
+    "iteration 4: PR #36 already merged for task Some(\"impl-1\")",
+    "iteration 5: triggered cloud agent for task impl-2 (issue #37)"
   ]
 }
