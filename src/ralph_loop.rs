@@ -593,4 +593,18 @@ mod tests {
         // "old" has recency bonus, "never" does not
         assert_eq!(ready[0], 1);
     }
+
+    #[test]
+    fn scheduler_returns_empty_for_empty_task_list() {
+        assert!(TaskScheduler::schedule(&[]).is_empty());
+    }
+
+    #[test]
+    fn scheduler_returns_empty_when_all_tasks_failed() {
+        let tasks = vec![
+            make_task("a", TaskStatus::Failed, 0, 1, 1, vec![]),
+            make_task("b", TaskStatus::Failed, 0, 1, 3, vec![]),
+        ];
+        assert!(TaskScheduler::schedule(&tasks).is_empty());
+    }
 }
