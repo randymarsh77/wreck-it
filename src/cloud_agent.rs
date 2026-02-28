@@ -42,7 +42,6 @@ pub struct TriggerResult {
 /// create pull requests.
 pub struct CloudAgentClient {
     github_token: String,
-    fallback_token: Option<String>,
     repo_owner: String,
     repo_name: String,
     http: reqwest::Client,
@@ -62,13 +61,11 @@ fn is_copilot_in_assignees(issue: &serde_json::Value) -> bool {
 impl CloudAgentClient {
     pub fn new(
         github_token: String,
-        fallback_token: Option<String>,
         repo_owner: String,
         repo_name: String,
     ) -> Self {
         Self {
             github_token,
-            fallback_token,
             repo_owner,
             repo_name,
             http: reqwest::Client::new(),
@@ -126,9 +123,20 @@ impl CloudAgentClient {
             .as_str()
             .context("Missing issue URL in response")?
             .to_string();
+        let issue_node_id = issue["node_id"].as_str().map(|s| s.to_string());
+        if issue_node_id.is_none() {
+            tracing::warn!(
+                "Issue creation response for #{} did not include node_id; \
+                 will need an extra API call to resolve it",
+                issue_number,
+            );
+        }
 
         // Assign Copilot to the issue to trigger the coding agent.
-        if !self.assign_copilot(issue_number).await {
+        if !self
+            .assign_copilot(issue_number, issue_node_id.as_deref())
+            .await
+        {
             tracing::warn!(
                 "Copilot assignment failed for issue #{}; the issue was created but the \
                  agent may need to be triggered manually",
@@ -144,68 +152,187 @@ impl CloudAgentClient {
 
     /// Assign the Copilot bot to an issue, triggering the coding agent.
     /// Returns `true` if the assignment succeeded.
-    ///
-    /// If the primary token fails and a `fallback_token` is configured, the
-    /// assignment is retried with the fallback token (e.g. a workflow PAT that
-    /// has models:read permission).
-    async fn assign_copilot(&self, issue_number: u64) -> bool {
-        if self
-            .try_assign_copilot(issue_number, &self.github_token)
-            .await
-        {
-            return true;
-        }
-
-        if let Some(ref fallback) = self.fallback_token {
-            tracing::info!(
-                "Retrying Copilot assignment for issue #{} with fallback token",
-                issue_number,
-            );
-            if self.try_assign_copilot(issue_number, fallback).await {
-                return true;
-            }
-        }
-
-        false
+    async fn assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
+        self.try_assign_copilot(issue_number, issue_node_id).await
     }
 
-    /// Attempt to assign Copilot using the given `token`.
-    /// Returns `true` when Copilot appears in the assignees after the call.
-    async fn try_assign_copilot(&self, issue_number: u64, token: &str) -> bool {
+    /// Look up a GitHub user's GraphQL node ID by login.
+    async fn get_user_node_id(&self, login: &str) -> Option<String> {
+        let url = format!("{}/users/{}", GITHUB_API_BASE, login);
+        match self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v["node_id"].as_str().map(|s| s.to_string())),
+            Ok(resp) => {
+                tracing::warn!("Failed to look up user '{}' ({})", login, resp.status());
+                None
+            }
+            Err(e) => {
+                tracing::warn!("HTTP error looking up user '{}': {}", login, e);
+                None
+            }
+        }
+    }
+
+    /// Fetch the GraphQL node ID for an issue.
+    async fn get_issue_node_id(&self, issue_number: u64) -> Option<String> {
         let url = format!(
-            "{}/repos/{}/{}/issues/{}/assignees",
+            "{}/repos/{}/{}/issues/{}",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, issue_number,
         );
+        match self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v["node_id"].as_str().map(|s| s.to_string())),
+            Ok(resp) => {
+                tracing::warn!(
+                    "Failed to fetch issue #{} for node_id ({})",
+                    issue_number,
+                    resp.status(),
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "HTTP error fetching issue #{} for node_id: {}",
+                    issue_number,
+                    e,
+                );
+                None
+            }
+        }
+    }
 
-        let body = serde_json::json!({
-            "assignees": [COPILOT_LOGIN],
+    /// Attempt to assign Copilot using the GraphQL `replaceActorsForAssignable`
+    /// mutation. Falls back to fetching the issue node ID if it was not provided.
+    /// Returns `true` when the mutation succeeds.
+    async fn try_assign_copilot(
+        &self,
+        issue_number: u64,
+        issue_node_id: Option<&str>,
+    ) -> bool {
+        // Resolve the issue's GraphQL node ID.
+        let owned_node_id;
+        let assignable_id = match issue_node_id {
+            Some(id) => id,
+            None => {
+                match self.get_issue_node_id(issue_number).await {
+                    Some(id) => {
+                        owned_node_id = id;
+                        owned_node_id.as_str()
+                    }
+                    None => {
+                        tracing::warn!(
+                            "Could not resolve node_id for issue #{}",
+                            issue_number,
+                        );
+                        return false;
+                    }
+                }
+            }
+        };
+
+        // Look up the Copilot bot's GraphQL node ID.
+        let actor_id = match self.get_user_node_id(COPILOT_LOGIN).await {
+            Some(id) => id,
+            None => {
+                tracing::warn!(
+                    "Could not look up node_id for user '{}'; \
+                     unable to assign via GraphQL",
+                    COPILOT_LOGIN,
+                );
+                return false;
+            }
+        };
+
+        // Use the GraphQL replaceActorsForAssignable mutation.
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": r#"mutation($assignableId: ID!, $actorIds: [ID!]!) {
+                replaceActorsForAssignable(input: {
+                    assignableId: $assignableId,
+                    actorIds: $actorIds
+                }) {
+                    assignable {
+                        ... on Issue {
+                            assignees(first: 10) {
+                                nodes { login }
+                            }
+                        }
+                    }
+                }
+            }"#,
+            "variables": {
+                "assignableId": assignable_id,
+                "actorIds": [actor_id],
+            },
         });
 
         match self
             .http
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", token))
+            .post(&graphql_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
-            .json(&body)
+            .json(&query)
             .send()
             .await
         {
             Ok(resp) if resp.status().is_success() => {
-                // Verify that Copilot actually appears in the assignees list.
-                // The API can return 200 without actually assigning Copilot
-                // when the token lacks sufficient permissions.
-                if let Ok(issue) = resp.json::<serde_json::Value>().await {
-                    if is_copilot_in_assignees(&issue) {
+                if let Ok(gql_resp) = resp.json::<serde_json::Value>().await {
+                    // Check for GraphQL-level errors.
+                    if let Some(errors) = gql_resp.get("errors") {
+                        tracing::warn!(
+                            "GraphQL errors assigning Copilot to issue #{}: {}",
+                            issue_number,
+                            errors,
+                        );
+                        return false;
+                    }
+
+                    // Verify Copilot appears in the assignees from the mutation
+                    // response.
+                    let has_copilot = gql_resp
+                        .pointer(
+                            "/data/replaceActorsForAssignable/assignable/assignees/nodes",
+                        )
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .any(|a| a["login"].as_str() == Some(COPILOT_LOGIN))
+                        })
+                        .unwrap_or(false);
+
+                    if has_copilot {
                         tracing::info!(
-                            "Assigned Copilot to issue #{} – coding agent triggered",
-                            issue_number
+                            "Assigned Copilot to issue #{} via GraphQL – coding agent triggered",
+                            issue_number,
                         );
                         return true;
                     }
                 }
                 tracing::warn!(
-                    "Copilot not found in assignees for issue #{} after assignment; \
+                    "Copilot not found in assignees for issue #{} after GraphQL mutation; \
                      the token may lack permission to assign Copilot (a PAT may be required)",
                     issue_number,
                 );
@@ -213,7 +340,8 @@ impl CloudAgentClient {
             }
             Ok(resp) => {
                 tracing::warn!(
-                    "Failed to assign Copilot to issue #{} ({}); agent may need manual trigger",
+                    "Failed to assign Copilot to issue #{} via GraphQL ({}); \
+                     agent may need manual trigger",
                     issue_number,
                     resp.status(),
                 );
@@ -221,7 +349,7 @@ impl CloudAgentClient {
             }
             Err(e) => {
                 tracing::warn!(
-                    "HTTP error assigning Copilot to issue #{}: {}",
+                    "HTTP error assigning Copilot to issue #{} via GraphQL: {}",
                     issue_number,
                     e,
                 );
@@ -268,7 +396,7 @@ impl CloudAgentClient {
                     "Copilot is not assigned to issue #{}; attempting to reassign",
                     issue_number,
                 );
-                if self.assign_copilot(issue_number).await {
+                if self.assign_copilot(issue_number, None).await {
                     tracing::info!("Successfully reassigned Copilot to issue #{}", issue_number,);
                 } else {
                     tracing::warn!(
@@ -592,25 +720,12 @@ mod tests {
     fn cloud_agent_client_constructs() {
         let client = CloudAgentClient::new(
             "test-token".to_string(),
-            None,
             "owner".to_string(),
             "repo".to_string(),
         );
+        assert_eq!(client.github_token, "test-token");
         assert_eq!(client.repo_owner, "owner");
         assert_eq!(client.repo_name, "repo");
-        assert!(client.fallback_token.is_none());
-    }
-
-    #[test]
-    fn cloud_agent_client_with_fallback_token() {
-        let client = CloudAgentClient::new(
-            "primary-token".to_string(),
-            Some("fallback-token".to_string()),
-            "owner".to_string(),
-            "repo".to_string(),
-        );
-        assert_eq!(client.github_token, "primary-token");
-        assert_eq!(client.fallback_token.as_deref(), Some("fallback-token"));
     }
 
     #[test]
