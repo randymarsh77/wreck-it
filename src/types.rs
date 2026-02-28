@@ -161,7 +161,10 @@ pub struct Task {
     pub priority: u32,
 
     /// Estimated complexity on a 1–10 scale (lower = quicker win).  Defaults to 1.
-    #[serde(default = "default_complexity", skip_serializing_if = "is_default_complexity")]
+    #[serde(
+        default = "default_complexity",
+        skip_serializing_if = "is_default_complexity"
+    )]
     pub complexity: u32,
 
     /// Number of previous failed execution attempts.
@@ -432,7 +435,11 @@ mod tests {
 
     #[test]
     fn task_role_roundtrip_all_variants() {
-        for role in [AgentRole::Ideas, AgentRole::Implementer, AgentRole::Evaluator] {
+        for role in [
+            AgentRole::Ideas,
+            AgentRole::Implementer,
+            AgentRole::Evaluator,
+        ] {
             let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
             task.role = role;
             let json = serde_json::to_string(&task).unwrap();

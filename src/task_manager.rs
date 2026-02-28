@@ -64,7 +64,10 @@ pub fn has_circular_dependency(tasks: &[Task], new_task: &Task) -> bool {
     // Build adjacency list: task_id → list of dependency IDs.
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
     for t in tasks {
-        adj.insert(t.id.as_str(), t.depends_on.iter().map(|s| s.as_str()).collect());
+        adj.insert(
+            t.id.as_str(),
+            t.depends_on.iter().map(|s| s.as_str()).collect(),
+        );
     }
     // Include the new task (it may not be in `tasks` yet).
     adj.insert(
