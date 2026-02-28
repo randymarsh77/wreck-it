@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>wreck-it — Ralph Wiggum. Cloud Scale.</title>
+  <meta name="description" content="A TUI agent harness that uses the Copilot SDK to perform Ralph Wiggum loops. Autonomous AI agent orchestration for your codebase.">
+  <style>
+    :root {
+      --bg: #0f0f0f;
+      --surface: #1a1a1a;
+      --text: #e8e8e8;
+      --text-muted: #888;
+      --accent: #e74c3c;
+      --accent-glow: rgba(231, 76, 60, 0.3);
+      --code-bg: #252525;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(15, 15, 15, 0.9);
+      backdrop-filter: blur(10px);
+      z-index: 100;
+      border-bottom: 1px solid #222;
+    }
+
+    nav .logo {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    nav .logo span {
+      color: var(--accent);
+    }
+
+    nav .links {
+      display: flex;
+      gap: 2rem;
+      align-items: center;
+    }
+
+    nav .links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.95rem;
+      transition: color 0.2s;
+    }
+
+    nav .links a:hover {
+      color: var(--text);
+    }
+
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      min-height: 100vh;
+      padding: 6rem 2rem 4rem;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4.5rem);
+      font-weight: 800;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    .hero h1 span {
+      color: var(--accent);
+    }
+
+    .hero .tagline {
+      font-size: clamp(1.1rem, 2.5vw, 1.5rem);
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+      font-weight: 400;
+    }
+
+    .hero .description {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin-bottom: 2.5rem;
+    }
+
+    .hero .buttons {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 0.8rem 2rem;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    .btn-primary:hover {
+      background: #c0392b;
+      box-shadow: 0 0 30px var(--accent-glow);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid #333;
+    }
+
+    .btn-secondary:hover {
+      background: #252525;
+      border-color: #444;
+      transform: translateY(-1px);
+    }
+
+    .features {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 4rem 2rem 6rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 2rem;
+    }
+
+    .feature {
+      background: var(--surface);
+      border: 1px solid #252525;
+      border-radius: 12px;
+      padding: 2rem;
+      transition: border-color 0.2s;
+    }
+
+    .feature:hover {
+      border-color: #333;
+    }
+
+    .feature .icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .feature h3 {
+      font-size: 1.15rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .feature p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .code-block {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 0 2rem 6rem;
+    }
+
+    .code-block pre {
+      background: var(--code-bg);
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      overflow-x: auto;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.9rem;
+      line-height: 1.7;
+      color: var(--text-muted);
+    }
+
+    .code-block pre .comment {
+      color: #555;
+    }
+
+    .code-block pre .cmd {
+      color: var(--text);
+    }
+
+    footer {
+      text-align: center;
+      padding: 2rem;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      border-top: 1px solid #222;
+    }
+
+    footer a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+
+    footer a:hover {
+      color: var(--text);
+    }
+
+    @media (max-width: 600px) {
+      nav {
+        padding: 0.75rem 1rem;
+      }
+      nav .links {
+        gap: 1rem;
+      }
+      .hero {
+        padding: 5rem 1.5rem 3rem;
+      }
+      .features {
+        padding: 2rem 1.5rem 4rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/" class="logo"><span>wreck-it</span></a>
+    <div class="links">
+      <a href="/docs/">Docs</a>
+      <a href="https://github.com/randymarsh77/wreck-it">GitHub</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <h1><span>wreck-it</span></h1>
+    <p class="tagline">Ralph Wiggum. Cloud Scale.</p>
+    <p class="description">
+      A TUI agent harness that uses the Copilot SDK to perform Ralph Wiggum loops — autonomous AI agent orchestration for your codebase.
+    </p>
+    <div class="buttons">
+      <a href="/docs/" class="btn btn-primary">Read the Docs</a>
+      <a href="https://github.com/randymarsh77/wreck-it" class="btn btn-secondary">View on GitHub</a>
+    </div>
+  </section>
+
+  <section class="features">
+    <div class="feature">
+      <div class="icon">🎨</div>
+      <h3>TUI Interface</h3>
+      <p>Beautiful terminal UI showing tasks, progress, and real-time logs with pause/resume controls.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">🔄</div>
+      <h3>Continuous Execution</h3>
+      <p>Runs until all tasks complete or max iterations reached. Filesystem-as-memory for persistence.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">🧪</div>
+      <h3>Automatic Testing</h3>
+      <p>Runs tests after each task. Only commits changes that pass. Supports cargo, npm, and pytest.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">🤖</div>
+      <h3>Headless Mode</h3>
+      <p>Run without TUI for CI/CD automation. Scheduled agent swarms for continuous improvement.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">☁️</div>
+      <h3>Cloud Agents</h3>
+      <p>GitHub Models integration for cloud-scale agent execution alongside local Copilot SDK.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">🔒</div>
+      <h3>Safety Limits</h3>
+      <p>Configurable max iterations, test validation, and git history for reversible changes.</p>
+    </div>
+  </section>
+
+  <section class="code-block">
+    <pre><span class="comment"># Install and run</span>
+<span class="cmd">git clone https://github.com/randymarsh77/wreck-it.git</span>
+<span class="cmd">cd wreck-it && cargo build --release</span>
+
+<span class="comment"># Initialize tasks and start the loop</span>
+<span class="cmd">wreck-it init</span>
+<span class="cmd">wreck-it run --task-file tasks.json --max-iterations 50</span></pre>
+  </section>
+
+  <footer>
+    <p>MIT License &middot; <a href="https://github.com/randymarsh77/wreck-it">wreck-it</a></p>
+  </footer>
+</body>
+</html>
