@@ -174,7 +174,7 @@ async fn run_needs_trigger(
     );
 
     let result = client
-        .trigger_agent(&pending_task.id, &pending_task.description)
+        .trigger_agent(&pending_task.id, &pending_task.description, &state.memory)
         .await?;
 
     state.issue_number = Some(result.issue_number);
