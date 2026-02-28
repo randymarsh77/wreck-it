@@ -331,6 +331,14 @@ async fn run_needs_verification(
                 return Ok(StepOutcome::Yield);
             }
             println!("[wreck-it] PR #{} marked as ready for review", pr_number);
+            // Approve any workflow runs that require approval so checks can
+            // start running (repos may require approval for Actions).
+            if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                println!(
+                    "[wreck-it] failed to approve workflow runs for PR #{}: {}",
+                    pr_number, e
+                );
+            }
             state.memory.push(format!(
                 "iteration {}: marked PR #{} as ready for review",
                 state.iteration, pr_number,
@@ -343,6 +351,14 @@ async fn run_needs_verification(
                 "[wreck-it] PR #{} is not yet mergeable, will retry next run",
                 pr_number
             );
+            // Approve any workflow runs that require approval – the PR may
+            // be stuck because checks haven't started yet.
+            if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                println!(
+                    "[wreck-it] failed to approve workflow runs for PR #{}: {}",
+                    pr_number, e
+                );
+            }
             state.memory.push(format!(
                 "iteration {}: PR #{} not yet mergeable",
                 state.iteration, pr_number,
