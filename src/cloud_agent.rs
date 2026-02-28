@@ -723,6 +723,7 @@ mod tests {
             "owner".to_string(),
             "repo".to_string(),
         );
+        assert_eq!(client.github_token, "test-token");
         assert_eq!(client.repo_owner, "owner");
         assert_eq!(client.repo_name, "repo");
     }
