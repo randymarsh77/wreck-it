@@ -28,6 +28,6 @@ The Ralph Wiggum Loop is a continuous execution pattern designed for AI agent wo
 - 🧪 **Automatic Testing** — Runs tests after each task execution
 - 💾 **Git Integration** — Automatically commits successful changes
 - 🔒 **Safety Limits** — Configurable max iterations to prevent runaway costs
-- 🤖 **Headless Mode** — Run without TUI for CI/CD and automation
+- 🤖 **Headless Mode** — Run without TUI for CI/CD automation
 - ☁️ **Cloud Agents** — GitHub Models integration for cloud-scale agent execution
 - 🐕 **Dogfooding** — wreck-it develops itself via scheduled agent swarms

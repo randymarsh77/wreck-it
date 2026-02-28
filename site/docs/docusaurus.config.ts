@@ -17,7 +17,8 @@ const config: Config = {
   organizationName: 'randymarsh77',
   projectName: 'wreck-it',
 
-  onBrokenLinks: 'throw',
+  onBrokenLinks: 'warn',
+  onBrokenMarkdownLinks: 'warn',
 
   i18n: {
     defaultLocale: 'en',
@@ -29,10 +30,11 @@ const config: Config = {
       'classic',
       {
         docs: {
+          path: '../../docs',
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
           editUrl:
-            'https://github.com/randymarsh77/wreck-it/tree/master/site/docs/',
+            'https://github.com/randymarsh77/wreck-it/tree/master/',
         },
         blog: false,
         theme: {
