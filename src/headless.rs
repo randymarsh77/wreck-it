@@ -1,9 +1,12 @@
 use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus, PrMergeStatus};
 use crate::headless_config::{load_headless_config, HeadlessConfig};
-use crate::headless_state::{load_headless_state, save_headless_state, AgentPhase, HeadlessState};
+use crate::headless_state::{
+    load_headless_state, save_headless_state, AgentPhase, HeadlessState, TrackedPr,
+};
 use crate::task_manager::{load_tasks, save_tasks};
 use crate::types::Config;
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// Default name for the repo-committed config file.
@@ -121,11 +124,15 @@ pub async fn run_headless(config: Config) -> Result<()> {
 
 /// Sweep all open PRs in the repository.
 ///
-/// For each open PR:
+/// For each open PR (and each previously tracked PR):
 /// - If it is a draft → mark it ready for review and approve pending workflows.
 /// - If it is not yet mergeable → approve pending workflow runs so CI can start.
 /// - If it is mergeable → merge it.
-/// - If it was already merged → update task status.
+/// - If it was already merged → mark the associated task complete.
+///
+/// All open PRs are recorded in `state.tracked_prs`.  When a PR is merged or
+/// closed, it is removed from the tracked list and the associated task is
+/// marked complete in the task file.
 ///
 /// When a merged PR corresponds to the currently tracked task in `state`, the
 /// headless state is advanced to [`AgentPhase::Completed`] so the next
@@ -151,93 +158,204 @@ async fn sweep_open_prs(
     let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
 
     let open_prs = client.list_open_prs().await?;
-    if open_prs.is_empty() {
-        println!("[wreck-it] sweep: no open PRs found");
+
+    // Merge the open PR list with previously tracked PRs.  Any PR that is
+    // still open stays tracked; new PRs are added.  We attempt to infer the
+    // task ID from the PR title ("[wreck-it] <task_id>") for any PR not
+    // already in the tracked list.
+    let previously_tracked: HashSet<u64> =
+        state.tracked_prs.iter().map(|tp| tp.pr_number).collect();
+
+    for pr in &open_prs {
+        if !previously_tracked.contains(&pr.number) {
+            let task_id = infer_task_id_from_title(&pr.title);
+            state.tracked_prs.push(TrackedPr {
+                pr_number: pr.number,
+                task_id,
+            });
+        }
+    }
+
+    // Also ensure the current task's PR is tracked.
+    if let (Some(pr_num), Some(task_id)) = (state.pr_number, state.current_task_id.clone()) {
+        if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_num) {
+            state.tracked_prs.push(TrackedPr {
+                pr_number: pr_num,
+                task_id,
+            });
+        }
+    }
+
+    if state.tracked_prs.is_empty() {
+        println!("[wreck-it] sweep: no open or tracked PRs");
         return Ok(());
     }
 
     println!(
-        "[wreck-it] sweep: found {} open PR(s), processing…",
-        open_prs.len()
+        "[wreck-it] sweep: processing {} tracked PR(s) ({} currently open)",
+        state.tracked_prs.len(),
+        open_prs.len(),
     );
 
     let task_file = work_dir.join(&headless_cfg.task_file);
 
-    for pr in &open_prs {
+    // Process each tracked PR.  Collect indices of PRs that have been merged
+    // (to remove from the tracked list after the loop).
+    let open_pr_numbers: HashSet<u64> = open_prs.iter().map(|p| p.number).collect();
+    let mut merged_pr_numbers: Vec<u64> = Vec::new();
+
+    // Iterate over a snapshot of tracked_prs to avoid borrow issues.
+    let tracked_snapshot: Vec<TrackedPr> = state.tracked_prs.clone();
+
+    for tracked in &tracked_snapshot {
+        let pr_number = tracked.pr_number;
+
+        // If the PR is no longer in the open list, check if it was merged.
+        if !open_pr_numbers.contains(&pr_number) {
+            // PR is no longer open — check if it was merged.
+            match client.check_pr_merge_status(pr_number).await {
+                Ok(PrMergeStatus::AlreadyMerged) => {
+                    println!(
+                        "[wreck-it] sweep: tracked PR #{} (task {}) already merged",
+                        pr_number, tracked.task_id
+                    );
+                    mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                    if state.pr_number == Some(pr_number) {
+                        state.phase = AgentPhase::Completed;
+                    }
+                    merged_pr_numbers.push(pr_number);
+                }
+                _ => {
+                    // PR closed without merge or error — remove from tracking.
+                    println!(
+                        "[wreck-it] sweep: tracked PR #{} (task {}) is no longer open",
+                        pr_number, tracked.task_id
+                    );
+                    merged_pr_numbers.push(pr_number);
+                }
+            }
+            continue;
+        }
+
         println!(
-            "[wreck-it] sweep: PR #{} – \"{}\" (draft={})",
-            pr.number, pr.title, pr.draft
+            "[wreck-it] sweep: PR #{} (task {})",
+            pr_number, tracked.task_id
         );
 
-        match client.check_pr_merge_status(pr.number).await {
+        match client.check_pr_merge_status(pr_number).await {
             Ok(PrMergeStatus::Draft) => {
                 println!(
                     "[wreck-it] sweep: PR #{} is a draft, marking ready for review",
-                    pr.number
+                    pr_number
                 );
-                if let Err(e) = client.mark_pr_ready_for_review(pr.number).await {
+                if let Err(e) = client.mark_pr_ready_for_review(pr_number).await {
                     println!(
                         "[wreck-it] sweep: failed to mark PR #{} ready: {}",
-                        pr.number, e
+                        pr_number, e
                     );
                 }
-                if let Err(e) = client.approve_pending_workflow_runs(pr.number).await {
+                if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
                     println!(
                         "[wreck-it] sweep: failed to approve workflows for PR #{}: {}",
-                        pr.number, e
+                        pr_number, e
                     );
                 }
                 state.memory.push(format!(
-                    "sweep: marked PR #{} as ready for review",
-                    pr.number,
+                    "sweep: marked PR #{} (task {}) as ready for review",
+                    pr_number, tracked.task_id,
                 ));
             }
             Ok(PrMergeStatus::NotMergeable) => {
                 println!(
                     "[wreck-it] sweep: PR #{} not yet mergeable, approving workflows",
-                    pr.number
+                    pr_number
                 );
-                if let Err(e) = client.approve_pending_workflow_runs(pr.number).await {
+                if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
                     println!(
                         "[wreck-it] sweep: failed to approve workflows for PR #{}: {}",
-                        pr.number, e
+                        pr_number, e
                     );
                 }
             }
             Ok(PrMergeStatus::Mergeable) => {
-                println!("[wreck-it] sweep: PR #{} is mergeable, merging", pr.number);
-                match client.merge_pr(pr.number).await {
+                println!("[wreck-it] sweep: PR #{} is mergeable, merging", pr_number);
+                match client.merge_pr(pr_number).await {
                     Ok(()) => {
-                        println!("[wreck-it] sweep: merged PR #{}", pr.number);
+                        println!("[wreck-it] sweep: merged PR #{}", pr_number);
                         state
                             .memory
-                            .push(format!("sweep: merged PR #{}", pr.number,));
-                        // If this PR was the one tracked by state, advance phase.
-                        if state.pr_number == Some(pr.number) {
-                            mark_current_task_complete(state, &task_file)?;
+                            .push(format!("sweep: merged PR #{}", pr_number));
+                        mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                        if state.pr_number == Some(pr_number) {
+                            state.phase = AgentPhase::Completed;
                         }
+                        merged_pr_numbers.push(pr_number);
                     }
                     Err(e) => {
-                        println!("[wreck-it] sweep: failed to merge PR #{}: {}", pr.number, e);
+                        println!("[wreck-it] sweep: failed to merge PR #{}: {}", pr_number, e);
                     }
                 }
             }
             Ok(PrMergeStatus::AlreadyMerged) => {
-                println!("[wreck-it] sweep: PR #{} already merged", pr.number);
-                if state.pr_number == Some(pr.number) {
-                    mark_current_task_complete(state, &task_file)?;
+                println!("[wreck-it] sweep: PR #{} already merged", pr_number);
+                mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                if state.pr_number == Some(pr_number) {
+                    state.phase = AgentPhase::Completed;
                 }
+                merged_pr_numbers.push(pr_number);
             }
             Err(e) => {
-                println!("[wreck-it] sweep: error checking PR #{}: {}", pr.number, e);
+                println!("[wreck-it] sweep: error checking PR #{}: {}", pr_number, e);
             }
         }
     }
 
+    // Remove merged/closed PRs from the tracked list.
+    let merged_set: HashSet<u64> = merged_pr_numbers.into_iter().collect();
+    state
+        .tracked_prs
+        .retain(|tp| !merged_set.contains(&tp.pr_number));
+
+    Ok(())
+}
+
+/// Try to infer a task ID from a PR title.
+///
+/// Agent-created PRs often reference the triggering issue whose title is
+/// `[wreck-it] <task_id>`.  PR titles may contain the issue number (e.g.
+/// "Fixes #42") or quote the task ID directly.  This is a best-effort
+/// extraction; returns `"unknown"` when no ID can be inferred.
+fn infer_task_id_from_title(title: &str) -> String {
+    // Look for "[wreck-it] <task_id>" pattern.
+    if let Some(rest) = title.strip_prefix("[wreck-it] ") {
+        return rest.trim().to_string();
+    }
+    // Check if the title itself is a known wreck-it task ID pattern.
+    let trimmed = title.trim();
+    if trimmed.starts_with("ideas-") || trimmed.starts_with("impl-") || trimmed.starts_with("eval-")
+    {
+        return trimmed.to_string();
+    }
+    "unknown".to_string()
+}
+
+/// Mark a task as completed by its ID in the task file.
+fn mark_task_complete_by_id(task_id: &str, task_file: &Path) -> Result<()> {
+    if task_id == "unknown" {
+        return Ok(());
+    }
+    let mut tasks = load_tasks(task_file)?;
+    if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
+        if task.status != crate::types::TaskStatus::Completed {
+            task.status = crate::types::TaskStatus::Completed;
+            save_tasks(task_file, &tasks)?;
+        }
+    }
     Ok(())
 }
 
 /// Mark the current task as completed and advance the headless state.
+#[cfg(test)]
 fn mark_current_task_complete(state: &mut HeadlessState, task_file: &Path) -> Result<()> {
     state.phase = AgentPhase::Completed;
     state.memory.push(format!(
@@ -246,13 +364,9 @@ fn mark_current_task_complete(state: &mut HeadlessState, task_file: &Path) -> Re
         state.pr_number.unwrap_or(0),
     ));
 
-    let mut tasks = load_tasks(task_file)?;
     if let Some(task_id) = &state.current_task_id {
-        if let Some(task) = tasks.iter_mut().find(|t| &t.id == task_id) {
-            task.status = crate::types::TaskStatus::Completed;
-        }
+        mark_task_complete_by_id(task_id, task_file)?;
     }
-    save_tasks(task_file, &tasks)?;
 
     Ok(())
 }
@@ -274,14 +388,24 @@ async fn run_needs_trigger(
     let task_file = work_dir.join(&headless_cfg.task_file);
     let tasks = load_tasks(&task_file)?;
 
-    // Check if there are pending tasks
-    let pending = tasks
+    // Build the set of completed task IDs for dependency checking.
+    let completed_ids: HashSet<&str> = tasks
         .iter()
-        .find(|t| t.status == crate::types::TaskStatus::Pending);
+        .filter(|t| t.status == crate::types::TaskStatus::Completed)
+        .map(|t| t.id.as_str())
+        .collect();
+
+    // Find the first pending task whose dependencies are all satisfied.
+    let pending = tasks.iter().find(|t| {
+        t.status == crate::types::TaskStatus::Pending
+            && t.depends_on
+                .iter()
+                .all(|dep| completed_ids.contains(dep.as_str()))
+    });
     let pending_task = match pending {
         Some(t) => t.clone(),
         None => {
-            println!("[wreck-it] no pending tasks, nothing to do");
+            println!("[wreck-it] no ready tasks (all pending tasks have unmet dependencies)");
             return Ok(StepOutcome::Yield);
         }
     };
@@ -404,6 +528,12 @@ async fn run_agent_working(
                 "iteration {}: agent created PR #{} for task {:?}",
                 state.iteration, pr_number, state.current_task_id,
             ));
+            // Track this PR so it is managed across invocations.
+            if let Some(task_id) = state.current_task_id.clone() {
+                if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_number) {
+                    state.tracked_prs.push(TrackedPr { pr_number, task_id });
+                }
+            }
             Ok(StepOutcome::Continue)
         }
         CloudAgentStatus::CompletedNoPr => {
@@ -452,8 +582,6 @@ async fn run_needs_verification(
     )?;
 
     let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
-
-    use crate::cloud_agent::PrMergeStatus;
 
     println!("[wreck-it] checking PR #{} for merge readiness", pr_number);
 
@@ -523,13 +651,11 @@ async fn run_needs_verification(
 
             // Mark task as completed.
             let task_file = work_dir.join(&headless_cfg.task_file);
-            let mut tasks = load_tasks(&task_file)?;
             if let Some(task_id) = &state.current_task_id {
-                if let Some(task) = tasks.iter_mut().find(|t| &t.id == task_id) {
-                    task.status = crate::types::TaskStatus::Completed;
-                }
+                mark_task_complete_by_id(task_id, &task_file)?;
             }
-            save_tasks(&task_file, &tasks)?;
+            // Remove from tracked list.
+            state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
 
             return Ok(StepOutcome::Continue);
         }
@@ -554,13 +680,11 @@ async fn run_needs_verification(
 
             // Mark task as completed.
             let task_file = work_dir.join(&headless_cfg.task_file);
-            let mut tasks = load_tasks(&task_file)?;
             if let Some(task_id) = &state.current_task_id {
-                if let Some(task) = tasks.iter_mut().find(|t| &t.id == task_id) {
-                    task.status = crate::types::TaskStatus::Completed;
-                }
+                mark_task_complete_by_id(task_id, &task_file)?;
             }
-            save_tasks(&task_file, &tasks)?;
+            // Remove from tracked list.
+            state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
 
             Ok(StepOutcome::Continue)
         }
@@ -600,6 +724,7 @@ mod tests {
             pr_url: Some("https://github.com/o/r/pull/10".to_string()),
             last_prompt: Some("do something".to_string()),
             memory: vec![],
+            tracked_prs: vec![],
         };
 
         // Simulate the Completed branch of the loop.
@@ -656,6 +781,7 @@ mod tests {
             pr_url: None,
             last_prompt: None,
             memory: vec![],
+            tracked_prs: vec![],
         };
 
         mark_current_task_complete(&mut state, &task_file).unwrap();
@@ -685,10 +811,80 @@ mod tests {
             pr_url: None,
             last_prompt: None,
             memory: vec![],
+            tracked_prs: vec![],
         };
 
         // Should not error even with no current task.
         mark_current_task_complete(&mut state, &task_file).unwrap();
         assert_eq!(state.phase, AgentPhase::Completed);
+    }
+
+    #[test]
+    fn infer_task_id_from_wreck_it_prefix() {
+        assert_eq!(infer_task_id_from_title("[wreck-it] impl-3"), "impl-3");
+        assert_eq!(infer_task_id_from_title("[wreck-it] eval-2"), "eval-2");
+    }
+
+    #[test]
+    fn infer_task_id_from_bare_id() {
+        assert_eq!(infer_task_id_from_title("ideas-1"), "ideas-1");
+        assert_eq!(infer_task_id_from_title("impl-5"), "impl-5");
+        assert_eq!(infer_task_id_from_title("eval-7"), "eval-7");
+    }
+
+    #[test]
+    fn infer_task_id_unknown_for_unrecognized_title() {
+        assert_eq!(infer_task_id_from_title("Fix some random bug"), "unknown");
+    }
+
+    #[test]
+    fn mark_task_complete_by_id_updates_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+
+        let tasks = vec![crate::types::Task {
+            id: "t1".to_string(),
+            description: "task one".to_string(),
+            status: crate::types::TaskStatus::InProgress,
+            role: crate::types::AgentRole::default(),
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
+        }];
+        save_tasks(&task_file, &tasks).unwrap();
+
+        mark_task_complete_by_id("t1", &task_file).unwrap();
+
+        let reloaded = load_tasks(&task_file).unwrap();
+        assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
+    }
+
+    #[test]
+    fn mark_task_complete_by_id_ignores_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+
+        let tasks = vec![crate::types::Task {
+            id: "t1".to_string(),
+            description: "task one".to_string(),
+            status: crate::types::TaskStatus::Pending,
+            role: crate::types::AgentRole::default(),
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
+        }];
+        save_tasks(&task_file, &tasks).unwrap();
+
+        // "unknown" task IDs are skipped.
+        mark_task_complete_by_id("unknown", &task_file).unwrap();
+
+        let reloaded = load_tasks(&task_file).unwrap();
+        assert_eq!(reloaded[0].status, crate::types::TaskStatus::Pending);
     }
 }

@@ -31,6 +31,7 @@ pub enum PrMergeStatus {
 
 /// Summary of an open pull request, returned by [`CloudAgentClient::list_open_prs`].
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct OpenPr {
     pub number: u64,
     pub title: String,
