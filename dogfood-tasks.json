@@ -48,7 +48,7 @@
   {
     "id": "impl-4",
     "description": "Implement intelligent task routing and scheduling in ralph_loop.rs. Instead of simple phase-based ordering, add a scoring system that considers: task priority, estimated complexity, dependency satisfaction, number of previous failed attempts, and time since last attempt. Add a TaskScheduler struct that encapsulates this logic and returns an ordered list of ready tasks. This replaces the simple ready_task_indices method with a smarter selection strategy. Add unit tests.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "impl-1"
@@ -57,7 +57,7 @@
   {
     "id": "eval-1",
     "description": "Evaluate the role-based agent system (impl-1) and dynamic task generation (impl-2) implementations. Verify: 1) The role field is properly serialized/deserialized with backward compatibility, 2) Tasks can be dynamically added during execution without corrupting the task file, 3) Circular dependency detection works correctly, 4) All new unit tests pass. Run 'cargo test' and 'cargo clippy' to confirm code quality. Document any issues found in the task descriptions of new fix tasks if needed.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "impl-1",
