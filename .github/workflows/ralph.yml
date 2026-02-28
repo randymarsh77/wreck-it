@@ -21,6 +21,10 @@ on:
         required: false
         default: '5'
 
+concurrency:
+  group: ralph-dogfood
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
@@ -75,6 +79,7 @@ jobs:
           else
             git add -A
             git commit -m "wreck-it: dogfood iteration update"
+            git pull --rebase
             git push
           fi
 
@@ -96,4 +101,4 @@ jobs:
 
             See `dogfood-tasks.json` for current task status.
           branch: dogfood/agent-updates
-          base: main
+          base: master

@@ -24,7 +24,13 @@ impl AgentMemory {
         // Sanitize the task ID so it is safe to use as a filename.
         let safe_id: String = task_id
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         self.memory_dir.join(format!("{}.md", safe_id))
     }
@@ -55,7 +61,6 @@ impl AgentMemory {
             .unwrap_or(0)
     }
 
-
     ///
     /// If the file does not yet exist it is created along with all necessary
     /// parent directories.
@@ -83,10 +88,7 @@ impl AgentMemory {
             format!("# Task Memory: {}\n\n## Previous Attempts\n", task_id)
         };
 
-        let entry = format!(
-            "\n### Attempt {} - {}\n{}\n",
-            iteration, outcome, summary
-        );
+        let entry = format!("\n### Attempt {} - {}\n{}\n", iteration, outcome, summary);
 
         let updated = format!("{}{}", existing, entry);
         fs::write(&path, updated)
@@ -152,7 +154,12 @@ mod tests {
         let memory = AgentMemory::new(dir.path().to_str().unwrap());
 
         memory
-            .record_attempt("task-3", 1, "Failure", "Test failed due to off-by-one error")
+            .record_attempt(
+                "task-3",
+                1,
+                "Failure",
+                "Test failed due to off-by-one error",
+            )
             .unwrap();
 
         let ctx = memory.load_context("task-3").unwrap();
@@ -191,9 +198,13 @@ mod tests {
         let memory = AgentMemory::new(dir.path().to_str().unwrap());
 
         assert_eq!(memory.attempt_count("task-y"), 0);
-        memory.record_attempt("task-y", 1, "Failure", "first").unwrap();
+        memory
+            .record_attempt("task-y", 1, "Failure", "first")
+            .unwrap();
         assert_eq!(memory.attempt_count("task-y"), 1);
-        memory.record_attempt("task-y", 2, "Success", "second").unwrap();
+        memory
+            .record_attempt("task-y", 2, "Success", "second")
+            .unwrap();
         assert_eq!(memory.attempt_count("task-y"), 2);
     }
 

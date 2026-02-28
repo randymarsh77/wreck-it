@@ -800,8 +800,13 @@ mod tests {
             id: "1".to_string(),
             description: "test task".to_string(),
             status: crate::types::TaskStatus::Pending,
+            role: crate::types::AgentRole::default(),
             phase: 1,
             depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
         };
 
         let result = client.execute_task(&task).await;

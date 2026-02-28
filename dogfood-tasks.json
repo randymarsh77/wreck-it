@@ -39,7 +39,7 @@
   {
     "id": "impl-3",
     "description": "Implement an agent context/memory system that persists across iterations. Create a new src/agent_memory.rs module that maintains a per-task context file (.wreck-it-memory/{task_id}.md) containing: previous attempts and their outcomes, key decisions made, relevant code locations discovered, and learnings from failed attempts. Integrate this with the AgentClient so context is included in agent prompts. This enables agents to learn from previous iterations rather than starting fresh each time. Add unit tests.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-3"
@@ -48,7 +48,7 @@
   {
     "id": "impl-4",
     "description": "Implement intelligent task routing and scheduling in ralph_loop.rs. Instead of simple phase-based ordering, add a scoring system that considers: task priority, estimated complexity, dependency satisfaction, number of previous failed attempts, and time since last attempt. Add a TaskScheduler struct that encapsulates this logic and returns an ordered list of ready tasks. This replaces the simple ready_task_indices method with a smarter selection strategy. Add unit tests.",
-    "status": "pending",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "impl-1"
@@ -57,7 +57,7 @@
   {
     "id": "eval-1",
     "description": "Evaluate the role-based agent system (impl-1) and dynamic task generation (impl-2) implementations. Verify: 1) The role field is properly serialized/deserialized with backward compatibility, 2) Tasks can be dynamically added during execution without corrupting the task file, 3) Circular dependency detection works correctly, 4) All new unit tests pass. Run 'cargo test' and 'cargo clippy' to confirm code quality. Document any issues found in the task descriptions of new fix tasks if needed.",
-    "status": "pending",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-1",
@@ -67,7 +67,7 @@
   {
     "id": "eval-2",
     "description": "Evaluate the agent memory system (impl-3) and intelligent task scheduling (impl-4) implementations. Verify: 1) Memory files are created and updated correctly across iterations, 2) Memory context is properly injected into agent prompts, 3) The task scheduler produces correct orderings for various scenarios, 4) Edge cases are handled (empty task list, all failed tasks, circular scoring). Run 'cargo test' and 'cargo clippy'. Document any issues found.",
-    "status": "pending",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-3",
@@ -77,7 +77,7 @@
   {
     "id": "eval-3",
     "description": "Perform end-to-end integration evaluation of all new features working together. Create a small test scenario with a mix of ideas, implementer, and evaluator tasks that exercise: role-based routing, dynamic task generation, agent memory persistence, and intelligent scheduling. Verify the complete workflow runs without errors in headless mode. Run the full test suite with 'cargo test --verbose'. Update docs/architecture.md to reflect the new agent swarm capabilities. Mark this task complete only if all systems work together correctly.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 4,
     "depends_on": [
       "eval-1",
