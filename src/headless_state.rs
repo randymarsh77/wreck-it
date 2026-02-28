@@ -17,6 +17,19 @@ pub enum AgentPhase {
     Completed,
 }
 
+/// A pull request being actively tracked by the headless runner.
+///
+/// Multiple PRs may be in flight at once (e.g. from different agent sessions).
+/// The runner persists this list so it can manage all of them across cron
+/// invocations — converting drafts, approving workflow runs, and merging.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrackedPr {
+    /// Pull request number on GitHub.
+    pub pr_number: u64,
+    /// The wreck-it task ID associated with this PR.
+    pub task_id: String,
+}
+
 /// Persistent state that is committed to the repo between cron invocations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeadlessState {
@@ -49,6 +62,11 @@ pub struct HeadlessState {
     /// Freeform memory that persists across invocations.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub memory: Vec<String>,
+
+    /// All pull requests being actively managed by the headless runner.
+    /// Populated during the sweep phase and persisted between invocations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracked_prs: Vec<TrackedPr>,
 }
 
 impl Default for HeadlessState {
@@ -62,6 +80,7 @@ impl Default for HeadlessState {
             pr_url: None,
             last_prompt: None,
             memory: Vec::new(),
+            tracked_prs: Vec::new(),
         }
     }
 }
@@ -115,6 +134,10 @@ mod tests {
             pr_url: Some("https://github.com/o/r/pull/42".to_string()),
             last_prompt: Some("implement feature X".to_string()),
             memory: vec!["context note".to_string()],
+            tracked_prs: vec![TrackedPr {
+                pr_number: 42,
+                task_id: "task-1".to_string(),
+            }],
         };
 
         save_headless_state(&state_file, &state).unwrap();
@@ -131,6 +154,9 @@ mod tests {
         );
         assert_eq!(loaded.last_prompt.as_deref(), Some("implement feature X"));
         assert_eq!(loaded.memory, vec!["context note".to_string()]);
+        assert_eq!(loaded.tracked_prs.len(), 1);
+        assert_eq!(loaded.tracked_prs[0].pr_number, 42);
+        assert_eq!(loaded.tracked_prs[0].task_id, "task-1");
     }
 
     #[test]
@@ -144,5 +170,30 @@ mod tests {
         assert!(state.pr_url.is_none());
         assert!(state.last_prompt.is_none());
         assert!(state.memory.is_empty());
+        assert!(state.tracked_prs.is_empty());
+    }
+
+    #[test]
+    fn test_tracked_prs_backward_compat() {
+        // Existing state files without tracked_prs should load fine.
+        let dir = tempdir().unwrap();
+        let state_file = dir.path().join(".wreck-it-state.json");
+        fs::write(&state_file, r#"{"phase":"needs_trigger","iteration":5}"#).unwrap();
+
+        let loaded = load_headless_state(&state_file).unwrap();
+        assert_eq!(loaded.phase, AgentPhase::NeedsTrigger);
+        assert_eq!(loaded.iteration, 5);
+        assert!(loaded.tracked_prs.is_empty());
+    }
+
+    #[test]
+    fn test_tracked_pr_roundtrip() {
+        let pr = TrackedPr {
+            pr_number: 99,
+            task_id: "impl-3".to_string(),
+        };
+        let json = serde_json::to_string(&pr).unwrap();
+        let loaded: TrackedPr = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, pr);
     }
 }

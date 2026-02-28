@@ -29,6 +29,17 @@ pub enum PrMergeStatus {
     AlreadyMerged,
 }
 
+/// Summary of an open pull request, returned by [`CloudAgentClient::list_open_prs`].
+#[derive(Debug, Clone)]
+pub struct OpenPr {
+    pub number: u64,
+    pub title: String,
+    /// Whether the PR is currently a draft.  Stored for informational purposes;
+    /// the sweep logic re-checks draft status via [`CloudAgentClient::check_pr_merge_status`].
+    #[allow(dead_code)]
+    pub draft: bool,
+}
+
 /// Result of triggering a cloud agent.
 #[derive(Debug, Clone)]
 pub struct TriggerResult {
@@ -42,11 +53,7 @@ pub struct TriggerResult {
 /// the coding agent has visibility into earlier iterations.  Each memory
 /// entry is formatted as a bullet point and should be a complete, self-
 /// contained description (e.g. "iteration 3: merged PR #7 for task setup").
-pub(crate) fn build_issue_body(
-    task_id: &str,
-    task_description: &str,
-    memory: &[String],
-) -> String {
+pub(crate) fn build_issue_body(task_id: &str, task_description: &str, memory: &[String]) -> String {
     let memory_section = if memory.is_empty() {
         String::new()
     } else {
@@ -942,6 +949,57 @@ impl CloudAgentClient {
         tracing::info!("Merged PR #{}", pr_number);
         Ok(())
     }
+
+    /// List all open pull requests in the repository.
+    pub async fn list_open_prs(&self) -> Result<Vec<OpenPr>> {
+        let mut prs = Vec::new();
+        let mut page = 1u32;
+
+        loop {
+            let url = format!(
+                "{}/repos/{}/{}/pulls?state=open&per_page=100&page={}",
+                GITHUB_API_BASE, self.repo_owner, self.repo_name, page,
+            );
+
+            let resp = self
+                .http
+                .get(&url)
+                .header("Authorization", format!("Bearer {}", self.github_token))
+                .header("User-Agent", "wreck-it")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+                .context("Failed to list open PRs")?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                bail!("Failed to list open PRs ({}): {}", status, body);
+            }
+
+            let items: Vec<serde_json::Value> = resp.json().await?;
+            if items.is_empty() {
+                break;
+            }
+
+            for item in &items {
+                if let Some(number) = item["number"].as_u64() {
+                    prs.push(OpenPr {
+                        number,
+                        title: item["title"].as_str().unwrap_or("").to_string(),
+                        draft: item["draft"].as_bool().unwrap_or(false),
+                    });
+                }
+            }
+
+            if items.len() < 100 {
+                break;
+            }
+            page += 1;
+        }
+
+        Ok(prs)
+    }
 }
 
 /// Parse a GitHub remote URL into (owner, repo).
@@ -1177,5 +1235,30 @@ mod tests {
             context_pos < footer_pos,
             "memory context should appear before the footer"
         );
+    }
+
+    #[test]
+    fn open_pr_struct_stores_fields() {
+        let pr = OpenPr {
+            number: 42,
+            title: "Fix the thing".to_string(),
+            draft: true,
+        };
+        assert_eq!(pr.number, 42);
+        assert_eq!(pr.title, "Fix the thing");
+        assert!(pr.draft);
+    }
+
+    #[test]
+    fn open_pr_clone() {
+        let pr = OpenPr {
+            number: 1,
+            title: "PR title".to_string(),
+            draft: false,
+        };
+        let cloned = pr.clone();
+        assert_eq!(cloned.number, pr.number);
+        assert_eq!(cloned.title, pr.title);
+        assert_eq!(cloned.draft, pr.draft);
     }
 }
