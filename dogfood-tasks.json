@@ -57,7 +57,7 @@
   {
     "id": "eval-1",
     "description": "Evaluate the role-based agent system (impl-1) and dynamic task generation (impl-2) implementations. Verify: 1) The role field is properly serialized/deserialized with backward compatibility, 2) Tasks can be dynamically added during execution without corrupting the task file, 3) Circular dependency detection works correctly, 4) All new unit tests pass. Run 'cargo test' and 'cargo clippy' to confirm code quality. Document any issues found in the task descriptions of new fix tasks if needed.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-1",
@@ -67,7 +67,7 @@
   {
     "id": "eval-2",
     "description": "Evaluate the agent memory system (impl-3) and intelligent task scheduling (impl-4) implementations. Verify: 1) Memory files are created and updated correctly across iterations, 2) Memory context is properly injected into agent prompts, 3) The task scheduler produces correct orderings for various scenarios, 4) Edge cases are handled (empty task list, all failed tasks, circular scoring). Run 'cargo test' and 'cargo clippy'. Document any issues found.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "impl-3",
