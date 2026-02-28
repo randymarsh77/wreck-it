@@ -42,7 +42,6 @@ pub struct TriggerResult {
 /// create pull requests.
 pub struct CloudAgentClient {
     github_token: String,
-    fallback_token: Option<String>,
     repo_owner: String,
     repo_name: String,
     http: reqwest::Client,
@@ -62,13 +61,11 @@ fn is_copilot_in_assignees(issue: &serde_json::Value) -> bool {
 impl CloudAgentClient {
     pub fn new(
         github_token: String,
-        fallback_token: Option<String>,
         repo_owner: String,
         repo_name: String,
     ) -> Self {
         Self {
             github_token,
-            fallback_token,
             repo_owner,
             repo_name,
             http: reqwest::Client::new(),
@@ -155,41 +152,17 @@ impl CloudAgentClient {
 
     /// Assign the Copilot bot to an issue, triggering the coding agent.
     /// Returns `true` if the assignment succeeded.
-    ///
-    /// If the primary token fails and a `fallback_token` is configured, the
-    /// assignment is retried with the fallback token (e.g. a workflow PAT that
-    /// has models:read permission).
     async fn assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
-        if self
-            .try_assign_copilot(issue_number, issue_node_id, &self.github_token)
-            .await
-        {
-            return true;
-        }
-
-        if let Some(ref fallback) = self.fallback_token {
-            tracing::info!(
-                "Retrying Copilot assignment for issue #{} with fallback token",
-                issue_number,
-            );
-            if self
-                .try_assign_copilot(issue_number, issue_node_id, fallback)
-                .await
-            {
-                return true;
-            }
-        }
-
-        false
+        self.try_assign_copilot(issue_number, issue_node_id).await
     }
 
     /// Look up a GitHub user's GraphQL node ID by login.
-    async fn get_user_node_id(&self, login: &str, token: &str) -> Option<String> {
+    async fn get_user_node_id(&self, login: &str) -> Option<String> {
         let url = format!("{}/users/{}", GITHUB_API_BASE, login);
         match self
             .http
             .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {}", self.github_token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
             .send()
@@ -212,7 +185,7 @@ impl CloudAgentClient {
     }
 
     /// Fetch the GraphQL node ID for an issue.
-    async fn get_issue_node_id(&self, issue_number: u64, token: &str) -> Option<String> {
+    async fn get_issue_node_id(&self, issue_number: u64) -> Option<String> {
         let url = format!(
             "{}/repos/{}/{}/issues/{}",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, issue_number,
@@ -220,7 +193,7 @@ impl CloudAgentClient {
         match self
             .http
             .get(&url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {}", self.github_token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
             .send()
@@ -257,14 +230,13 @@ impl CloudAgentClient {
         &self,
         issue_number: u64,
         issue_node_id: Option<&str>,
-        token: &str,
     ) -> bool {
         // Resolve the issue's GraphQL node ID.
         let owned_node_id;
         let assignable_id = match issue_node_id {
             Some(id) => id,
             None => {
-                match self.get_issue_node_id(issue_number, token).await {
+                match self.get_issue_node_id(issue_number).await {
                     Some(id) => {
                         owned_node_id = id;
                         owned_node_id.as_str()
@@ -281,7 +253,7 @@ impl CloudAgentClient {
         };
 
         // Look up the Copilot bot's GraphQL node ID.
-        let actor_id = match self.get_user_node_id(COPILOT_LOGIN, token).await {
+        let actor_id = match self.get_user_node_id(COPILOT_LOGIN).await {
             Some(id) => id,
             None => {
                 tracing::warn!(
@@ -319,7 +291,7 @@ impl CloudAgentClient {
         match self
             .http
             .post(&graphql_url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {}", self.github_token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
             .json(&query)
@@ -748,25 +720,11 @@ mod tests {
     fn cloud_agent_client_constructs() {
         let client = CloudAgentClient::new(
             "test-token".to_string(),
-            None,
             "owner".to_string(),
             "repo".to_string(),
         );
         assert_eq!(client.repo_owner, "owner");
         assert_eq!(client.repo_name, "repo");
-        assert!(client.fallback_token.is_none());
-    }
-
-    #[test]
-    fn cloud_agent_client_with_fallback_token() {
-        let client = CloudAgentClient::new(
-            "primary-token".to_string(),
-            Some("fallback-token".to_string()),
-            "owner".to_string(),
-            "repo".to_string(),
-        );
-        assert_eq!(client.github_token, "primary-token");
-        assert_eq!(client.fallback_token.as_deref(), Some("fallback-token"));
     }
 
     #[test]
