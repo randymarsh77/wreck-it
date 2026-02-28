@@ -35,6 +35,7 @@
     "iteration 6: triggered cloud agent for task impl-3 (issue #39)",
     "iteration 6: agent created PR #41 for task Some(\"impl-3\")",
     "iteration 6: marked PR #41 as ready for review",
+    "iteration 6: PR #41 not yet mergeable",
     "iteration 6: PR #41 not yet mergeable"
   ]
 }
