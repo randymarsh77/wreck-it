@@ -1,7 +1,9 @@
 use anyhow::{bail, Context, Result};
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
-const COPILOT_LOGIN: &str = "copilot";
+/// Known coding agent logins to search for via the `suggestedActors` GraphQL
+/// query. Agents are tried in order; the first match wins.
+const KNOWN_AGENT_LOGINS: &[&str] = &["copilot-swe-agent", "copilot", "claude", "codex"];
 
 /// Status of a cloud agent session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,13 +49,17 @@ pub struct CloudAgentClient {
     http: reqwest::Client,
 }
 
-/// Check whether Copilot appears in an issue's assignees array.
+/// Check whether any known coding agent appears in an issue's assignees array.
 fn is_copilot_in_assignees(issue: &serde_json::Value) -> bool {
     issue["assignees"]
         .as_array()
         .map(|arr| {
-            arr.iter()
-                .any(|a| a["login"].as_str() == Some(COPILOT_LOGIN))
+            arr.iter().any(|a| {
+                a["login"]
+                    .as_str()
+                    .map(|login| KNOWN_AGENT_LOGINS.contains(&login))
+                    .unwrap_or(false)
+            })
         })
         .unwrap_or(false)
 }
@@ -152,32 +158,101 @@ impl CloudAgentClient {
         self.try_assign_copilot(issue_number, issue_node_id).await
     }
 
-    /// Look up a GitHub user's GraphQL node ID by login.
-    async fn get_user_node_id(&self, login: &str) -> Option<String> {
-        let url = format!("{}/users/{}", GITHUB_API_BASE, login);
-        match self
+    /// Find an available coding agent via the `suggestedActors` GraphQL query.
+    ///
+    /// Returns `(agent_node_id, agent_login)` of the first known agent found,
+    /// or `None` if no agent could be discovered.
+    async fn get_agent_from_suggested_actors(&self) -> Option<(String, String)> {
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": r#"query($owner: String!, $name: String!) {
+                repository(owner: $owner, name: $name) {
+                    suggestedActors(capabilities: [CAN_BE_ASSIGNED], first: 100) {
+                        nodes {
+                            login
+                            __typename
+                            ... on Bot { id }
+                            ... on User { id }
+                        }
+                    }
+                }
+            }"#,
+            "variables": {
+                "owner": self.repo_owner,
+                "name": self.repo_name,
+            },
+        });
+
+        let resp = match self
             .http
-            .get(&url)
+            .post(&graphql_url)
             .header("Authorization", format!("Bearer {}", self.github_token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
+            .json(&query)
             .send()
             .await
         {
-            Ok(resp) if resp.status().is_success() => resp
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|v| v["node_id"].as_str().map(|s| s.to_string())),
-            Ok(resp) => {
-                tracing::warn!("Failed to look up user '{}' ({})", login, resp.status());
-                None
-            }
+            Ok(r) => r,
             Err(e) => {
-                tracing::warn!("HTTP error looking up user '{}': {}", login, e);
-                None
+                tracing::warn!("HTTP error querying suggestedActors: {}", e);
+                return None;
+            }
+        };
+
+        if !resp.status().is_success() {
+            tracing::warn!("suggestedActors query failed ({})", resp.status(),);
+            return None;
+        }
+
+        let body: serde_json::Value = match resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("Failed to parse suggestedActors response: {}", e);
+                return None;
+            }
+        };
+
+        if let Some(errors) = body.get("errors") {
+            tracing::warn!("GraphQL errors in suggestedActors query: {}", errors);
+            return None;
+        }
+
+        let nodes = body
+            .pointer("/data/repository/suggestedActors/nodes")
+            .and_then(|v| v.as_array());
+
+        let nodes = match nodes {
+            Some(n) => n,
+            None => {
+                tracing::warn!("No suggestedActors nodes returned");
+                return None;
+            }
+        };
+
+        // Search for the first known agent login in priority order.
+        for &known_login in KNOWN_AGENT_LOGINS {
+            for node in nodes {
+                if node["login"].as_str() == Some(known_login) {
+                    if let Some(id) = node["id"].as_str() {
+                        tracing::info!(
+                            "Found coding agent '{}' (id: {}) via suggestedActors",
+                            known_login,
+                            id,
+                        );
+                        return Some((id.to_string(), known_login.to_string()));
+                    }
+                }
             }
         }
+
+        tracing::warn!(
+            "No known coding agent found in suggestedActors (searched for {:?}). \
+             This feature may require a GitHub Enterprise account or Copilot for \
+             Pull Requests and Issues to be enabled in the repository settings.",
+            KNOWN_AGENT_LOGINS,
+        );
+        None
     }
 
     /// Fetch the GraphQL node ID for an issue.
@@ -219,9 +294,10 @@ impl CloudAgentClient {
         }
     }
 
-    /// Attempt to assign Copilot using the GraphQL `replaceActorsForAssignable`
-    /// mutation. Falls back to fetching the issue node ID if it was not provided.
-    /// Returns `true` when the mutation succeeds.
+    /// Attempt to assign a coding agent using the GraphQL
+    /// `assignCopilotAgentToAssignable` mutation. Discovers the agent via
+    /// `suggestedActors` and falls back to fetching the issue node ID if it was
+    /// not provided. Returns `true` when the mutation succeeds.
     async fn try_assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
         // Resolve the issue's GraphQL node ID.
         let owned_node_id;
@@ -239,26 +315,19 @@ impl CloudAgentClient {
             },
         };
 
-        // Look up the Copilot bot's GraphQL node ID.
-        let actor_id = match self.get_user_node_id(COPILOT_LOGIN).await {
-            Some(id) => id,
-            None => {
-                tracing::warn!(
-                    "Could not look up node_id for user '{}'; \
-                     unable to assign via GraphQL",
-                    COPILOT_LOGIN,
-                );
-                return false;
-            }
+        // Discover a coding agent via the suggestedActors GraphQL query.
+        let (agent_id, agent_login) = match self.get_agent_from_suggested_actors().await {
+            Some(pair) => pair,
+            None => return false,
         };
 
-        // Use the GraphQL replaceActorsForAssignable mutation.
+        // Use the GraphQL assignCopilotAgentToAssignable mutation.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
         let query = serde_json::json!({
-            "query": r#"mutation($assignableId: ID!, $actorIds: [ID!]!) {
-                replaceActorsForAssignable(input: {
+            "query": r#"mutation($assignableId: ID!, $agentId: ID!) {
+                assignCopilotAgentToAssignable(input: {
                     assignableId: $assignableId,
-                    actorIds: $actorIds
+                    agentId: $agentId
                 }) {
                     assignable {
                         ... on Issue {
@@ -271,7 +340,7 @@ impl CloudAgentClient {
             }"#,
             "variables": {
                 "assignableId": assignable_id,
-                "actorIds": [actor_id],
+                "agentId": agent_id,
             },
         });
 
@@ -290,43 +359,51 @@ impl CloudAgentClient {
                     // Check for GraphQL-level errors.
                     if let Some(errors) = gql_resp.get("errors") {
                         tracing::warn!(
-                            "GraphQL errors assigning Copilot to issue #{}: {}",
+                            "GraphQL errors assigning '{}' to issue #{}: {}",
+                            agent_login,
                             issue_number,
                             errors,
                         );
                         return false;
                     }
 
-                    // Verify Copilot appears in the assignees from the mutation
-                    // response.
-                    let has_copilot = gql_resp
-                        .pointer("/data/replaceActorsForAssignable/assignable/assignees/nodes")
+                    // Verify the agent appears in the assignees from the
+                    // mutation response.
+                    let has_agent = gql_resp
+                        .pointer("/data/assignCopilotAgentToAssignable/assignable/assignees/nodes")
                         .and_then(|v| v.as_array())
                         .map(|arr| {
-                            arr.iter()
-                                .any(|a| a["login"].as_str() == Some(COPILOT_LOGIN))
+                            arr.iter().any(|a| {
+                                a["login"]
+                                    .as_str()
+                                    .map(|l| KNOWN_AGENT_LOGINS.contains(&l))
+                                    .unwrap_or(false)
+                            })
                         })
                         .unwrap_or(false);
 
-                    if has_copilot {
+                    if has_agent {
                         tracing::info!(
-                            "Assigned Copilot to issue #{} via GraphQL – coding agent triggered",
+                            "Assigned '{}' to issue #{} via GraphQL – coding agent triggered",
+                            agent_login,
                             issue_number,
                         );
                         return true;
                     }
                 }
                 tracing::warn!(
-                    "Copilot not found in assignees for issue #{} after GraphQL mutation; \
-                     the token may lack permission to assign Copilot (a PAT may be required)",
+                    "Agent not found in assignees for issue #{} after GraphQL mutation; \
+                     the token may lack permission or a GitHub Enterprise account may be \
+                     required",
                     issue_number,
                 );
                 false
             }
             Ok(resp) => {
                 tracing::warn!(
-                    "Failed to assign Copilot to issue #{} via GraphQL ({}); \
+                    "Failed to assign '{}' to issue #{} via GraphQL ({}); \
                      agent may need manual trigger",
+                    agent_login,
                     issue_number,
                     resp.status(),
                 );
@@ -334,7 +411,8 @@ impl CloudAgentClient {
             }
             Err(e) => {
                 tracing::warn!(
-                    "HTTP error assigning Copilot to issue #{} via GraphQL: {}",
+                    "HTTP error assigning '{}' to issue #{} via GraphQL: {}",
+                    agent_login,
                     issue_number,
                     e,
                 );
@@ -689,11 +767,7 @@ impl CloudAgentClient {
                 .await
             {
                 Ok(resp) if resp.status().is_success() => {
-                    tracing::info!(
-                        "Approved workflow run {} for PR #{}",
-                        run_id,
-                        pr_number,
-                    );
+                    tracing::info!("Approved workflow run {} for PR #{}", run_id, pr_number,);
                 }
                 Ok(resp) => {
                     tracing::warn!(
@@ -920,5 +994,37 @@ mod tests {
     fn is_copilot_in_assignees_no_field() {
         let issue = serde_json::json!({});
         assert!(!is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_copilot_swe_agent() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "copilot-swe-agent"}]
+        });
+        assert!(is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_claude() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "claude"}]
+        });
+        assert!(is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn is_copilot_in_assignees_codex() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "codex"}]
+        });
+        assert!(is_copilot_in_assignees(&issue));
+    }
+
+    #[test]
+    fn known_agent_logins_contains_expected_entries() {
+        assert!(KNOWN_AGENT_LOGINS.contains(&"copilot-swe-agent"));
+        assert!(KNOWN_AGENT_LOGINS.contains(&"copilot"));
+        assert!(KNOWN_AGENT_LOGINS.contains(&"claude"));
+        assert!(KNOWN_AGENT_LOGINS.contains(&"codex"));
     }
 }
