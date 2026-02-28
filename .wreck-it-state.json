@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 6,
   "current_task_id": "impl-3",
   "issue_number": 39,
+  "pr_number": 41,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/41",
   "last_prompt": "Implement an agent context/memory system that persists across iterations. Create a new src/agent_memory.rs module that maintains a per-task context file (.wreck-it-memory/{task_id}.md) containing: previous attempts and their outcomes, key decisions made, relevant code locations discovered, and learnings from failed attempts. Integrate this with the AgentClient so context is included in agent prompts. This enables agents to learn from previous iterations rather than starting fresh each time. Add unit tests.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
@@ -30,6 +32,8 @@
     "iteration 5: triggered cloud agent for task impl-2 (issue #37)",
     "iteration 5: agent created PR #38 for task Some(\"impl-2\")",
     "iteration 5: PR #38 already merged for task Some(\"impl-2\")",
-    "iteration 6: triggered cloud agent for task impl-3 (issue #39)"
+    "iteration 6: triggered cloud agent for task impl-3 (issue #39)",
+    "iteration 6: agent created PR #41 for task Some(\"impl-3\")",
+    "iteration 6: marked PR #41 as ready for review"
   ]
 }
