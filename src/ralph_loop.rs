@@ -1,9 +1,13 @@
 use crate::agent::AgentClient;
+use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{Config, EvaluationMode, LoopState, Task, TaskStatus};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Error message used when evaluation/tests fail without a prior agent error.
+const TEST_FAILURE_ERROR: &str = "Tests failed";
 
 /// Intelligent task scheduler that scores ready tasks across multiple factors
 /// and returns them ordered from highest to lowest priority.
@@ -210,16 +214,19 @@ impl RalphLoop {
         let task_desc = self.state.tasks[task_idx].description.clone();
         self.state.add_log(format!("Starting task: {}", task_desc));
 
-        // Execute the task with reflection rounds
+        // Execute the task with reflection rounds; capture any error text for
+        // potential use by the re-planner.
         let task = self.state.tasks[task_idx].clone();
         let reflection_rounds = self.config.reflection_rounds;
+        let mut task_error = String::new();
         match self.agent.execute_task_with_reflection(&task, reflection_rounds).await {
             Ok(()) => {
                 self.state.add_log("Task completed".to_string());
                 self.state.tasks[task_idx].status = TaskStatus::Completed;
             }
             Err(e) => {
-                self.state.add_log(format!("Task failed: {}", e));
+                task_error = e.to_string();
+                self.state.add_log(format!("Task failed: {}", task_error));
                 self.state.tasks[task_idx].status = TaskStatus::Failed;
                 self.state.tasks[task_idx].failed_attempts += 1;
             }
@@ -235,6 +242,9 @@ impl RalphLoop {
             }
             Ok(false) => {
                 self.state.add_log("Tests failed".to_string());
+                if task_error.is_empty() {
+                    task_error = TEST_FAILURE_ERROR.to_string();
+                }
                 self.state.tasks[task_idx].status = TaskStatus::Failed;
             }
             Err(e) => {
@@ -254,6 +264,45 @@ impl RalphLoop {
 
         // Save task state to filesystem
         save_tasks(&self.config.task_file, &self.state.tasks).context("Failed to save tasks")?;
+
+        // Update consecutive failure counter and optionally invoke re-planner.
+        if self.state.tasks[task_idx].status == TaskStatus::Failed {
+            self.state.consecutive_failures += 1;
+            let threshold = self.config.replan_threshold;
+            if threshold > 0 && self.state.consecutive_failures >= threshold {
+                self.state.add_log(format!(
+                    "Consecutive failure threshold ({}) reached – invoking re-planner",
+                    threshold
+                ));
+                let replanner = TaskReplanner::new(
+                    self.config.model_provider.clone(),
+                    self.config.api_endpoint.clone(),
+                    self.config.api_token.clone(),
+                    self.config.work_dir.to_string_lossy().to_string(),
+                );
+                let failed_task = self.state.tasks[task_idx].clone();
+                match replan_and_save(
+                    &replanner,
+                    &self.state.tasks,
+                    &failed_task,
+                    &task_error,
+                    &self.config.task_file,
+                )
+                .await
+                {
+                    Ok(updated) => {
+                        self.state.tasks = updated;
+                        self.state.consecutive_failures = 0;
+                        self.state.add_log("Re-planning succeeded".to_string());
+                    }
+                    Err(e) => {
+                        self.state.add_log(format!("Re-planning failed: {}", e));
+                    }
+                }
+            }
+        } else {
+            self.state.consecutive_failures = 0;
+        }
 
         Ok(true)
     }

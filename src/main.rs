@@ -10,6 +10,7 @@ mod headless_state;
 mod integration_eval;
 mod planner;
 mod ralph_loop;
+mod replanner;
 mod repo_config;
 mod state_worktree;
 mod task_manager;
@@ -60,6 +61,7 @@ async fn main() -> Result<()> {
             ralph,
             goal,
             reflection_rounds,
+            replan_threshold,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -139,6 +141,9 @@ async fn main() -> Result<()> {
             }
             if let Some(reflection_rounds) = reflection_rounds {
                 config.reflection_rounds = reflection_rounds;
+            }
+            if let Some(replan_threshold) = replan_threshold {
+                config.replan_threshold = replan_threshold;
             }
             if config.model_provider == ModelProvider::Llama
                 && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT

@@ -11,6 +11,7 @@ pub const DEFAULT_GITHUB_MODELS_MODEL: &str = "anthropic/claude-opus-4.6";
 pub const LLAMA_PROVIDER_TYPE: &str = "openai";
 pub const DEFAULT_COMPLETION_MARKER: &str = ".task-complete";
 pub const DEFAULT_REFLECTION_ROUNDS: u8 = 2;
+pub const DEFAULT_REPLAN_THRESHOLD: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -92,6 +93,11 @@ pub struct Config {
     /// completes a task.  A value of 0 disables reflection entirely.
     #[serde(default = "default_reflection_rounds")]
     pub reflection_rounds: u8,
+
+    /// Number of consecutive task failures before the adaptive re-planner is
+    /// invoked.  A value of 0 disables re-planning.
+    #[serde(default = "default_replan_threshold")]
+    pub replan_threshold: u32,
 }
 
 fn default_max_iterations() -> usize {
@@ -122,6 +128,10 @@ fn default_reflection_rounds() -> u8 {
     DEFAULT_REFLECTION_ROUNDS
 }
 
+fn default_replan_threshold() -> u32 {
+    DEFAULT_REPLAN_THRESHOLD
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -136,6 +146,7 @@ impl Default for Config {
             completeness_prompt: None,
             completion_marker_file: default_completion_marker(),
             reflection_rounds: default_reflection_rounds(),
+            replan_threshold: default_replan_threshold(),
         }
     }
 }
@@ -271,6 +282,8 @@ pub struct LoopState {
     pub current_task: Option<usize>,
     pub running: bool,
     pub logs: Vec<String>,
+    /// Number of consecutive task failures since the last success or re-plan.
+    pub consecutive_failures: u32,
 }
 
 impl LoopState {
@@ -282,6 +295,7 @@ impl LoopState {
             current_task: None,
             running: false,
             logs: Vec::new(),
+            consecutive_failures: 0,
         }
     }
 
@@ -450,6 +464,7 @@ mod tests {
             PathBuf::from(DEFAULT_COMPLETION_MARKER)
         );
         assert_eq!(config.reflection_rounds, DEFAULT_REFLECTION_ROUNDS);
+        assert_eq!(config.replan_threshold, DEFAULT_REPLAN_THRESHOLD);
     }
 
     #[test]
@@ -466,6 +481,7 @@ mod tests {
         let json = r#"{"max_iterations":10}"#;
         let config: Config = serde_json::from_str(json).unwrap();
         assert_eq!(config.reflection_rounds, DEFAULT_REFLECTION_ROUNDS);
+        assert_eq!(config.replan_threshold, DEFAULT_REPLAN_THRESHOLD);
     }
 
     #[test]
