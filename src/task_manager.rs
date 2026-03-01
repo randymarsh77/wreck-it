@@ -195,6 +195,7 @@ mod tests {
             last_attempt_at: None,
             inputs: vec![],
             outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
         }
     }
 
@@ -218,6 +219,7 @@ mod tests {
             last_attempt_at: None,
             inputs: vec![],
             outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
         }];
 
         save_tasks(&task_file, &tasks).unwrap();
@@ -245,6 +247,7 @@ mod tests {
                 last_attempt_at: None,
                 inputs: vec![],
                 outputs: vec![],
+                runtime: crate::types::TaskRuntime::default(),
             },
             Task {
                 id: "2".to_string(),
@@ -261,6 +264,7 @@ mod tests {
                 last_attempt_at: None,
                 inputs: vec![],
                 outputs: vec![],
+                runtime: crate::types::TaskRuntime::default(),
             },
         ];
 
