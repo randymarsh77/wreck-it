@@ -37,6 +37,8 @@ mod tests {
             complexity,
             failed_attempts: 0,
             last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
         }
     }
 

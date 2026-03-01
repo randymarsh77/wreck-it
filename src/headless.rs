@@ -923,6 +923,8 @@ mod tests {
             complexity: 1,
             failed_attempts: 0,
             last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
@@ -950,6 +952,8 @@ mod tests {
             complexity: 1,
             failed_attempts: 0,
             last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
         }];
         save_tasks(&task_file, &tasks).unwrap();
 

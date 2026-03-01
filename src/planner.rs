@@ -247,6 +247,8 @@ pub fn parse_and_validate_plan(raw: &str) -> Result<Vec<Task>> {
                 complexity: 1,
                 failed_attempts: 0,
                 last_attempt_at: None,
+                inputs: vec![],
+                outputs: vec![],
             })
         })
         .collect::<Result<Vec<Task>>>()?;

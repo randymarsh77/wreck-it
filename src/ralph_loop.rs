@@ -1,4 +1,5 @@
 use crate::agent::AgentClient;
+use crate::artefact_store;
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{Config, EvaluationMode, LoopState, Task, TaskStatus};
@@ -254,6 +255,25 @@ impl RalphLoop {
 
         // Commit changes (if task succeeded)
         if self.state.tasks[task_idx].status == TaskStatus::Completed {
+            // Persist declared output artefacts before committing.
+            if !task.outputs.is_empty() {
+                let manifest_path = self.config.work_dir.join(".wreck-it-artefacts.json");
+                match artefact_store::persist_output_artefacts(
+                    &manifest_path,
+                    &task.id,
+                    &task.outputs,
+                    &self.config.work_dir,
+                ) {
+                    Ok(()) => {
+                        self.state.add_log("Output artefacts persisted".to_string());
+                    }
+                    Err(e) => {
+                        self.state
+                            .add_log(format!("Warning: failed to persist output artefacts: {}", e));
+                    }
+                }
+            }
+
             let commit_msg = format!("Complete task: {}", self.state.tasks[task_idx].description);
             if let Err(e) = self.agent.commit_changes(&commit_msg) {
                 self.state.add_log(format!("Failed to commit: {}", e));
@@ -493,6 +513,8 @@ mod tests {
             complexity,
             failed_attempts,
             last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
         }
     }
 
@@ -599,6 +621,8 @@ mod tests {
                 complexity: 1,
                 failed_attempts: 0,
                 last_attempt_at: Some(recent_ts),
+                inputs: vec![],
+                outputs: vec![],
             },
             Task {
                 id: "old".to_string(),
@@ -613,6 +637,8 @@ mod tests {
                 complexity: 1,
                 failed_attempts: 0,
                 last_attempt_at: Some(old_ts),
+                inputs: vec![],
+                outputs: vec![],
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -645,6 +671,8 @@ mod tests {
                 complexity: 1,
                 failed_attempts: 0,
                 last_attempt_at: Some(old_ts),
+                inputs: vec![],
+                outputs: vec![],
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
