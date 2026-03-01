@@ -123,7 +123,7 @@
   {
     "id": "impl-9",
     "description": "Implement a Gastown cloud runtime integration. Add a 'gastown' ModelProvider variant (or a separate 'runtime' field on Task) so tasks can declare 'runtime: gastown' to offload execution to a gastown cloud agent service. Implement a GastownClient in a new src/gastown_client.rs module that: (1) serialises the wreck-it task graph as a gastown-compatible workflow DAG (YAML/JSON), (2) submits the workflow to a configurable gastown endpoint, (3) polls for task completion events and updates .wreck-it-state.json accordingly. Add gastown_endpoint and gastown_token configuration fields to Config in types.rs (both optional; when absent, gastown integration is disabled). Add unit tests for DAG serialisation and status-update handling. Document the integration in docs/roadmap.md.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 4,
     "depends_on": [
       "eval-3"
@@ -132,7 +132,7 @@
   {
     "id": "impl-10",
     "description": "Implement Openclaw provenance tracking integration. During task execution in ralph_loop.rs, record a provenance record for every agent invocation: { task_id, agent_role, model, prompt_hash, tool_calls: [...], git_diff_hash, timestamp, outcome }. Persist provenance records to .wreck-it-provenance/<task_id>.json. Add a 'wreck-it provenance --task <id>' sub-command that prints the human-readable provenance chain for a task. Add a 'wreck-it export-openclaw [--output path]' sub-command that serialises the full run provenance in the openclaw plan-graph JSON format for import into the openclaw visualiser. Add unit tests for provenance record serialisation and the export format. Document the integration in docs/roadmap.md.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 4,
     "depends_on": [
       "eval-3"
