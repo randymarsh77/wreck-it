@@ -151,7 +151,7 @@
   {
     "id": "eval-5",
     "description": "Evaluate the adaptive re-planning on failure (impl-7) and typed artefact store (impl-8) implementations. Verify: 1) After exceeding the replan threshold, the re-planner agent is invoked and produces a modified task list that is persisted correctly; 2) Circular dependency and duplicate ID guards reject invalid re-planner outputs; 3) Artefact outputs are persisted after task completion and correctly injected into downstream task prompts; 4) Tasks without inputs/outputs fields behave identically to pre-impl-8 behaviour (backward compatibility); 5) All new unit tests pass with 'cargo test'; 6) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 5,
     "depends_on": [
       "impl-7",
@@ -161,7 +161,7 @@
   {
     "id": "eval-6",
     "description": "Evaluate the Gastown cloud runtime integration (impl-9) and Openclaw provenance tracking integration (impl-10). Verify: 1) The task graph is correctly serialised as a gastown-compatible workflow DAG; 2) When gastown_endpoint is absent in config, the gastown runtime is silently disabled and wreck-it falls back to local execution; 3) Provenance records are written to .wreck-it-provenance/ for each task execution; 4) 'wreck-it provenance --task <id>' correctly prints the provenance chain; 5) 'wreck-it export-openclaw' produces valid openclaw plan-graph JSON; 6) All new unit tests pass with 'cargo test'; 7) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 5,
     "depends_on": [
       "impl-9",
