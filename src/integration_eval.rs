@@ -58,15 +58,7 @@ mod tests {
 
         // ── Step 1: Build a mixed-role task list ─────────────────────────────
         let initial_tasks = vec![
-            make_task(
-                "ideas-1",
-                AgentRole::Ideas,
-                TaskStatus::Pending,
-                1,
-                5,
-                3,
-                vec![],
-            ),
+            make_task("ideas-1", AgentRole::Ideas, TaskStatus::Pending, 1, 5, 3, vec![]),
             make_task(
                 "impl-1",
                 AgentRole::Implementer,
@@ -91,15 +83,9 @@ mod tests {
         // ── Step 2: Role-based routing ────────────────────────────────────────
         let tasks = load_tasks(&task_file).unwrap();
         assert_eq!(filter_tasks_by_role(&tasks, AgentRole::Ideas).len(), 1);
-        assert_eq!(
-            filter_tasks_by_role(&tasks, AgentRole::Implementer).len(),
-            1
-        );
+        assert_eq!(filter_tasks_by_role(&tasks, AgentRole::Implementer).len(), 1);
         assert_eq!(filter_tasks_by_role(&tasks, AgentRole::Evaluator).len(), 1);
-        assert_eq!(
-            filter_tasks_by_role(&tasks, AgentRole::Ideas)[0].id,
-            "ideas-1"
-        );
+        assert_eq!(filter_tasks_by_role(&tasks, AgentRole::Ideas)[0].id, "ideas-1");
 
         // ── Step 3: Intelligent scheduling ───────────────────────────────────
         // Only ideas-1 is ready; impl-1 and eval-1 are blocked by dependencies.
@@ -149,9 +135,7 @@ mod tests {
 
         state.iteration = 1;
         state.current_task_id = Some("ideas-1".to_string());
-        state
-            .memory
-            .push("iteration 1: triggered ideas-1 (issue #10)".to_string());
+        state.memory.push("iteration 1: triggered ideas-1 (issue #10)".to_string());
         save_headless_state(&state_file, &state).unwrap();
 
         // Second invocation: memory from iteration 1 is still present.
@@ -161,9 +145,7 @@ mod tests {
 
         state.iteration = 2;
         state.phase = AgentPhase::NeedsVerification;
-        state
-            .memory
-            .push("iteration 2: impl-1 PR #20 created".to_string());
+        state.memory.push("iteration 2: impl-1 PR #20 created".to_string());
         save_headless_state(&state_file, &state).unwrap();
 
         // Third invocation: both memory entries survive across restarts.

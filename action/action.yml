@@ -1,6 +1,10 @@
 name: 'wreck-it'
 description: 'Run wreck-it ralph loop in headless mode for CI environments'
 inputs:
+  task_file:
+    description: 'Path to the task JSON file'
+    required: false
+    default: 'tasks.json'
   max_iterations:
     description: 'Maximum number of loop iterations'
     required: false
@@ -8,14 +12,10 @@ inputs:
   verify_command:
     description: 'Shell command to verify task completion (trusted input only)'
     required: false
-  state_branch:
-    description: 'Git branch used to persist wreck-it state (orphan branch)'
-    required: false
-    default: 'wreck-it-state'
 runs:
   using: 'docker'
   image: 'Dockerfile'
   env:
+    INPUT_TASK_FILE: ${{ inputs.task_file }}
     INPUT_MAX_ITERATIONS: ${{ inputs.max_iterations }}
     INPUT_VERIFY_COMMAND: ${{ inputs.verify_command }}
-    INPUT_STATE_BRANCH: ${{ inputs.state_branch }}
