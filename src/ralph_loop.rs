@@ -1,14 +1,27 @@
 use crate::agent::AgentClient;
 use crate::artefact_store;
+use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
-use crate::types::{Config, EvaluationMode, LoopState, Task, TaskStatus};
+use crate::types::{
+    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus, DEFAULT_GITHUB_MODELS_MODEL,
+    DEFAULT_LLAMA_MODEL,
+};
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Error message used when evaluation/tests fail without a prior agent error.
 const TEST_FAILURE_ERROR: &str = "Tests failed";
+
+/// Return a human-readable model name for the given provider.
+fn model_name(provider: &ModelProvider) -> String {
+    match provider {
+        ModelProvider::Copilot => "copilot".to_string(),
+        ModelProvider::Llama => DEFAULT_LLAMA_MODEL.to_string(),
+        ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL.to_string(),
+    }
+}
 
 /// Intelligent task scheduler that scores ready tasks across multiple factors
 /// and returns them ordered from highest to lowest priority.
@@ -205,12 +218,8 @@ impl RalphLoop {
     async fn run_single_task(&mut self, task_idx: usize) -> Result<bool> {
         self.state.current_task = Some(task_idx);
         self.state.tasks[task_idx].status = TaskStatus::InProgress;
-        self.state.tasks[task_idx].last_attempt_at = Some(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-        );
+        let invocation_timestamp = provenance::now_timestamp();
+        self.state.tasks[task_idx].last_attempt_at = Some(invocation_timestamp);
 
         let task_desc = self.state.tasks[task_idx].description.clone();
         self.state.add_log(format!("Starting task: {}", task_desc));
@@ -231,6 +240,24 @@ impl RalphLoop {
                 self.state.tasks[task_idx].status = TaskStatus::Failed;
                 self.state.tasks[task_idx].failed_attempts += 1;
             }
+        }
+
+        // Record provenance for this agent invocation (before committing so
+        // the git diff hash reflects the agent's actual changes).
+        let prov_outcome = if task_error.is_empty() { "success" } else { "failure" };
+        let prov_record = ProvenanceRecord {
+            task_id: task.id.clone(),
+            agent_role: task.role,
+            model: model_name(&self.config.model_provider),
+            prompt_hash: provenance::hash_string(&task.description),
+            tool_calls: vec![],
+            git_diff_hash: provenance::git_diff_hash(&self.config.work_dir),
+            timestamp: invocation_timestamp,
+            outcome: prov_outcome.to_string(),
+        };
+        if let Err(e) = provenance::persist_provenance_record(&prov_record, &self.config.work_dir) {
+            self.state
+                .add_log(format!("Warning: failed to persist provenance record: {}", e));
         }
 
         // Run tests / evaluation
@@ -347,21 +374,18 @@ impl RalphLoop {
             self.state.tasks[indices[0]].phase,
         ));
 
-        // Mark all as in-progress and collect task data.
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let mut task_data: Vec<(usize, crate::types::Task)> = Vec::new();
+        // Mark all as in-progress and collect task data with per-task timestamps.
+        let mut task_data: Vec<(usize, crate::types::Task, u64)> = Vec::new();
         for &idx in &indices {
+            let ts = provenance::now_timestamp();
             self.state.tasks[idx].status = TaskStatus::InProgress;
-            self.state.tasks[idx].last_attempt_at = Some(now_secs);
-            task_data.push((idx, self.state.tasks[idx].clone()));
+            self.state.tasks[idx].last_attempt_at = Some(ts);
+            task_data.push((idx, self.state.tasks[idx].clone(), ts));
         }
 
-        // Spawn concurrent agent work.
+        // Spawn concurrent agent work (include per-task timestamp for provenance).
         let mut handles = Vec::new();
-        for (idx, task) in task_data {
+        for (idx, task, ts) in task_data {
             let mut agent = AgentClient::with_evaluation(
                 self.config.model_provider.clone(),
                 self.config.api_endpoint.clone(),
@@ -377,30 +401,66 @@ impl RalphLoop {
             );
             let handle = tokio::spawn(async move {
                 let result = agent.execute_task(&task).await;
-                (idx, result)
+                (idx, task, ts, result)
             });
             handles.push(handle);
         }
 
-        // Collect results.
+        // Collect results.  Compute the git diff hash once after all tasks
+        // finish so the hash reflects the combined state of all parallel changes,
+        // and avoid running `git diff` repeatedly for the same snapshot.
+        let mut completed: Vec<(usize, crate::types::Task, u64)> = Vec::new();
+        let mut failed: Vec<(usize, crate::types::Task, u64)> = Vec::new();
         for handle in handles {
             match handle.await {
-                Ok((idx, Ok(result))) => {
+                Ok((idx, task, ts, Ok(result))) => {
                     self.state.add_log(format!(
                         "Task [{}] completed: {}",
                         self.state.tasks[idx].id, result
                     ));
                     self.state.tasks[idx].status = TaskStatus::Completed;
+                    completed.push((idx, task, ts));
                 }
-                Ok((idx, Err(e))) => {
+                Ok((idx, task, ts, Err(e))) => {
                     self.state
                         .add_log(format!("Task [{}] failed: {}", self.state.tasks[idx].id, e));
                     self.state.tasks[idx].status = TaskStatus::Failed;
                     self.state.tasks[idx].failed_attempts += 1;
+                    failed.push((idx, task, ts));
                 }
                 Err(e) => {
                     self.state.add_log(format!("Parallel task panicked: {}", e));
                 }
+            }
+        }
+
+        // Record provenance for this batch.  Compute the diff hash once and
+        // share it across all records in this parallel phase.
+        let model = model_name(&self.config.model_provider);
+        let batch_diff_hash = provenance::git_diff_hash(&self.config.work_dir);
+        for (_, task, ts) in completed.iter().chain(failed.iter()) {
+            let outcome = if failed.iter().any(|(_, t, _)| t.id == task.id) {
+                "failure"
+            } else {
+                "success"
+            };
+            let prov_record = ProvenanceRecord {
+                task_id: task.id.clone(),
+                agent_role: task.role,
+                model: model.clone(),
+                prompt_hash: provenance::hash_string(&task.description),
+                tool_calls: vec![],
+                git_diff_hash: batch_diff_hash.clone(),
+                timestamp: *ts,
+                outcome: outcome.to_string(),
+            };
+            if let Err(e) =
+                provenance::persist_provenance_record(&prov_record, &self.config.work_dir)
+            {
+                self.state.add_log(format!(
+                    "Warning: failed to persist provenance record: {}",
+                    e
+                ));
             }
         }
 
