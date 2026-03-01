@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 11,
   "current_task_id": "impl-5",
   "issue_number": 63,
+  "pr_number": 64,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/64",
   "last_prompt": "Implement LLM-powered dynamic task planning: add a 'wreck-it plan --goal \"...\"' sub-command (and an optional pre-loop planning phase in 'wreck-it run --goal \"...\"') that sends a natural-language goal to the Copilot SDK and receives back a structured task plan as a JSON array. The planner prompt must instruct the model to emit tasks with 'id', 'description', 'phase', and optional 'depends_on' fields. Validate the output against the Task schema before writing it to tasks.json. Add a 'generate_task_plan(goal: &str) -> Result<Vec<Task>>' method to AgentClient and a corresponding 'Plan' variant to the Commands enum in cli.rs. Add unit tests for the schema validation and ID-uniqueness checks.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
@@ -53,6 +55,14 @@
     "iteration 10: triggered cloud agent for task eval-3 (issue #56)",
     "iteration 10: agent created PR #57 for task Some(\"eval-3\")",
     "iteration 10: PR #57 already merged for task Some(\"eval-3\")",
-    "iteration 11: triggered cloud agent for task impl-5 (issue #63)"
+    "iteration 11: triggered cloud agent for task impl-5 (issue #63)",
+    "iteration 11: agent created PR #64 for task Some(\"impl-5\")",
+    "iteration 11: marked PR #64 as ready for review"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 64,
+      "task_id": "impl-5"
+    }
   ]
 }
