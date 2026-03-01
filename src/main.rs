@@ -21,8 +21,8 @@ use cli::{Cli, Commands};
 use config_manager::{load_user_config, save_user_config};
 use ralph_loop::RalphLoop;
 use repo_config::{
-    is_interactive, is_state_empty, load_repo_config, prompt_with_default, repo_config_path,
-    save_repo_config, RepoConfig,
+    is_interactive, is_state_uninitialized, load_repo_config, prompt_with_default,
+    repo_config_path, save_repo_config, RepoConfig,
 };
 use std::env;
 use tui::TuiApp;
@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
                 state_worktree::ensure_state_worktree(&resolved_work_dir, &repo_cfg.state_branch)?;
 
             // If state is empty, nothing to do.
-            if is_state_empty(&state_dir) {
+            if is_state_uninitialized(&state_dir) {
                 println!("wreck-it state is empty; nothing to do");
                 return Ok(());
             }
@@ -135,15 +135,11 @@ async fn main() -> Result<()> {
             }
 
             // Commit any pending state changes and push.
-            if let Ok(true) =
-                state_worktree::commit_state_worktree(&resolved_work_dir, "wreck-it: update state")
-            {
-                if let Err(e) =
-                    state_worktree::push_state_branch(&resolved_work_dir, &repo_cfg.state_branch)
-                {
-                    println!("[wreck-it] warning: failed to push state: {}", e);
-                }
-            }
+            let _ = state_worktree::commit_and_push_state(
+                &resolved_work_dir,
+                &repo_cfg.state_branch,
+                "wreck-it: update state",
+            );
         }
 
         Commands::Init { output } => {
@@ -176,7 +172,10 @@ async fn main() -> Result<()> {
 
                     // Commit the config to the current branch.
                     let cfg_path = repo_config_path(&work_dir);
-                    state_worktree::git_cmd(&work_dir, &["add", &cfg_path.to_string_lossy()])?;
+                    let cfg_path_str = cfg_path
+                        .to_str()
+                        .ok_or_else(|| anyhow::anyhow!("config path contains invalid UTF-8"))?;
+                    state_worktree::git_cmd(&work_dir, &["add", cfg_path_str])?;
                     state_worktree::git_cmd(
                         &work_dir,
                         &["commit", "-m", "Initialize wreck-it configuration"],

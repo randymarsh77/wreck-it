@@ -128,12 +128,28 @@ fn sync_local_with_remote(repo_root: &Path, branch: &str) -> Result<()> {
 }
 
 /// Push the state branch to the remote.
-///
-/// This is a best-effort operation: if there is no `origin` remote or the push
-/// fails for network reasons a warning is printed but no error is returned.
 pub fn push_state_branch(repo_root: &Path, branch: &str) -> Result<()> {
     git_cmd(repo_root, &["push", "origin", branch]).context("Failed to push state branch")?;
     Ok(())
+}
+
+/// Commit pending state-worktree changes and push the branch to the remote.
+///
+/// Returns `Ok(true)` if a commit was made (and a push was attempted),
+/// `Ok(false)` if there was nothing to commit, or `Err` on failure.
+/// Push failures are downgraded to warnings so that offline / no-remote
+/// environments do not break the run.
+pub fn commit_and_push_state(repo_root: &Path, branch: &str, message: &str) -> Result<bool> {
+    match commit_state_worktree(repo_root, message) {
+        Ok(true) => {
+            if let Err(e) = push_state_branch(repo_root, branch) {
+                println!("[wreck-it] warning: failed to push state: {}", e);
+            }
+            Ok(true)
+        }
+        Ok(false) => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 /// Ensure the git worktree for the state branch exists and is checked out.

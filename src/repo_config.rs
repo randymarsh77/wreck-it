@@ -97,8 +97,9 @@ pub fn prompt_with_default(prompt: &str, default: &str) -> String {
     }
 }
 
-/// Return `true` when the state worktree contains no files besides `.git`.
-pub fn is_state_empty(state_dir: &Path) -> bool {
+/// Return `true` when the state worktree contains no files besides `.git`,
+/// indicating that no state has been written yet.
+pub fn is_state_uninitialized(state_dir: &Path) -> bool {
     let entries = match std::fs::read_dir(state_dir) {
         Ok(e) => e,
         Err(_) => return true,
@@ -175,22 +176,22 @@ mod tests {
     }
 
     #[test]
-    fn test_is_state_empty_true_for_git_only() {
+    fn test_is_state_uninitialized_true_for_git_only() {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
-        assert!(is_state_empty(dir.path()));
+        assert!(is_state_uninitialized(dir.path()));
     }
 
     #[test]
-    fn test_is_state_empty_false_with_files() {
+    fn test_is_state_uninitialized_false_with_files() {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         std::fs::write(dir.path().join("tasks.json"), "[]").unwrap();
-        assert!(!is_state_empty(dir.path()));
+        assert!(!is_state_uninitialized(dir.path()));
     }
 
     #[test]
-    fn test_is_state_empty_true_for_nonexistent() {
-        assert!(is_state_empty(Path::new("/nonexistent/path")));
+    fn test_is_state_uninitialized_true_for_nonexistent() {
+        assert!(is_state_uninitialized(Path::new("/nonexistent/path")));
     }
 }

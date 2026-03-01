@@ -4,7 +4,7 @@ use crate::headless_state::{
     load_headless_state, save_headless_state, AgentPhase, HeadlessState, TrackedPr,
 };
 use crate::repo_config::load_repo_config;
-use crate::state_worktree::{commit_state_worktree, ensure_state_worktree, push_state_branch};
+use crate::state_worktree::{commit_and_push_state, ensure_state_worktree};
 use crate::task_manager::{load_tasks, save_tasks};
 use crate::types::Config;
 use anyhow::{Context, Result};
@@ -153,16 +153,10 @@ pub async fn run_headless(config: Config) -> Result<()> {
     save_headless_state(&state_path, &state).context("Failed to save headless state")?;
 
     // Commit state changes in the worktree and push if anything was committed.
-    match commit_state_worktree(&work_dir, "wreck-it: update headless state") {
-        Ok(true) => {
-            if let Err(e) = push_state_branch(&work_dir, &state_branch) {
-                println!("[wreck-it] warning: failed to push state: {}", e);
-            }
-        }
-        Ok(false) => {}
-        Err(e) => {
-            println!("[wreck-it] warning: failed to commit state changes: {}", e);
-        }
+    if let Err(e) =
+        commit_and_push_state(&work_dir, &state_branch, "wreck-it: update headless state")
+    {
+        println!("[wreck-it] warning: failed to commit state changes: {}", e);
     }
 
     println!(
