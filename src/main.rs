@@ -59,6 +59,7 @@ async fn main() -> Result<()> {
             headless,
             ralph,
             goal,
+            reflection_rounds,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -135,6 +136,9 @@ async fn main() -> Result<()> {
             }
             if let Some(completion_marker_file) = completion_marker_file {
                 config.completion_marker_file = completion_marker_file;
+            }
+            if let Some(reflection_rounds) = reflection_rounds {
+                config.reflection_rounds = reflection_rounds;
             }
             if config.model_provider == ModelProvider::Llama
                 && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
