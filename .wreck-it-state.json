@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 17,
-  "current_task_id": "eval-4",
-  "issue_number": 75,
-  "pr_number": 76,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/76",
-  "last_prompt": "Evaluate the LLM-powered dynamic task planning (impl-5) and critic-actor reflection loop (impl-6) implementations. Verify: 1) 'wreck-it plan --goal' generates a valid tasks.json with correct schema, unique IDs, and sensible dependency structure for a realistic goal; 2) The critic prompt correctly identifies an intentionally flawed diff (e.g., missing function body, wrong file edited) and triggers a reflection round; 3) The reflection round counter is respected and the loop does not spin infinitely; 4) All new unit tests pass with 'cargo test'; 5) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
+  "phase": "agent_working",
+  "iteration": 18,
+  "current_task_id": "eval-5",
+  "issue_number": 77,
+  "last_prompt": "Evaluate the adaptive re-planning on failure (impl-7) and typed artefact store (impl-8) implementations. Verify: 1) After exceeding the replan threshold, the re-planner agent is invoked and produces a modified task list that is persisted correctly; 2) Circular dependency and duplicate ID guards reject invalid re-planner outputs; 3) Artefact outputs are persisted after task completion and correctly injected into downstream task prompts; 4) Tasks without inputs/outputs fields behave identically to pre-impl-8 behaviour (backward compatibility); 5) All new unit tests pass with 'cargo test'; 6) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
     "iteration 1: agent created PR #16 for task Some(\"ideas-1\")",
@@ -81,12 +79,8 @@
     "advance: merged PR #74",
     "iteration 17: triggered cloud agent for task eval-4 (issue #75)",
     "iteration 17: agent created PR #76 for task Some(\"eval-4\")",
-    "iteration 17: marked PR #76 as ready for review"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 76,
-      "task_id": "eval-4"
-    }
+    "iteration 17: marked PR #76 as ready for review",
+    "advance: merged PR #76",
+    "iteration 18: triggered cloud agent for task eval-5 (issue #77)"
   ]
 }
