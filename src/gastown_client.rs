@@ -39,6 +39,7 @@ pub struct DagNode {
 }
 
 /// A gastown-compatible workflow DAG ready for submission.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkflowDag {
     /// Workflow name / identifier.
@@ -52,6 +53,7 @@ pub struct WorkflowDag {
 // ---------------------------------------------------------------------------
 
 /// The completion status reported by the gastown service for a task.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum GastownTaskStatus {
@@ -64,6 +66,7 @@ pub enum GastownTaskStatus {
 }
 
 /// A status-update event received from the gastown polling endpoint.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GastownStatusEvent {
     /// Wreck-it task ID whose status changed.
@@ -77,12 +80,14 @@ pub struct GastownStatusEvent {
 // ---------------------------------------------------------------------------
 
 /// Client for the gastown cloud agent service.
+#[allow(dead_code)]
 pub struct GastownClient {
     endpoint: String,
     token: String,
     http: reqwest::Client,
 }
 
+#[allow(dead_code)]
 impl GastownClient {
     /// Create a new client.
     ///
