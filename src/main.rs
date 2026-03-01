@@ -4,6 +4,7 @@ mod artefact_store;
 mod cli;
 mod cloud_agent;
 mod config_manager;
+mod gastown_client;
 mod headless;
 mod headless_config;
 mod headless_state;
@@ -338,6 +339,7 @@ async fn main() -> Result<()> {
                     last_attempt_at: None,
                     inputs: vec![],
                     outputs: vec![],
+                    runtime: types::TaskRuntime::default(),
                 },
                 Task {
                     id: "2".to_string(),
@@ -354,6 +356,7 @@ async fn main() -> Result<()> {
                     last_attempt_at: None,
                     inputs: vec![],
                     outputs: vec![],
+                    runtime: types::TaskRuntime::default(),
                 },
                 Task {
                     id: "3".to_string(),
@@ -370,6 +373,7 @@ async fn main() -> Result<()> {
                     last_attempt_at: None,
                     inputs: vec![],
                     outputs: vec![],
+                    runtime: types::TaskRuntime::default(),
                 },
             ];
 

@@ -84,12 +84,29 @@ These features connect wreck-it to the broader ecosystem: cloud-native execution
 
 **Inspired by**: Gastown agent-as-a-service, workflow-as-data, durable execution patterns.
 
+**Status**: ✅ Implemented (`impl-9`)
+
 Add a `gastown` runtime backend. Tasks can declare `runtime: "gastown"` to offload execution to gastown cloud services. wreck-it acts as a workflow DAG producer: it serialises the task graph as a gastown-compatible YAML/JSON workflow and submits it to the gastown orchestrator. Gastown handles horizontal scaling, durable checkpointing (crash recovery), and capability negotiation for multi-model routing.
 
 **Key integration points**:
-- wreck-it → gastown: task graph serialisation (DAG export).
-- gastown → wreck-it: status callbacks (task completed/failed events update `.wreck-it-state.json`).
+- wreck-it → gastown: task graph serialisation (DAG export) via `GastownClient::build_dag` / `serialise_dag`.
+- gastown → wreck-it: status callbacks (task completed/failed events) applied to `.wreck-it-state.json` via `GastownClient::apply_status_events`.
 - Capability negotiation: wreck-it queries the gastown agent registry to route tasks to the best-matched agent.
+
+**Configuration** (`Config` in `types.rs`):
+```toml
+gastown_endpoint = "https://my-gastown-host/api"   # enables integration
+gastown_token    = "tok_…"                          # auth token
+```
+
+**Task declaration** (`tasks.json`):
+```json
+{ "id": "my-task", "description": "...", "runtime": "gastown" }
+```
+
+When either `gastown_endpoint` or `gastown_token` is absent, gastown integration is disabled and tasks run locally as before.
+
+**Implementation**: `src/gastown_client.rs` — `GastownClient`, `WorkflowDag`, `DagNode`, `GastownStatusEvent`.
 
 ---
 

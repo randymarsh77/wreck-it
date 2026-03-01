@@ -249,6 +249,7 @@ pub fn parse_and_validate_plan(raw: &str) -> Result<Vec<Task>> {
                 last_attempt_at: None,
                 inputs: vec![],
                 outputs: vec![],
+                runtime: crate::types::TaskRuntime::default(),
             })
         })
         .collect::<Result<Vec<Task>>>()?;

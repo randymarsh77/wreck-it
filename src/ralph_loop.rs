@@ -515,6 +515,7 @@ mod tests {
             last_attempt_at: None,
             inputs: vec![],
             outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
         }
     }
 
@@ -623,6 +624,7 @@ mod tests {
                 last_attempt_at: Some(recent_ts),
                 inputs: vec![],
                 outputs: vec![],
+                runtime: crate::types::TaskRuntime::default(),
             },
             Task {
                 id: "old".to_string(),
@@ -639,6 +641,7 @@ mod tests {
                 last_attempt_at: Some(old_ts),
                 inputs: vec![],
                 outputs: vec![],
+                runtime: crate::types::TaskRuntime::default(),
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -673,6 +676,7 @@ mod tests {
                 last_attempt_at: Some(old_ts),
                 inputs: vec![],
                 outputs: vec![],
+                runtime: crate::types::TaskRuntime::default(),
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);

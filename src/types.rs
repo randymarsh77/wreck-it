@@ -43,6 +43,21 @@ pub enum ModelProvider {
     GithubModels,
 }
 
+/// Execution runtime for a task.
+///
+/// When absent the task is executed locally by the wreck-it agent harness
+/// (the default).  Set to `gastown` to offload execution to the gastown cloud
+/// agent service.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskRuntime {
+    /// Execute locally (default behaviour).
+    #[default]
+    Local,
+    /// Offload execution to the gastown cloud agent service.
+    Gastown,
+}
+
 /// How task completeness is evaluated after the agent finishes work.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default)]
 #[serde(rename_all = "snake_case")]
@@ -120,6 +135,16 @@ pub struct Config {
     /// invoked.  A value of 0 disables re-planning.
     #[serde(default = "default_replan_threshold")]
     pub replan_threshold: u32,
+
+    /// Base URL of the gastown cloud agent service.  When absent, gastown
+    /// integration is disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gastown_endpoint: Option<String>,
+
+    /// Authentication token for the gastown cloud agent service.  When absent,
+    /// gastown integration is disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gastown_token: Option<String>,
 }
 
 fn default_max_iterations() -> usize {
@@ -169,6 +194,8 @@ impl Default for Config {
             completion_marker_file: default_completion_marker(),
             reflection_rounds: default_reflection_rounds(),
             replan_threshold: default_replan_threshold(),
+            gastown_endpoint: None,
+            gastown_token: None,
         }
     }
 }
@@ -267,6 +294,11 @@ pub struct Task {
     /// task completes successfully.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<TaskArtefact>,
+
+    /// Execution runtime for this task.  Defaults to `local`.  Set to
+    /// `gastown` to offload execution to the gastown cloud agent service.
+    #[serde(default, skip_serializing_if = "is_default_runtime")]
+    pub runtime: TaskRuntime,
 }
 
 fn is_default_role(r: &AgentRole) -> bool {
@@ -295,6 +327,10 @@ fn is_default_complexity(v: &u32) -> bool {
 
 fn is_zero_u32(v: &u32) -> bool {
     *v == 0
+}
+
+fn is_default_runtime(r: &TaskRuntime) -> bool {
+    *r == TaskRuntime::Local
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -411,6 +447,7 @@ mod tests {
             last_attempt_at: None,
             inputs: vec![],
             outputs: vec![],
+            runtime: TaskRuntime::default(),
         }
     }
 
@@ -695,5 +732,85 @@ mod tests {
         assert_eq!(loaded.outputs[0].kind, ArtefactKind::File);
         assert_eq!(loaded.outputs[0].name, "report");
         assert_eq!(loaded.outputs[0].path, "reports/out.txt");
+    }
+
+    // ---- TaskRuntime tests ----
+
+    #[test]
+    fn task_runtime_default_is_local() {
+        assert_eq!(TaskRuntime::default(), TaskRuntime::Local);
+    }
+
+    #[test]
+    fn task_runtime_defaults_to_local_when_absent() {
+        let json = r#"{"id":"x","description":"d","status":"pending"}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert_eq!(task.runtime, TaskRuntime::Local);
+    }
+
+    #[test]
+    fn task_runtime_local_is_omitted_in_serialization() {
+        let task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(
+            !json.contains("\"runtime\""),
+            "default runtime should be omitted"
+        );
+    }
+
+    #[test]
+    fn task_runtime_gastown_is_serialized() {
+        let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        task.runtime = TaskRuntime::Gastown;
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(json.contains("\"runtime\":\"gastown\""));
+    }
+
+    #[test]
+    fn task_runtime_roundtrip() {
+        for runtime in [TaskRuntime::Local, TaskRuntime::Gastown] {
+            let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+            task.runtime = runtime;
+            let json = serde_json::to_string(&task).unwrap();
+            let loaded: Task = serde_json::from_str(&json).unwrap();
+            assert_eq!(loaded.runtime, runtime);
+        }
+    }
+
+    // ---- Config gastown fields tests ----
+
+    #[test]
+    fn config_gastown_fields_default_to_none() {
+        let config = Config::default();
+        assert!(config.gastown_endpoint.is_none());
+        assert!(config.gastown_token.is_none());
+    }
+
+    #[test]
+    fn config_gastown_fields_roundtrip() {
+        let mut config = Config::default();
+        config.gastown_endpoint = Some("https://gastown.example.com".to_string());
+        config.gastown_token = Some("tok_secret".to_string());
+        let json = serde_json::to_string(&config).unwrap();
+        let loaded: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            loaded.gastown_endpoint.as_deref(),
+            Some("https://gastown.example.com")
+        );
+        assert_eq!(loaded.gastown_token.as_deref(), Some("tok_secret"));
+    }
+
+    #[test]
+    fn config_gastown_fields_omitted_when_none() {
+        let config = Config::default();
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(
+            !json.contains("gastown_endpoint"),
+            "absent endpoint should be omitted"
+        );
+        assert!(
+            !json.contains("gastown_token"),
+            "absent token should be omitted"
+        );
     }
 }

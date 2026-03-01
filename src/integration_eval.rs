@@ -39,6 +39,7 @@ mod tests {
             last_attempt_at: None,
             inputs: vec![],
             outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
         }
     }
 
