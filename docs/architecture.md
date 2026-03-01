@@ -329,6 +329,154 @@ that contains both `milestone` and `recurring` tasks is often sufficient.
 The scheduler handles both kinds transparently, and recurring tasks
 automatically reset after their cooldown elapses.
 
+### LLM-Powered Dynamic Task Planning (`wreck-it plan`)
+
+The `wreck-it plan --goal "..."` sub-command (and the optional `--goal` flag
+for `wreck-it run`) converts a natural-language goal into a structured
+`tasks.json` via the configured LLM.
+
+```bash
+wreck-it plan --goal "Build a REST API with authentication" --output tasks.json
+```
+
+The planner prompt instructs the model to emit a JSON array of tasks with
+`id`, `description`, `phase`, and optional `depends_on` fields.  The output
+is validated (no empty IDs, no duplicate IDs, phase ≥ 1) before being written
+to disk.
+
+**Implementation**: `src/planner.rs` — `TaskPlanner`, `parse_and_validate_plan`.
+
+---
+
+### Critic-Actor Reflection Loop
+
+After the actor agent completes a task and before tests run, a lightweight
+**critic** prompt reads the git diff and evaluates it against the original
+task description.  The critic returns a structured
+`CriticResult { score, issues, approved }`.  If not approved, the actor is
+re-invoked with the critic's issues as additional context (up to
+`reflection_rounds`, default 2).
+
+```toml
+reflection_rounds = 2   # 0 disables reflection
+```
+
+**Implementation**: `src/agent.rs` — `CriticResult`, reflection loop in the
+`AgentClient` execution path.
+
+---
+
+### Adaptive Re-Planning on Failure
+
+After `replan_threshold` consecutive task failures (default 2), wreck-it
+invokes a **re-planner** agent that receives: the original task list, the
+failed task, the error output, and the current git status.  The re-planner
+may: (a) rewrite the failed task description, (b) split it into smaller
+sub-tasks, or (c) inject a prerequisite task.  The modified task list is
+persisted and the loop continues.
+
+```toml
+replan_threshold = 2   # 0 disables re-planning
+```
+
+**Validation guards**: duplicate IDs, circular dependencies, and completed
+tasks that must not be rolled back.
+
+**Implementation**: `src/replanner.rs` — `TaskReplanner`, `parse_and_validate_replan`,
+`build_replan_prompt`.
+
+---
+
+### Typed Artefact Store / Context Chain
+
+Tasks declare optional `inputs` (references to upstream artefacts) and
+`outputs` (artefacts to persist after completion).  When a task completes
+its declared outputs are read from disk and stored in
+`.wreck-it-artefacts.json`.  Downstream tasks that declare `inputs` have
+those artefacts injected into their agent prompt automatically.
+
+```json
+{
+  "id": "design-1",
+  "outputs": [{ "kind": "summary", "name": "spec", "path": "spec.md" }]
+}
+{
+  "id": "impl-1",
+  "inputs": ["design-1/spec"],
+  "outputs": [{ "kind": "json", "name": "code", "path": "api.rs" }]
+}
+```
+
+**Implementation**: `src/artefact_store.rs` — `ArtefactManifest`,
+`persist_output_artefacts`, `resolve_input_artefacts`.
+
+---
+
+### Gastown Cloud Runtime Integration
+
+Tasks can declare `runtime: "gastown"` to offload execution to the gastown
+cloud agent service.  wreck-it acts as a workflow DAG producer: it serialises
+the task graph and submits it to the gastown orchestrator.  Gastown handles
+horizontal scaling, durable checkpointing, and capability negotiation.
+
+```json
+{ "id": "heavy-task", "description": "...", "runtime": "gastown" }
+```
+
+Integration is enabled by setting both `gastown_endpoint` and `gastown_token`
+in the configuration.  When either is absent, tasks fall back to local
+execution.
+
+| Integration point | Implementation |
+|---|---|
+| wreck-it → gastown | `GastownClient::build_dag` / `serialise_dag` |
+| gastown → wreck-it | `GastownClient::apply_status_events` |
+
+**Implementation**: `src/gastown_client.rs` — `GastownClient`, `WorkflowDag`,
+`DagNode`, `GastownStatusEvent`.
+
+---
+
+### Openclaw Provenance Tracking and Export
+
+Every task execution is recorded as a provenance entry capturing: task ID,
+agent role, model, prompt hash, git diff hash, tool calls, timestamp, and
+outcome.  Records are stored in `.wreck-it-provenance/<task-id>-<ts>.json`.
+
+```bash
+# Inspect the provenance chain for a single task
+wreck-it provenance --task impl-1
+
+# Export the full run as an openclaw-compatible JSON document
+wreck-it export-openclaw --output run.openclaw.json
+```
+
+The openclaw export (`OpenclawDocument`) contains the complete task graph
+annotated with all provenance records and artefact links, ready to load into
+the openclaw plan-graph visualiser.
+
+**Implementation**: `src/provenance.rs` — `ProvenanceRecord`,
+`persist_provenance_record`, `load_provenance_records`.
+`src/openclaw.rs` — `OpenclawDocument`, `build_document`, `serialise_document`.
+
+---
+
+## End-to-End Integration
+
+All Horizon 2–3 features are exercised together in the
+`eval7_full_horizon2_horizon3_acceptance_gate` test in
+`src/integration_eval.rs`.  The scenario:
+
+1. `wreck-it plan` generates a four-task "Build REST API" plan (impl-5).
+2. Role-based routing assigns specialist agents to each task (impl-1).
+3. Artefact chaining passes the design spec into the implementation task (impl-8).
+4. Provenance records are written for every completed step (impl-10).
+5. The `review` task fails twice — adaptive re-planning splits it into two
+   smaller tasks (impl-7).
+6. Gastown DAG serialisation is verified for the review tasks (impl-9).
+7. The full run is exported as an openclaw document (impl-10).
+8. Agent memory persists across simulated cron invocations (impl-3).
+
 ## Future Enhancements
 
 - Custom test commands

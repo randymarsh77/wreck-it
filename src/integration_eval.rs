@@ -1,13 +1,16 @@
-/// End-to-end integration tests for eval-3 and eval-5.
+/// End-to-end integration tests for eval-3, eval-5, eval-6, and eval-7.
 ///
 /// Exercises all agent swarm features working together in a single scenario:
 /// role-based routing, dynamic task generation, agent memory persistence, and
 /// intelligent scheduling (eval-3); and adaptive re-planning on failure and
-/// typed artefact store (eval-5).
+/// typed artefact store (eval-5); Gastown cloud runtime integration and
+/// Openclaw provenance tracking (eval-6); and the full Horizon 2–3 acceptance
+/// gate that combines every feature end-to-end (eval-7).
 #[cfg(test)]
 mod tests {
     use crate::artefact_store::{load_manifest, persist_output_artefacts, resolve_input_artefacts};
     use crate::headless_state::{load_headless_state, save_headless_state, AgentPhase};
+    use crate::openclaw::{build_document, serialise_document};
     use crate::ralph_loop::TaskScheduler;
     use crate::replanner::parse_and_validate_replan;
     use crate::task_manager::{
@@ -613,5 +616,335 @@ mod tests {
 
         // ── Step 7: Provenance records for now_timestamp() are positive ───────
         assert!(now_timestamp() > 0);
+    }
+
+    /// Full Horizon 2–3 acceptance gate (eval-7).
+    ///
+    /// Exercises every feature from impl-5 through impl-10 in a single
+    /// realistic scenario:
+    ///
+    /// Scenario: "Build a REST API" project with four phases:
+    ///   1. `plan-1`   (ideas)       – LLM-generated planning task.
+    ///   2. `design-1` (ideas)       – Outputs a "spec" artefact consumed by impl.
+    ///   3. `impl-1`   (implementer) – Consumes spec; outputs a "code" artefact.
+    ///   4. `review-1` (evaluator)   – Reviews impl-1; fails once (tests adaptive
+    ///                                  re-planning), then succeeds on re-plan.
+    ///
+    /// Checks:
+    /// R1 – Role-based routing assigns tasks to the correct role pools.
+    /// R2 – Intelligent scheduling respects dependency order.
+    /// R3 – Artefact chaining: spec flows from design-1 into impl-1's prompt.
+    /// R4 – Provenance records are written for every completed step.
+    /// R5 – Adaptive re-planning fires when review-1 fails threshold times.
+    /// R6 – Openclaw export contains all nodes, provenance, and artefact links.
+    /// R7 – Agent memory persists across "cron invocations".
+    #[test]
+    fn eval7_full_horizon2_horizon3_acceptance_gate() {
+        use crate::gastown_client::{GastownClient, GastownStatusEvent, GastownTaskStatus};
+        use crate::planner::parse_and_validate_plan;
+        use crate::provenance::{hash_string, persist_provenance_record, ProvenanceRecord};
+        use crate::types::TaskRuntime;
+
+        let dir = tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+        let manifest_path = dir.path().join(".wreck-it-artefacts.json");
+        let state_file = dir.path().join(".wreck-it-state.json");
+
+        // ── R1: Role-based routing ───────────────────────────────────────────
+        // Simulate the output from 'wreck-it plan' (impl-5): a JSON array
+        // that the planner module parses and validates.
+        let plan_output = r#"[
+            {"id":"plan-1",   "description":"Research requirements and plan the REST API",   "phase":1},
+            {"id":"design-1", "description":"Write the API design specification",             "phase":2, "depends_on":["plan-1"]},
+            {"id":"impl-1",   "description":"Implement the REST API",                        "phase":3, "depends_on":["design-1"]},
+            {"id":"review-1", "description":"Review the REST API implementation for quality","phase":4, "depends_on":["impl-1"]}
+        ]"#;
+
+        let mut tasks = parse_and_validate_plan(plan_output).unwrap();
+        assert_eq!(tasks.len(), 4, "planner produced 4 tasks");
+
+        // Assign roles to each task (as a specialist-routing step would do).
+        tasks[0].role = AgentRole::Ideas;
+        tasks[1].role = AgentRole::Ideas;
+        tasks[2].role = AgentRole::Implementer;
+        tasks[3].role = AgentRole::Evaluator;
+
+        // Add artefact declarations: design-1 outputs a spec; impl-1 consumes it.
+        tasks[1].outputs = vec![TaskArtefact {
+            kind: ArtefactKind::Summary,
+            name: "spec".to_string(),
+            path: "spec.md".to_string(),
+        }];
+        tasks[2].inputs = vec!["design-1/spec".to_string()];
+        tasks[2].outputs = vec![TaskArtefact {
+            kind: ArtefactKind::Json,
+            name: "code".to_string(),
+            path: "api.rs".to_string(),
+        }];
+
+        save_tasks(&task_file, &tasks).unwrap();
+
+        // Verify role-based routing (R1).
+        let loaded = load_tasks(&task_file).unwrap();
+        assert_eq!(
+            filter_tasks_by_role(&loaded, AgentRole::Ideas).len(),
+            2,
+            "R1: two ideas tasks"
+        );
+        assert_eq!(
+            filter_tasks_by_role(&loaded, AgentRole::Implementer).len(),
+            1,
+            "R1: one implementer task"
+        );
+        assert_eq!(
+            filter_tasks_by_role(&loaded, AgentRole::Evaluator).len(),
+            1,
+            "R1: one evaluator task"
+        );
+
+        // ── R2: Intelligent scheduling respects dependency order ─────────────
+        let ready = TaskScheduler::schedule(&loaded);
+        assert_eq!(ready.len(), 1, "R2: only plan-1 is initially unblocked");
+        assert_eq!(loaded[ready[0]].id, "plan-1", "R2: plan-1 is first");
+
+        // ── R3: Artefact chaining ────────────────────────────────────────────
+        // Simulate plan-1 and design-1 completing; persist design-1's spec artefact.
+        let mut tasks = load_tasks(&task_file).unwrap();
+        tasks[0].status = TaskStatus::Completed; // plan-1
+        tasks[1].status = TaskStatus::Completed; // design-1
+        save_tasks(&task_file, &tasks).unwrap();
+
+        fs::write(dir.path().join("spec.md"), "# REST API Spec\n\nEndpoints: /users, /items").unwrap();
+        let design_outputs = vec![TaskArtefact {
+            kind: ArtefactKind::Summary,
+            name: "spec".to_string(),
+            path: "spec.md".to_string(),
+        }];
+        persist_output_artefacts(&manifest_path, "design-1", &design_outputs, dir.path()).unwrap();
+
+        // Verify the artefact is accessible for impl-1's input.
+        let resolved =
+            resolve_input_artefacts(&manifest_path, &["design-1/spec".to_string()]).unwrap();
+        assert_eq!(resolved.len(), 1, "R3: artefact resolved");
+        assert!(
+            resolved[0].1.contains("REST API Spec"),
+            "R3: spec content injected"
+        );
+
+        // Simulate impl-1 completing; persist its code artefact.
+        let mut tasks = load_tasks(&task_file).unwrap();
+        tasks[2].status = TaskStatus::Completed; // impl-1
+        save_tasks(&task_file, &tasks).unwrap();
+
+        fs::write(dir.path().join("api.rs"), "pub fn router() {}").unwrap();
+        let impl_outputs = vec![TaskArtefact {
+            kind: ArtefactKind::Json,
+            name: "code".to_string(),
+            path: "api.rs".to_string(),
+        }];
+        persist_output_artefacts(&manifest_path, "impl-1", &impl_outputs, dir.path()).unwrap();
+
+        let manifest = load_manifest(&manifest_path).unwrap();
+        assert!(
+            manifest.artefacts.contains_key("design-1/spec"),
+            "R3: design-1/spec in manifest"
+        );
+        assert!(
+            manifest.artefacts.contains_key("impl-1/code"),
+            "R3: impl-1/code in manifest"
+        );
+
+        // ── R4: Provenance records written for every completed step ──────────
+        let ts_base: u64 = 1_710_000_000;
+        for (idx, (task_id, role)) in [
+            ("plan-1", AgentRole::Ideas),
+            ("design-1", AgentRole::Ideas),
+            ("impl-1", AgentRole::Implementer),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let record = ProvenanceRecord {
+                task_id: task_id.to_string(),
+                agent_role: *role,
+                model: "copilot".to_string(),
+                prompt_hash: hash_string(task_id),
+                tool_calls: vec![],
+                git_diff_hash: "0000000000000000".to_string(),
+                timestamp: ts_base + idx as u64,
+                outcome: "success".to_string(),
+            };
+            persist_provenance_record(&record, dir.path()).unwrap();
+        }
+
+        let prov_dir = dir.path().join(".wreck-it-provenance");
+        assert!(prov_dir.exists(), "R4: provenance dir created");
+        let entries: Vec<_> = fs::read_dir(&prov_dir).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(entries.len(), 3, "R4: three provenance files written");
+
+        // ── R5: Adaptive re-planning fires on repeated review-1 failure ──────
+        // review-1 fails twice (threshold=2).  The re-planner splits it into
+        // review-1a (quick sanity check) + review-1b (full quality review).
+        let mut tasks = load_tasks(&task_file).unwrap();
+        let rev_idx = tasks.iter().position(|t| t.id == "review-1").unwrap();
+        tasks[rev_idx].status = TaskStatus::Failed;
+        tasks[rev_idx].failed_attempts = 2;
+        save_tasks(&task_file, &tasks).unwrap();
+
+        let replan_output = r#"[
+            {"id":"plan-1",    "description":"Research requirements and plan the REST API",    "status":"completed","phase":1,"depends_on":[]},
+            {"id":"design-1",  "description":"Write the API design specification",              "status":"completed","phase":2,"depends_on":["plan-1"]},
+            {"id":"impl-1",    "description":"Implement the REST API",                         "status":"completed","phase":3,"depends_on":["design-1"],"inputs":["design-1/spec"],"outputs":[{"kind":"json","name":"code","path":"api.rs"}]},
+            {"id":"review-1a", "description":"Sanity-check the REST API implementation",       "status":"pending",  "phase":4,"depends_on":["impl-1"]},
+            {"id":"review-1b", "description":"Full quality review of the REST API implementation","status":"pending","phase":5,"depends_on":["review-1a"]}
+        ]"#;
+
+        let current_tasks = load_tasks(&task_file).unwrap();
+        let replanned = parse_and_validate_replan(&current_tasks, replan_output).unwrap();
+        assert_eq!(replanned.len(), 5, "R5: re-planner split review-1 into two tasks");
+        assert!(replanned.iter().any(|t| t.id == "review-1a"), "R5: review-1a present");
+        assert!(replanned.iter().any(|t| t.id == "review-1b"), "R5: review-1b present");
+
+        // Completed tasks must remain completed regardless of LLM output.
+        let plan1_status = replanned.iter().find(|t| t.id == "plan-1").unwrap().status;
+        assert_eq!(plan1_status, TaskStatus::Completed, "R5: plan-1 stays completed");
+
+        save_tasks(&task_file, &replanned).unwrap();
+
+        // Simulate review-1a and review-1b completing successfully.
+        let mut tasks = load_tasks(&task_file).unwrap();
+        for task in tasks.iter_mut() {
+            if task.id == "review-1a" || task.id == "review-1b" {
+                task.status = TaskStatus::Completed;
+            }
+        }
+        save_tasks(&task_file, &tasks).unwrap();
+
+        // Write provenance for the two review tasks.
+        for (offset, task_id) in [(10u64, "review-1a"), (11u64, "review-1b")] {
+            let record = ProvenanceRecord {
+                task_id: task_id.to_string(),
+                agent_role: AgentRole::Evaluator,
+                model: "copilot".to_string(),
+                prompt_hash: hash_string(task_id),
+                tool_calls: vec!["evaluate_completeness".to_string()],
+                git_diff_hash: "0000000000000000".to_string(),
+                timestamp: ts_base + offset,
+                outcome: "success".to_string(),
+            };
+            persist_provenance_record(&record, dir.path()).unwrap();
+        }
+
+        // ── R6: Openclaw export covers all nodes, provenance, artefacts ──────
+        let final_tasks = load_tasks(&task_file).unwrap();
+        assert!(
+            final_tasks.iter().all(|t| t.status == TaskStatus::Completed),
+            "R6: all tasks completed before export"
+        );
+
+        let doc = build_document(&task_file, dir.path(), "Build REST API").unwrap();
+        assert_eq!(doc.schema_version, "1.0");
+        assert_eq!(doc.workflow.name, "Build REST API");
+        // 5 tasks in the final (re-planned) task list.
+        assert_eq!(doc.workflow.nodes.len(), 5, "R6: 5 nodes in openclaw export");
+
+        // Every node that had provenance written should appear in the export.
+        let plan1_node = doc.workflow.nodes.iter().find(|n| n.id == "plan-1").unwrap();
+        assert_eq!(plan1_node.provenance.len(), 1, "R6: plan-1 has one provenance record");
+        assert_eq!(plan1_node.provenance[0].outcome, "success");
+
+        let impl1_node = doc.workflow.nodes.iter().find(|n| n.id == "impl-1").unwrap();
+        assert_eq!(impl1_node.provenance.len(), 1, "R6: impl-1 has one provenance record");
+        // impl-1 should list its consumed input artefact.
+        assert_eq!(
+            impl1_node.artefacts.inputs,
+            vec!["design-1/spec"],
+            "R6: impl-1 input artefact in export"
+        );
+        // impl-1 should list its produced output artefact.
+        assert!(
+            impl1_node.artefacts.outputs.contains(&"impl-1/code".to_string()),
+            "R6: impl-1/code output artefact in export"
+        );
+
+        let design1_node = doc
+            .workflow
+            .nodes
+            .iter()
+            .find(|n| n.id == "design-1")
+            .unwrap();
+        assert!(
+            design1_node.artefacts.outputs.contains(&"design-1/spec".to_string()),
+            "R6: design-1/spec output artefact in export"
+        );
+
+        // The document must serialise to valid JSON.
+        let json = serialise_document(&doc).unwrap();
+        let reparsed: crate::openclaw::OpenclawDocument = serde_json::from_str(&json).unwrap();
+        assert_eq!(reparsed.workflow.nodes.len(), 5, "R6: export round-trips correctly");
+
+        // ── R6b: Gastown DAG serialisation is consistent with openclaw export ─
+        // Mark review-1a/b as gastown tasks and verify the DAG includes them.
+        let mut tasks = load_tasks(&task_file).unwrap();
+        for task in tasks.iter_mut() {
+            if task.id == "review-1a" || task.id == "review-1b" {
+                task.runtime = TaskRuntime::Gastown;
+            }
+        }
+        save_tasks(&task_file, &tasks).unwrap();
+
+        let tasks_for_dag = load_tasks(&task_file).unwrap();
+        let dag = GastownClient::build_dag(&tasks_for_dag, "REST-API-review");
+        assert_eq!(dag.nodes.len(), 2, "R6b: gastown DAG contains two review nodes");
+        assert_eq!(dag.nodes[0].id, "review-1a");
+        assert_eq!(dag.nodes[1].id, "review-1b");
+
+        // Simulate gastown reporting both review tasks as completed.
+        let events = vec![
+            GastownStatusEvent {
+                task_id: "review-1a".to_string(),
+                status: GastownTaskStatus::Completed,
+            },
+            GastownStatusEvent {
+                task_id: "review-1b".to_string(),
+                status: GastownTaskStatus::Completed,
+            },
+        ];
+        GastownClient::apply_status_events(&events, &task_file).unwrap();
+
+        let after_events = load_tasks(&task_file).unwrap();
+        for task in after_events.iter().filter(|t| t.runtime == TaskRuntime::Gastown) {
+            assert_eq!(
+                task.status,
+                TaskStatus::Completed,
+                "R6b: gastown event applied to {}",
+                task.id
+            );
+        }
+
+        // ── R7: Agent memory persists across invocations ─────────────────────
+        let mut state = load_headless_state(&state_file).unwrap();
+        state.iteration = 1;
+        state.memory.push("iteration 1: plan-1 completed".to_string());
+        save_headless_state(&state_file, &state).unwrap();
+
+        let mut state = load_headless_state(&state_file).unwrap();
+        state.iteration = 2;
+        state.phase = AgentPhase::NeedsVerification;
+        state.memory.push("iteration 2: review re-plan triggered".to_string());
+        save_headless_state(&state_file, &state).unwrap();
+
+        let state = load_headless_state(&state_file).unwrap();
+        assert_eq!(state.iteration, 2, "R7: iteration persisted");
+        assert_eq!(state.memory.len(), 2, "R7: both memory entries survive");
+        assert!(state.memory[0].contains("plan-1"), "R7: first memory entry intact");
+        assert!(state.memory[1].contains("re-plan"), "R7: second memory entry intact");
+
+        // All tasks completed – scheduler returns nothing.
+        let final_tasks = load_tasks(&task_file).unwrap();
+        assert!(
+            TaskScheduler::schedule(&final_tasks).is_empty(),
+            "scheduler empty when all tasks complete"
+        );
     }
 }

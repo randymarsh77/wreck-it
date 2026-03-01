@@ -124,4 +124,24 @@ pub enum Commands {
         #[arg(short, long)]
         work_dir: Option<PathBuf>,
     },
+
+    /// Export the full run provenance as an openclaw-compatible JSON document
+    ExportOpenclaw {
+        /// Path to the task file to read (default: tasks.json)
+        #[arg(short, long, default_value = "tasks.json")]
+        task_file: PathBuf,
+
+        /// Working directory containing .wreck-it-provenance/ and
+        /// .wreck-it-artefacts.json
+        #[arg(short, long)]
+        work_dir: Option<PathBuf>,
+
+        /// Human-readable name for the workflow in the export (default: "wreck-it run")
+        #[arg(long, default_value = "wreck-it run")]
+        workflow_name: String,
+
+        /// Path to write the openclaw JSON document (default: stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
