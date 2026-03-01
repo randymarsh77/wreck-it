@@ -87,7 +87,7 @@
   {
     "id": "impl-5",
     "description": "Implement LLM-powered dynamic task planning: add a 'wreck-it plan --goal \"...\"' sub-command (and an optional pre-loop planning phase in 'wreck-it run --goal \"...\"') that sends a natural-language goal to the Copilot SDK and receives back a structured task plan as a JSON array. The planner prompt must instruct the model to emit tasks with 'id', 'description', 'phase', and optional 'depends_on' fields. Validate the output against the Task schema before writing it to tasks.json. Add a 'generate_task_plan(goal: &str) -> Result<Vec<Task>>' method to AgentClient and a corresponding 'Plan' variant to the Commands enum in cli.rs. Add unit tests for the schema validation and ID-uniqueness checks.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 4,
     "depends_on": [
       "eval-3"
@@ -96,7 +96,7 @@
   {
     "id": "impl-6",
     "description": "Implement a critic-actor reflection loop inspired by Openclaw and the Reflexion paper. After an actor agent completes a task and before committing, run a lightweight 'critic' prompt that reads the git diff and evaluates it against the original task description. The critic returns a structured CriticResult { score: f32, issues: Vec<String>, approved: bool }. If approved is false and there are substantive issues, re-invoke the actor with the issues as additional context (up to a configurable --reflection-rounds limit, default 2). Only after the critic approves (or rounds are exhausted) should tests run. Add 'critique_diff(diff: &str, task: &Task) -> Result<CriticResult>' and 'execute_task_with_reflection(task: &Task, rounds: u8) -> Result<()>' to AgentClient. Integrate into ralph_loop.rs. Add unit tests for the reflection round-counting logic.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 4,
     "depends_on": [
       "eval-3"
