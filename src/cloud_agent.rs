@@ -31,11 +31,11 @@ pub enum PrMergeStatus {
 
 /// Summary of an open pull request, returned by [`CloudAgentClient::list_open_prs`].
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct OpenPr {
     pub number: u64,
     pub title: String,
-    /// Whether the PR is currently a draft.  Stored for informational purposes;
-    /// the sweep logic re-checks draft status via [`CloudAgentClient::check_pr_merge_status`].
+    /// Whether the PR is currently a draft.
     #[allow(dead_code)]
     pub draft: bool,
 }
@@ -950,7 +950,161 @@ impl CloudAgentClient {
         Ok(())
     }
 
+    /// Check whether the base branch of a pull request has required status
+    /// checks configured via branch protection rules.
+    ///
+    /// Returns `true` when the branch has required status checks (meaning CI
+    /// must pass before merging) and `false` otherwise (no branch protection,
+    /// or no required checks).
+    pub async fn has_required_checks_for_pr(&self, pr_number: u64) -> Result<bool> {
+        // Fetch the PR to determine the base branch.
+        let pr_url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let pr_resp = self
+            .http
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for base branch")?;
+
+        if !pr_resp.status().is_success() {
+            // If we can't determine the base branch, assume no required checks.
+            return Ok(false);
+        }
+
+        let pr: serde_json::Value = pr_resp.json().await?;
+        let base_branch = pr
+            .pointer("/base/ref")
+            .and_then(|v| v.as_str())
+            .unwrap_or("main");
+
+        // Check branch protection for required status checks.
+        let protection_url = format!(
+            "{}/repos/{}/{}/branches/{}/protection/required_status_checks",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, base_branch,
+        );
+
+        let resp = self
+            .http
+            .get(&protection_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to check branch protection")?;
+
+        // 404 means no branch protection or no required status checks.
+        if resp.status().as_u16() == 404 {
+            return Ok(false);
+        }
+        if !resp.status().is_success() {
+            // Treat unexpected errors as "no required checks" to avoid blocking.
+            return Ok(false);
+        }
+
+        // If the endpoint returns successfully, required status checks exist.
+        Ok(true)
+    }
+
+    /// Enable auto-merge on a pull request using the squash merge method.
+    ///
+    /// This uses the GraphQL `enablePullRequestAutoMerge` mutation so that
+    /// GitHub automatically merges the PR once all required checks pass.
+    pub async fn enable_auto_merge(&self, pr_number: u64) -> Result<()> {
+        // Fetch the PR to obtain the GraphQL node_id.
+        let pr_url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let pr_resp = self
+            .http
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for node_id")?;
+
+        if !pr_resp.status().is_success() {
+            let status = pr_resp.status();
+            let body = pr_resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch PR #{} for node_id ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let pr: serde_json::Value = pr_resp.json().await?;
+        let node_id = pr["node_id"]
+            .as_str()
+            .context("Missing node_id in PR response")?;
+
+        // Use the GraphQL API to enable auto-merge.
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": concat!(
+                "mutation($prId: ID!) { ",
+                  "enablePullRequestAutoMerge(input: { ",
+                    "pullRequestId: $prId, ",
+                    "mergeMethod: SQUASH ",
+                  "}) { ",
+                    "pullRequest { autoMergeRequest { enabledAt } } ",
+                  "} ",
+                "}"
+            ),
+            "variables": { "prId": node_id },
+        });
+
+        let resp = self
+            .http
+            .post(&graphql_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&query)
+            .send()
+            .await
+            .context("Failed to call GraphQL enablePullRequestAutoMerge")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "GraphQL request failed for PR #{} ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let gql_resp: serde_json::Value = resp.json().await?;
+
+        // Check for GraphQL-level errors.
+        if let Some(errors) = gql_resp.get("errors") {
+            bail!(
+                "GraphQL errors enabling auto-merge for PR #{}: {}",
+                pr_number,
+                errors,
+            );
+        }
+
+        tracing::info!("Enabled auto-merge for PR #{}", pr_number);
+        Ok(())
+    }
+
     /// List all open pull requests in the repository.
+    #[allow(dead_code)]
     pub async fn list_open_prs(&self) -> Result<Vec<OpenPr>> {
         let mut prs = Vec::new();
         let mut page = 1u32;

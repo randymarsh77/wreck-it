@@ -23,6 +23,7 @@ const MAX_SYNC_STEPS: usize = 20;
 const UNKNOWN_TASK_ID: &str = "unknown";
 
 /// Known task-ID prefixes used by the wreck-it agent swarm.
+#[cfg(test)]
 const TASK_ID_PREFIXES: &[&str] = &["ideas-", "impl-", "eval-"];
 
 /// Outcome of a single headless phase step.
@@ -87,12 +88,12 @@ pub async fn run_headless(config: Config) -> Result<()> {
     let state_path = state_dir.join(&headless_cfg.state_file);
     let mut state = load_headless_state(&state_path).context("Failed to load headless state")?;
 
-    // Sweep all open PRs before entering the main state machine.  This
-    // converts drafts to ready, approves pending workflow runs, and merges
-    // PRs that are ready – even for tasks not currently tracked in state.
-    if let Err(e) = sweep_open_prs(&config, &headless_cfg, &mut state, &work_dir, &state_dir).await
+    // Advance tracked PRs before entering the main state machine.  Only PRs
+    // that are already tracked in state (created by wreck-it) are processed.
+    if let Err(e) =
+        advance_tracked_prs(&config, &headless_cfg, &mut state, &work_dir, &state_dir).await
     {
-        println!("[wreck-it] warning: sweep_open_prs failed: {}", e);
+        println!("[wreck-it] warning: advance_tracked_prs failed: {}", e);
     }
 
     let mut sync_steps: usize = 0;
@@ -155,22 +156,23 @@ pub async fn run_headless(config: Config) -> Result<()> {
     Ok(())
 }
 
-/// Sweep all open PRs in the repository.
+/// Advance all tracked PRs in the state.
 ///
-/// For each open PR (and each previously tracked PR):
-/// - If it is a draft → mark it ready for review and approve pending workflows.
-/// - If it is not yet mergeable → approve pending workflow runs so CI can start.
-/// - If it is mergeable → merge it.
-/// - If it was already merged → mark the associated task complete.
+/// Only PRs that are already recorded in `state.tracked_prs` (i.e. PRs
+/// created by wreck-it for known tasks) are processed.  This does **not**
+/// discover or adopt untracked PRs from the repository.
 ///
-/// All open PRs are recorded in `state.tracked_prs`.  When a PR is merged or
-/// closed, it is removed from the tracked list and the associated task is
-/// marked complete in the task file.
+/// For each tracked PR the progression is:
+/// - Draft → mark it ready for review.
+/// - Ready with required status checks → approve pending workflow runs and
+///   enable auto-merge so GitHub merges automatically once checks pass.
+/// - Ready without required checks → merge directly.
+/// - Already merged → mark the associated task complete.
 ///
 /// When a merged PR corresponds to the currently tracked task in `state`, the
 /// headless state is advanced to [`AgentPhase::Completed`] so the next
 /// invocation can pick up a new task.
-async fn sweep_open_prs(
+async fn advance_tracked_prs(
     config: &Config,
     headless_cfg: &HeadlessConfig,
     state: &mut HeadlessState,
@@ -181,7 +183,7 @@ async fn sweep_open_prs(
         .api_token
         .clone()
         .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-        .context("GitHub token required to sweep open PRs")?;
+        .context("GitHub token required to advance tracked PRs")?;
 
     let (repo_owner, repo_name) = resolve_repo_info(
         headless_cfg.repo_owner.as_deref(),
@@ -191,26 +193,7 @@ async fn sweep_open_prs(
 
     let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
 
-    let open_prs = client.list_open_prs().await?;
-
-    // Merge the open PR list with previously tracked PRs.  Any PR that is
-    // still open stays tracked; new PRs are added.  We attempt to infer the
-    // task ID from the PR title ("[wreck-it] <task_id>") for any PR not
-    // already in the tracked list.
-    let previously_tracked: HashSet<u64> =
-        state.tracked_prs.iter().map(|tp| tp.pr_number).collect();
-
-    for pr in &open_prs {
-        if !previously_tracked.contains(&pr.number) {
-            let task_id = infer_task_id_from_title(&pr.title);
-            state.tracked_prs.push(TrackedPr {
-                pr_number: pr.number,
-                task_id,
-            });
-        }
-    }
-
-    // Also ensure the current task's PR is tracked.
+    // Ensure the current task's PR is tracked.
     if let (Some(pr_num), Some(task_id)) = (state.pr_number, state.current_task_id.clone()) {
         if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_num) {
             state.tracked_prs.push(TrackedPr {
@@ -221,22 +204,20 @@ async fn sweep_open_prs(
     }
 
     if state.tracked_prs.is_empty() {
-        println!("[wreck-it] sweep: no open or tracked PRs");
+        println!("[wreck-it] advance: no tracked PRs");
         return Ok(());
     }
 
     println!(
-        "[wreck-it] sweep: processing {} tracked PR(s) ({} currently open)",
+        "[wreck-it] advance: processing {} tracked PR(s)",
         state.tracked_prs.len(),
-        open_prs.len(),
     );
 
     let task_file = state_dir.join(&headless_cfg.task_file);
 
-    // Process each tracked PR.  Collect indices of PRs that have been merged
-    // (to remove from the tracked list after the loop).
-    let open_pr_numbers: HashSet<u64> = open_prs.iter().map(|p| p.number).collect();
-    let mut merged_pr_numbers: Vec<u64> = Vec::new();
+    // Process each tracked PR.  Collect PR numbers that have been merged or
+    // closed (to remove from the tracked list after the loop).
+    let mut resolved_pr_numbers: Vec<u64> = Vec::new();
 
     // Iterate over a snapshot of tracked_prs to avoid borrow issues.
     let tracked_snapshot: Vec<TrackedPr> = state.tracked_prs.clone();
@@ -244,110 +225,147 @@ async fn sweep_open_prs(
     for tracked in &tracked_snapshot {
         let pr_number = tracked.pr_number;
 
-        // If the PR is no longer in the open list, check if it was merged.
-        if !open_pr_numbers.contains(&pr_number) {
-            match client.check_pr_merge_status(pr_number).await {
-                Ok(PrMergeStatus::AlreadyMerged) => {
-                    println!(
-                        "[wreck-it] sweep: tracked PR #{} (task {}) already merged",
-                        pr_number, tracked.task_id
-                    );
-                    mark_task_complete_by_id(&tracked.task_id, &task_file)?;
-                    if state.pr_number == Some(pr_number) {
-                        state.phase = AgentPhase::Completed;
-                    }
-                    merged_pr_numbers.push(pr_number);
-                }
-                _ => {
-                    // PR closed without merge or error — remove from tracking.
-                    println!(
-                        "[wreck-it] sweep: tracked PR #{} (task {}) is no longer open",
-                        pr_number, tracked.task_id
-                    );
-                    merged_pr_numbers.push(pr_number);
-                }
-            }
-            continue;
-        }
-
         println!(
-            "[wreck-it] sweep: PR #{} (task {})",
+            "[wreck-it] advance: PR #{} (task {})",
             pr_number, tracked.task_id
         );
 
         match client.check_pr_merge_status(pr_number).await {
             Ok(PrMergeStatus::Draft) => {
                 println!(
-                    "[wreck-it] sweep: PR #{} is a draft, marking ready for review",
+                    "[wreck-it] advance: PR #{} is a draft, marking ready for review",
                     pr_number
                 );
                 if let Err(e) = client.mark_pr_ready_for_review(pr_number).await {
                     println!(
-                        "[wreck-it] sweep: failed to mark PR #{} ready: {}",
-                        pr_number, e
-                    );
-                }
-                if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
-                    println!(
-                        "[wreck-it] sweep: failed to approve workflows for PR #{}: {}",
+                        "[wreck-it] advance: failed to mark PR #{} ready: {}",
                         pr_number, e
                     );
                 }
                 state.memory.push(format!(
-                    "sweep: marked PR #{} (task {}) as ready for review",
+                    "advance: marked PR #{} (task {}) as ready for review",
                     pr_number, tracked.task_id,
                 ));
             }
             Ok(PrMergeStatus::NotMergeable) => {
-                println!(
-                    "[wreck-it] sweep: PR #{} not yet mergeable, approving workflows",
-                    pr_number
-                );
-                if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                // Check whether the base branch requires status checks.
+                let has_checks = match client.has_required_checks_for_pr(pr_number).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        println!(
+                            "[wreck-it] advance: failed to check required checks for PR #{}: {}",
+                            pr_number, e
+                        );
+                        false
+                    }
+                };
+                if has_checks {
                     println!(
-                        "[wreck-it] sweep: failed to approve workflows for PR #{}: {}",
-                        pr_number, e
+                        "[wreck-it] advance: PR #{} not yet mergeable, approving workflows and enabling auto-merge",
+                        pr_number
+                    );
+                    if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                        println!(
+                            "[wreck-it] advance: failed to approve workflows for PR #{}: {}",
+                            pr_number, e
+                        );
+                    }
+                    if let Err(e) = client.enable_auto_merge(pr_number).await {
+                        println!(
+                            "[wreck-it] advance: failed to enable auto-merge for PR #{}: {}",
+                            pr_number, e
+                        );
+                    }
+                } else {
+                    println!(
+                        "[wreck-it] advance: PR #{} not yet mergeable (no required checks), will retry",
+                        pr_number
                     );
                 }
             }
             Ok(PrMergeStatus::Mergeable) => {
-                println!("[wreck-it] sweep: PR #{} is mergeable, merging", pr_number);
-                match client.merge_pr(pr_number).await {
-                    Ok(()) => {
-                        println!("[wreck-it] sweep: merged PR #{}", pr_number);
-                        state
-                            .memory
-                            .push(format!("sweep: merged PR #{}", pr_number));
-                        mark_task_complete_by_id(&tracked.task_id, &task_file)?;
-                        if state.pr_number == Some(pr_number) {
-                            state.phase = AgentPhase::Completed;
-                        }
-                        merged_pr_numbers.push(pr_number);
-                    }
+                // Check whether the base branch requires status checks.
+                let has_checks = match client.has_required_checks_for_pr(pr_number).await {
+                    Ok(v) => v,
                     Err(e) => {
-                        println!("[wreck-it] sweep: failed to merge PR #{}: {}", pr_number, e);
+                        println!(
+                            "[wreck-it] advance: failed to check required checks for PR #{}: {}",
+                            pr_number, e
+                        );
+                        false
+                    }
+                };
+                if has_checks {
+                    // Required checks exist and pass; enable auto-merge and
+                    // approve workflows in case any are still pending.
+                    println!(
+                        "[wreck-it] advance: PR #{} is mergeable with required checks, enabling auto-merge",
+                        pr_number
+                    );
+                    if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                        println!(
+                            "[wreck-it] advance: failed to approve workflows for PR #{}: {}",
+                            pr_number, e
+                        );
+                    }
+                    if let Err(e) = client.enable_auto_merge(pr_number).await {
+                        println!(
+                            "[wreck-it] advance: failed to enable auto-merge for PR #{}: {}",
+                            pr_number, e
+                        );
+                    }
+                } else {
+                    // No required checks – merge directly.
+                    println!(
+                        "[wreck-it] advance: PR #{} is mergeable, merging directly",
+                        pr_number
+                    );
+                    match client.merge_pr(pr_number).await {
+                        Ok(()) => {
+                            println!("[wreck-it] advance: merged PR #{}", pr_number);
+                            state
+                                .memory
+                                .push(format!("advance: merged PR #{}", pr_number));
+                            mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                            if state.pr_number == Some(pr_number) {
+                                state.phase = AgentPhase::Completed;
+                            }
+                            resolved_pr_numbers.push(pr_number);
+                        }
+                        Err(e) => {
+                            println!(
+                                "[wreck-it] advance: failed to merge PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
                     }
                 }
             }
             Ok(PrMergeStatus::AlreadyMerged) => {
-                println!("[wreck-it] sweep: PR #{} already merged", pr_number);
+                println!(
+                    "[wreck-it] advance: PR #{} (task {}) already merged",
+                    pr_number, tracked.task_id
+                );
                 mark_task_complete_by_id(&tracked.task_id, &task_file)?;
                 if state.pr_number == Some(pr_number) {
                     state.phase = AgentPhase::Completed;
                 }
-                merged_pr_numbers.push(pr_number);
+                resolved_pr_numbers.push(pr_number);
             }
             Err(e) => {
-                println!("[wreck-it] sweep: error checking PR #{}: {}", pr_number, e);
+                println!(
+                    "[wreck-it] advance: error checking PR #{}: {}",
+                    pr_number, e
+                );
             }
         }
     }
 
     // Remove merged/closed PRs from the tracked list.
-    let merged_set: HashSet<u64> = merged_pr_numbers.into_iter().collect();
+    let resolved_set: HashSet<u64> = resolved_pr_numbers.into_iter().collect();
     state
         .tracked_prs
-        .retain(|tp| !merged_set.contains(&tp.pr_number));
+        .retain(|tp| !resolved_set.contains(&tp.pr_number));
 
     Ok(())
 }
@@ -358,6 +376,7 @@ async fn sweep_open_prs(
 /// `[wreck-it] <task_id>`.  PR titles may contain the issue number (e.g.
 /// "Fixes #42") or quote the task ID directly.  This is a best-effort
 /// extraction; returns [`UNKNOWN_TASK_ID`] when no ID can be inferred.
+#[cfg(test)]
 fn infer_task_id_from_title(title: &str) -> String {
     // Look for "[wreck-it] <task_id>" pattern.
     if let Some(rest) = title.strip_prefix("[wreck-it] ") {
@@ -564,12 +583,18 @@ async fn run_agent_working(
     }
 }
 
-/// Phase: NeedsVerification – the agent created a PR; try to merge it.
+/// Phase: NeedsVerification – the agent created a PR; advance it toward merge.
 ///
-/// Checks whether the PR is mergeable and merges it.  On success the task is
-/// marked complete and [`StepOutcome::Continue`] is returned so the loop can
-/// advance to the next task immediately.  When waiting for the PR to become
-/// mergeable, returns [`StepOutcome::Yield`].
+/// Progresses the PR through its lifecycle:
+/// - Draft → mark ready for review.
+/// - Not yet mergeable with required checks → approve workflows and enable
+///   auto-merge so GitHub merges once checks pass.
+/// - Mergeable without required checks → merge directly.
+/// - Already merged → mark the task complete.
+///
+/// Returns [`StepOutcome::Continue`] when the phase transitions without an
+/// external wait, and [`StepOutcome::Yield`] when waiting for an external
+/// event (e.g. CI checks to pass).
 async fn run_needs_verification(
     config: &Config,
     headless_cfg: &HeadlessConfig,
@@ -621,14 +646,6 @@ async fn run_needs_verification(
                 return Ok(StepOutcome::Yield);
             }
             println!("[wreck-it] PR #{} marked as ready for review", pr_number);
-            // Approve any workflow runs that require approval so checks can
-            // start running (repos may require approval for Actions).
-            if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
-                println!(
-                    "[wreck-it] failed to approve workflow runs for PR #{}: {}",
-                    pr_number, e
-                );
-            }
             state.memory.push(format!(
                 "iteration {}: marked PR #{} as ready for review",
                 state.iteration, pr_number,
@@ -637,16 +654,38 @@ async fn run_needs_verification(
             return Ok(StepOutcome::Yield);
         }
         Ok(PrMergeStatus::NotMergeable) => {
-            println!(
-                "[wreck-it] PR #{} is not yet mergeable, will retry next run",
-                pr_number
-            );
-            // Approve any workflow runs that require approval – the PR may
-            // be stuck because checks haven't started yet.
-            if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+            // Check whether the base branch requires status checks.
+            let has_checks = match client.has_required_checks_for_pr(pr_number).await {
+                Ok(v) => v,
+                Err(e) => {
+                    println!(
+                        "[wreck-it] failed to check required checks for PR #{}: {}",
+                        pr_number, e
+                    );
+                    false
+                }
+            };
+            if has_checks {
                 println!(
-                    "[wreck-it] failed to approve workflow runs for PR #{}: {}",
-                    pr_number, e
+                    "[wreck-it] PR #{} is not yet mergeable, approving workflows and enabling auto-merge",
+                    pr_number
+                );
+                if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                    println!(
+                        "[wreck-it] failed to approve workflow runs for PR #{}: {}",
+                        pr_number, e
+                    );
+                }
+                if let Err(e) = client.enable_auto_merge(pr_number).await {
+                    println!(
+                        "[wreck-it] failed to enable auto-merge for PR #{}: {}",
+                        pr_number, e
+                    );
+                }
+            } else {
+                println!(
+                    "[wreck-it] PR #{} is not yet mergeable (no required checks), will retry next run",
+                    pr_number
                 );
             }
             state.memory.push(format!(
@@ -676,7 +715,7 @@ async fn run_needs_verification(
 
             return Ok(StepOutcome::Continue);
         }
-        Ok(PrMergeStatus::Mergeable) => { /* proceed to merge */ }
+        Ok(PrMergeStatus::Mergeable) => { /* proceed to merge logic below */ }
         Err(e) => {
             println!(
                 "[wreck-it] error checking PR #{} merge status: {}",
@@ -686,6 +725,45 @@ async fn run_needs_verification(
         }
     }
 
+    // PR is mergeable.  Check for required checks to decide the strategy.
+    let has_checks = match client.has_required_checks_for_pr(pr_number).await {
+        Ok(v) => v,
+        Err(e) => {
+            println!(
+                "[wreck-it] failed to check required checks for PR #{}: {}",
+                pr_number, e
+            );
+            false
+        }
+    };
+
+    if has_checks {
+        // Required checks exist and pass; enable auto-merge and approve
+        // workflows in case any are still pending.
+        println!(
+            "[wreck-it] PR #{} is mergeable with required checks, enabling auto-merge",
+            pr_number
+        );
+        if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+            println!(
+                "[wreck-it] failed to approve workflow runs for PR #{}: {}",
+                pr_number, e
+            );
+        }
+        if let Err(e) = client.enable_auto_merge(pr_number).await {
+            println!(
+                "[wreck-it] failed to enable auto-merge for PR #{}: {}",
+                pr_number, e
+            );
+        }
+        state.memory.push(format!(
+            "iteration {}: enabled auto-merge for PR #{}",
+            state.iteration, pr_number,
+        ));
+        return Ok(StepOutcome::Yield);
+    }
+
+    // No required checks — merge directly.
     match client.merge_pr(pr_number).await {
         Ok(()) => {
             println!("[wreck-it] PR #{} merged successfully", pr_number);

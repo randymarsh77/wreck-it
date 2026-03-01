@@ -64,7 +64,8 @@ pub struct HeadlessState {
     pub memory: Vec<String>,
 
     /// All pull requests being actively managed by the headless runner.
-    /// Populated during the sweep phase and persisted between invocations.
+    /// Populated when a cloud agent creates a PR and persisted between
+    /// invocations.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracked_prs: Vec<TrackedPr>,
 }
