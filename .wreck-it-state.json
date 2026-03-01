@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 12,
   "current_task_id": "impl-6",
   "issue_number": 65,
+  "pr_number": 66,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/66",
   "last_prompt": "Implement a critic-actor reflection loop inspired by Openclaw and the Reflexion paper. After an actor agent completes a task and before committing, run a lightweight 'critic' prompt that reads the git diff and evaluates it against the original task description. The critic returns a structured CriticResult { score: f32, issues: Vec<String>, approved: bool }. If approved is false and there are substantive issues, re-invoke the actor with the issues as additional context (up to a configurable --reflection-rounds limit, default 2). Only after the critic approves (or rounds are exhausted) should tests run. Add 'critique_diff(diff: &str, task: &Task) -> Result<CriticResult>' and 'execute_task_with_reflection(task: &Task, rounds: u8) -> Result<()>' to AgentClient. Integrate into ralph_loop.rs. Add unit tests for the reflection round-counting logic.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
@@ -57,6 +59,14 @@
     "iteration 11: agent created PR #64 for task Some(\"impl-5\")",
     "iteration 11: marked PR #64 as ready for review",
     "advance: merged PR #64",
-    "iteration 12: triggered cloud agent for task impl-6 (issue #65)"
+    "iteration 12: triggered cloud agent for task impl-6 (issue #65)",
+    "iteration 12: agent created PR #66 for task Some(\"impl-6\")",
+    "iteration 12: marked PR #66 as ready for review"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 66,
+      "task_id": "impl-6"
+    }
   ]
 }
