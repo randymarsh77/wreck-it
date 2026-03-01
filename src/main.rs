@@ -9,6 +9,7 @@ mod headless_state;
 #[cfg(test)]
 mod integration_eval;
 mod ralph_loop;
+mod state_worktree;
 mod task_manager;
 mod tui;
 mod types;
@@ -106,7 +107,20 @@ async fn main() -> Result<()> {
         }
 
         Commands::Init { output } => {
-            // Create a sample task file
+            // Set up the state worktree: create the orphan branch (if needed)
+            // and check out a worktree at .wreck-it/state.
+            let work_dir = std::env::current_dir()?;
+            let state_branch = state_worktree::DEFAULT_STATE_BRANCH;
+            let state_dir = state_worktree::ensure_state_worktree(&work_dir, state_branch)?;
+
+            println!(
+                "Initialized state worktree at {} (branch '{}')",
+                state_dir.display(),
+                state_branch,
+            );
+
+            // Write sample task file into the state worktree.
+            let task_path = state_dir.join(&output);
             let sample_tasks = vec![
                 Task {
                     id: "1".to_string(),
@@ -146,8 +160,32 @@ async fn main() -> Result<()> {
                 },
             ];
 
-            task_manager::save_tasks(&output, &sample_tasks)?;
-            println!("Created sample task file at: {}", output.display());
+            task_manager::save_tasks(&task_path, &sample_tasks)?;
+            println!("Created sample task file at: {}", task_path.display());
+
+            // Write a default .wreck-it.toml config into the state worktree.
+            let config_path = state_dir.join(".wreck-it.toml");
+            if !config_path.exists() {
+                let default_toml = format!(
+                    "# wreck-it headless configuration\n\
+                     # This file lives on the state branch ({}).\n\
+                     \n\
+                     task_file = \"{}\"\n\
+                     state_file = \".wreck-it-state.json\"\n\
+                     max_iterations = 100\n",
+                    state_branch,
+                    output.display(),
+                );
+                std::fs::write(&config_path, default_toml)?;
+                println!("Created default config at: {}", config_path.display());
+            }
+
+            // Commit everything into the state branch.
+            if let Ok(true) =
+                state_worktree::commit_state_worktree(&work_dir, "wreck-it: init state")
+            {
+                println!("Committed initial state to branch '{}'", state_branch);
+            }
         }
     }
 

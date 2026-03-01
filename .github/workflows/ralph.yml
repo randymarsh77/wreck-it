@@ -4,6 +4,12 @@
 # orchestrating a swarm of ideas/implementer/evaluator agents to
 # iteratively improve the codebase.
 #
+# All wreck-it artefacts (.wreck-it.toml, task files, state) live on the
+# orphan `wreck-it-state` branch via a git worktree.  The workflow checks
+# out the default branch, builds wreck-it, then runs the headless loop.
+# wreck-it automatically sets up the worktree and reads/writes state there.
+# Cloud agents are dispatched against the default branch.
+#
 # Required secrets:
 #   PAT_TOKEN – Personal Access Token with repo + PR merge permissions
 #               (used to push changes, merge agent PRs, and assign Copilot
@@ -63,7 +69,7 @@ jobs:
 
       - name: Run wreck-it headless iteration
         run: |
-          ARGS="--headless --work-dir . --task-file dogfood-tasks.json --model-provider github-models"
+          ARGS="--headless --work-dir . --model-provider github-models"
           if [ -n "$MAX_ITER" ]; then
             ARGS="$ARGS --max-iterations $MAX_ITER"
           fi
@@ -72,33 +78,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           MAX_ITER: ${{ inputs.max_iterations }}
 
-      - name: Commit and push state changes
+      - name: Push state branch
         run: |
-          if git diff --quiet && git diff --cached --quiet; then
-            echo "No changes to commit"
+          STATE_BRANCH="wreck-it-state"
+          if git rev-parse --verify "refs/heads/${STATE_BRANCH}" >/dev/null 2>&1; then
+            echo "Pushing state branch '${STATE_BRANCH}'"
+            git push origin "${STATE_BRANCH}"
           else
-            git add -A
-            git commit -m "wreck-it: dogfood iteration update"
-            git pull --rebase
-            git push
+            echo "State branch '${STATE_BRANCH}' does not exist (nothing to push)"
           fi
-
-      - name: Create PR if on feature branch
-        if: github.ref != 'refs/heads/main' && github.ref != 'refs/heads/master'
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.PAT_TOKEN }}
-          commit-message: "wreck-it: dogfood agent swarm update"
-          title: "🤖 wreck-it dogfood: agent swarm iteration"
-          body: |
-            Automated update from the wreck-it dogfood agent swarm.
-
-            This PR contains changes made by the agent swarm during a headless
-            iteration. The swarm consists of:
-            - **Ideas agents**: Research and propose improvements
-            - **Implementer agents**: Write code and implement features
-            - **Evaluator agents**: Review and validate completeness
-
-            See `dogfood-tasks.json` for current task status.
-          branch: dogfood/agent-updates
-          base: master
