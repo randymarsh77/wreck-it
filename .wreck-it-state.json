@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 18,
   "current_task_id": "eval-5",
   "issue_number": 77,
+  "pr_number": 78,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/78",
   "last_prompt": "Evaluate the adaptive re-planning on failure (impl-7) and typed artefact store (impl-8) implementations. Verify: 1) After exceeding the replan threshold, the re-planner agent is invoked and produces a modified task list that is persisted correctly; 2) Circular dependency and duplicate ID guards reject invalid re-planner outputs; 3) Artefact outputs are persisted after task completion and correctly injected into downstream task prompts; 4) Tasks without inputs/outputs fields behave identically to pre-impl-8 behaviour (backward compatibility); 5) All new unit tests pass with 'cargo test'; 6) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
@@ -81,6 +83,14 @@
     "iteration 17: agent created PR #76 for task Some(\"eval-4\")",
     "iteration 17: marked PR #76 as ready for review",
     "advance: merged PR #76",
-    "iteration 18: triggered cloud agent for task eval-5 (issue #77)"
+    "iteration 18: triggered cloud agent for task eval-5 (issue #77)",
+    "iteration 18: agent created PR #78 for task Some(\"eval-5\")",
+    "iteration 18: marked PR #78 as ready for review"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 78,
+      "task_id": "eval-5"
+    }
   ]
 }
