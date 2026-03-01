@@ -77,7 +77,7 @@
   {
     "id": "eval-3",
     "description": "Perform end-to-end integration evaluation of all new features working together. Create a small test scenario with a mix of ideas, implementer, and evaluator tasks that exercise: role-based routing, dynamic task generation, agent memory persistence, and intelligent scheduling. Verify the complete workflow runs without errors in headless mode. Run the full test suite with 'cargo test --verbose'. Update docs/architecture.md to reflect the new agent swarm capabilities. Mark this task complete only if all systems work together correctly.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 4,
     "depends_on": [
       "eval-1",
@@ -87,7 +87,7 @@
   {
     "id": "impl-5",
     "description": "Implement LLM-powered dynamic task planning: add a 'wreck-it plan --goal \"...\"' sub-command (and an optional pre-loop planning phase in 'wreck-it run --goal \"...\"') that sends a natural-language goal to the Copilot SDK and receives back a structured task plan as a JSON array. The planner prompt must instruct the model to emit tasks with 'id', 'description', 'phase', and optional 'depends_on' fields. Validate the output against the Task schema before writing it to tasks.json. Add a 'generate_task_plan(goal: &str) -> Result<Vec<Task>>' method to AgentClient and a corresponding 'Plan' variant to the Commands enum in cli.rs. Add unit tests for the schema validation and ID-uniqueness checks.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 4,
     "depends_on": [
       "eval-3"
