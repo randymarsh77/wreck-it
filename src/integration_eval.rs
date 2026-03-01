@@ -6,12 +6,8 @@
 /// typed artefact store (eval-5).
 #[cfg(test)]
 mod tests {
-    use crate::artefact_store::{
-        load_manifest, persist_output_artefacts, resolve_input_artefacts,
-    };
-    use crate::headless_state::{
-        load_headless_state, save_headless_state, AgentPhase,
-    };
+    use crate::artefact_store::{load_manifest, persist_output_artefacts, resolve_input_artefacts};
+    use crate::headless_state::{load_headless_state, save_headless_state, AgentPhase};
     use crate::ralph_loop::TaskScheduler;
     use crate::replanner::parse_and_validate_replan;
     use crate::task_manager::{
@@ -429,5 +425,193 @@ mod tests {
             resolved_empty.is_empty(),
             "empty inputs resolve to empty vec"
         );
+    }
+
+    /// End-to-end integration scenario for eval-6: Gastown cloud runtime
+    /// integration (impl-9) and Openclaw provenance tracking (impl-10).
+    ///
+    /// Verifies:
+    /// 1. The task graph is correctly serialised as a gastown-compatible
+    ///    workflow DAG (only `runtime: gastown` tasks are included, edges are
+    ///    preserved).
+    /// 2. When `gastown_endpoint` is absent, `GastownClient::new` returns
+    ///    `None` (silent disable / local fallback).
+    /// 3. Provenance records are written to `.wreck-it-provenance/` for each
+    ///    task execution.
+    /// 4. `load_provenance_records` returns all records for a task ID, sorted
+    ///    by timestamp (the `wreck-it provenance --task <id>` data source).
+    #[test]
+    fn eval6_gastown_and_provenance_integration() {
+        use crate::gastown_client::{GastownClient, GastownStatusEvent, GastownTaskStatus};
+        use crate::provenance::{
+            hash_string, load_provenance_records, now_timestamp, persist_provenance_record,
+            ProvenanceRecord,
+        };
+        use crate::types::{AgentRole, TaskRuntime};
+
+        let dir = tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+
+        // ── Step 1: Build a mixed-runtime task list ──────────────────────────
+        //   local-a  (local)
+        //   gastown-b (gastown)
+        //   gastown-c (gastown, depends on gastown-b)
+        let tasks = vec![
+            {
+                let mut t = make_task(
+                    "local-a",
+                    AgentRole::Implementer,
+                    TaskStatus::Pending,
+                    1,
+                    0,
+                    1,
+                    vec![],
+                );
+                t.runtime = TaskRuntime::Local;
+                t
+            },
+            {
+                let mut t = make_task(
+                    "gastown-b",
+                    AgentRole::Implementer,
+                    TaskStatus::Pending,
+                    1,
+                    0,
+                    1,
+                    vec![],
+                );
+                t.runtime = TaskRuntime::Gastown;
+                t
+            },
+            {
+                let mut t = make_task(
+                    "gastown-c",
+                    AgentRole::Implementer,
+                    TaskStatus::Pending,
+                    2,
+                    0,
+                    1,
+                    vec!["gastown-b"],
+                );
+                t.runtime = TaskRuntime::Gastown;
+                t
+            },
+        ];
+        save_tasks(&task_file, &tasks).unwrap();
+
+        // ── Step 2: Requirement 1 – DAG serialisation ────────────────────────
+        let loaded = load_tasks(&task_file).unwrap();
+        let dag = GastownClient::build_dag(&loaded, "eval-6-workflow");
+
+        assert_eq!(dag.name, "eval-6-workflow");
+        // Only the two gastown-runtime tasks should appear in the DAG.
+        assert_eq!(dag.nodes.len(), 2, "only gastown tasks in DAG");
+        assert_eq!(dag.nodes[0].id, "gastown-b");
+        assert_eq!(dag.nodes[1].id, "gastown-c");
+        // Dependency edge from gastown-c → gastown-b must be preserved.
+        assert_eq!(dag.nodes[1].depends_on, vec!["gastown-b"]);
+
+        // DAG must round-trip through JSON without loss.
+        let json = GastownClient::serialise_dag(&dag).unwrap();
+        let parsed: crate::gastown_client::WorkflowDag = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, dag, "DAG round-trips through JSON");
+
+        // ── Step 3: Requirement 2 – absent endpoint → None (local fallback) ──
+        let client_no_endpoint = GastownClient::new(None, Some("token"));
+        assert!(
+            client_no_endpoint.is_none(),
+            "no endpoint → client is None (gastown disabled)"
+        );
+        let client_no_token = GastownClient::new(Some("https://gastown.example.com"), None);
+        assert!(
+            client_no_token.is_none(),
+            "no token → client is None (gastown disabled)"
+        );
+        // Both present → integration is enabled.
+        let client_enabled = GastownClient::new(Some("https://gastown.example.com"), Some("tok"));
+        assert!(
+            client_enabled.is_some(),
+            "both present → gastown integration enabled"
+        );
+
+        // ── Step 4: Requirement 3 – provenance records written to disk ───────
+        let ts1: u64 = 1_700_000_000;
+        let ts2: u64 = 1_700_000_001;
+
+        let record1 = ProvenanceRecord {
+            task_id: "gastown-b".to_string(),
+            agent_role: AgentRole::Implementer,
+            model: "copilot".to_string(),
+            prompt_hash: hash_string("implement gastown-b"),
+            tool_calls: vec![],
+            git_diff_hash: "abcd1234abcd1234".to_string(),
+            timestamp: ts1,
+            outcome: "success".to_string(),
+        };
+        let record2 = ProvenanceRecord {
+            task_id: "gastown-b".to_string(),
+            agent_role: AgentRole::Implementer,
+            model: "copilot".to_string(),
+            prompt_hash: hash_string("implement gastown-b retry"),
+            tool_calls: vec!["evaluate_completeness".to_string()],
+            git_diff_hash: "0000000000000000".to_string(),
+            timestamp: ts2,
+            outcome: "failure".to_string(),
+        };
+
+        persist_provenance_record(&record1, dir.path()).unwrap();
+        persist_provenance_record(&record2, dir.path()).unwrap();
+
+        let prov_dir = dir.path().join(".wreck-it-provenance");
+        assert!(prov_dir.exists(), ".wreck-it-provenance directory created");
+        let file1 = prov_dir.join(format!("gastown-b-{}.json", ts1));
+        let file2 = prov_dir.join(format!("gastown-b-{}.json", ts2));
+        assert!(file1.exists(), "first provenance file written");
+        assert!(file2.exists(), "second provenance file written");
+
+        // ── Step 5: Requirement 4 – load_provenance_records retrieves records ─
+        // (This is the data source for `wreck-it provenance --task <id>`.)
+        let records = load_provenance_records("gastown-b", dir.path()).unwrap();
+        assert_eq!(records.len(), 2, "two records found for gastown-b");
+        // Records sorted by timestamp ascending.
+        assert_eq!(records[0].timestamp, ts1);
+        assert_eq!(records[1].timestamp, ts2);
+        assert_eq!(records[0].outcome, "success");
+        assert_eq!(records[1].outcome, "failure");
+
+        // A task with no records returns an empty Vec (no panic or error).
+        let none = load_provenance_records("local-a", dir.path()).unwrap();
+        assert!(none.is_empty(), "no records for local-a");
+
+        // A non-existent provenance directory returns an empty Vec.
+        let fresh_dir = tempdir().unwrap();
+        let none2 = load_provenance_records("any-task", fresh_dir.path()).unwrap();
+        assert!(none2.is_empty(), "empty vec when provenance dir absent");
+
+        // ── Step 6: Gastown apply_status_events – local task list updated ─────
+        // Even when tasks were dispatched to gastown, the local state file must
+        // reflect completion events returned by the polling endpoint.
+        let events = vec![
+            GastownStatusEvent {
+                task_id: "gastown-b".to_string(),
+                status: GastownTaskStatus::Completed,
+            },
+            GastownStatusEvent {
+                task_id: "gastown-c".to_string(),
+                status: GastownTaskStatus::Failed,
+            },
+        ];
+        GastownClient::apply_status_events(&events, &task_file).unwrap();
+
+        let updated = load_tasks(&task_file).unwrap();
+        let b = updated.iter().find(|t| t.id == "gastown-b").unwrap();
+        let c = updated.iter().find(|t| t.id == "gastown-c").unwrap();
+        let a = updated.iter().find(|t| t.id == "local-a").unwrap();
+        assert_eq!(b.status, TaskStatus::Completed, "gastown-b → Completed");
+        assert_eq!(c.status, TaskStatus::Failed, "gastown-c → Failed");
+        assert_eq!(a.status, TaskStatus::Pending, "local-a untouched");
+
+        // ── Step 7: Provenance records for now_timestamp() are positive ───────
+        assert!(now_timestamp() > 0);
     }
 }

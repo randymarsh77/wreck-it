@@ -408,6 +408,29 @@ async fn main() -> Result<()> {
                 );
             }
         }
+
+        Commands::Provenance { task, work_dir } => {
+            let resolved_work_dir =
+                work_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            let records = provenance::load_provenance_records(&task, &resolved_work_dir)?;
+            if records.is_empty() {
+                println!("No provenance records found for task '{}'.", task);
+            } else {
+                println!("Provenance records for task '{}':", task);
+                for record in &records {
+                    println!("  timestamp : {}", record.timestamp);
+                    println!("  outcome   : {}", record.outcome);
+                    println!("  model     : {}", record.model);
+                    println!("  agent_role: {:?}", record.agent_role);
+                    println!("  prompt_hash: {}", record.prompt_hash);
+                    println!("  diff_hash : {}", record.git_diff_hash);
+                    if !record.tool_calls.is_empty() {
+                        println!("  tool_calls: {}", record.tool_calls.join(", "));
+                    }
+                    println!();
+                }
+            }
+        }
     }
 
     Ok(())

@@ -681,7 +681,11 @@ mod tests {
 
     #[test]
     fn artefact_kind_roundtrip() {
-        for kind in [ArtefactKind::File, ArtefactKind::Json, ArtefactKind::Summary] {
+        for kind in [
+            ArtefactKind::File,
+            ArtefactKind::Json,
+            ArtefactKind::Summary,
+        ] {
             let json = serde_json::to_string(&kind).unwrap();
             let loaded: ArtefactKind = serde_json::from_str(&json).unwrap();
             assert_eq!(loaded, kind);
@@ -712,8 +716,14 @@ mod tests {
     fn task_inputs_outputs_omitted_when_empty() {
         let task = make_task("x", TaskStatus::Pending, 1, vec![]);
         let json = serde_json::to_string(&task).unwrap();
-        assert!(!json.contains("\"inputs\""), "empty inputs should be omitted");
-        assert!(!json.contains("\"outputs\""), "empty outputs should be omitted");
+        assert!(
+            !json.contains("\"inputs\""),
+            "empty inputs should be omitted"
+        );
+        assert!(
+            !json.contains("\"outputs\""),
+            "empty outputs should be omitted"
+        );
     }
 
     #[test]

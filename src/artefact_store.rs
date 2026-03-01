@@ -39,8 +39,7 @@ pub fn load_manifest(path: &Path) -> Result<ArtefactManifest> {
         return Ok(ArtefactManifest::default());
     }
     let content = fs::read_to_string(path).context("Failed to read artefact manifest")?;
-    let manifest =
-        serde_json::from_str(&content).context("Failed to parse artefact manifest")?;
+    let manifest = serde_json::from_str(&content).context("Failed to parse artefact manifest")?;
     Ok(manifest)
 }
 
@@ -226,8 +225,7 @@ mod tests {
             name: "missing".to_string(),
             path: "does_not_exist.txt".to_string(),
         }];
-        let result =
-            persist_output_artefacts(&manifest_path, "task-1", &outputs, dir.path());
+        let result = persist_output_artefacts(&manifest_path, "task-1", &outputs, dir.path());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("missing"));
     }
@@ -328,10 +326,7 @@ mod tests {
         );
         save_manifest(&manifest_path, &manifest).unwrap();
 
-        let inputs = vec![
-            "task-1/present".to_string(),
-            "task-1/missing".to_string(),
-        ];
+        let inputs = vec!["task-1/present".to_string(), "task-1/missing".to_string()];
         let result = resolve_input_artefacts(&manifest_path, &inputs);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("task-1/missing"));
