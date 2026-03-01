@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 13,
   "current_task_id": "impl-7",
   "issue_number": 67,
+  "pr_number": 68,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/68",
   "last_prompt": "Implement adaptive re-planning on failure inspired by LangGraph's re-planner node and MetaGPT's iterative planning. After a configurable number of consecutive task failures (--replan-threshold, default 2), invoke a 're-planner' agent that receives: the full current task list, the failed task's description and error output, and the current git status. The re-planner may (a) rewrite the failed task's description, (b) split it into smaller sub-tasks with new IDs, or (c) inject a new prerequisite task. The modified task list must be validated (no duplicate IDs, no new circular dependencies) and persisted to the task file before the loop continues. Add a 'replan(tasks: &[Task], failed: &Task, error: &str) -> Result<Vec<Task>>' method to AgentClient. Integrate into ralph_loop.rs with the threshold check. Add unit tests for the circular-dependency guard and ID-deduplication.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
@@ -61,6 +63,14 @@
     "iteration 12: agent created PR #66 for task Some(\"impl-6\")",
     "iteration 12: marked PR #66 as ready for review",
     "advance: merged PR #66",
-    "iteration 13: triggered cloud agent for task impl-7 (issue #67)"
+    "iteration 13: triggered cloud agent for task impl-7 (issue #67)",
+    "iteration 13: agent created PR #68 for task Some(\"impl-7\")",
+    "iteration 13: marked PR #68 as ready for review"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 68,
+      "task_id": "impl-7"
+    }
   ]
 }
