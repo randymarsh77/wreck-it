@@ -8,6 +8,7 @@ mod headless_config;
 mod headless_state;
 #[cfg(test)]
 mod integration_eval;
+mod planner;
 mod ralph_loop;
 mod repo_config;
 mod state_worktree;
@@ -57,6 +58,7 @@ async fn main() -> Result<()> {
             completion_marker_file,
             headless,
             ralph,
+            goal,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -151,6 +153,27 @@ async fn main() -> Result<()> {
 
             save_user_config(&config)?;
 
+            // Optional pre-loop planning phase: generate tasks from a goal.
+            if let Some(ref goal_str) = goal {
+                println!("Generating task plan for goal: {}", goal_str);
+                let task_path = state_dir.join(&config.task_file);
+                if task_path.exists() {
+                    println!(
+                        "Warning: existing task file '{}' will be overwritten with the generated plan",
+                        task_path.display()
+                    );
+                }
+                let task_planner = planner::TaskPlanner::new(
+                    config.model_provider.clone(),
+                    config.api_endpoint.clone(),
+                    config.api_token.clone(),
+                );
+                let planned_tasks = task_planner.generate_task_plan(goal_str).await?;
+                println!("Generated {} task(s)", planned_tasks.len());
+                task_manager::save_tasks(&task_path, &planned_tasks)?;
+                println!("Task plan written to {}", task_path.display());
+            }
+
             if headless {
                 headless::run_headless(config, ralph_overrides.as_ref()).await?;
             } else {
@@ -165,6 +188,49 @@ async fn main() -> Result<()> {
                 &repo_cfg.state_branch,
                 "wreck-it: update state",
             );
+        }
+
+        Commands::Plan {
+            goal,
+            output,
+            api_endpoint,
+            api_token,
+            model_provider,
+        } => {
+            let mut config = load_user_config().unwrap_or_default();
+
+            if let Some(api_endpoint) = api_endpoint {
+                config.api_endpoint = api_endpoint;
+            }
+            if let Some(model_provider) = model_provider {
+                config.model_provider = model_provider;
+            }
+            if config.model_provider == ModelProvider::Llama
+                && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
+            {
+                config.api_endpoint = DEFAULT_LLAMA_ENDPOINT.to_string();
+            }
+            if config.model_provider == ModelProvider::GithubModels
+                && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
+            {
+                config.api_endpoint = DEFAULT_GITHUB_MODELS_ENDPOINT.to_string();
+            }
+            config.api_token = api_token
+                .or(config.api_token)
+                .or_else(|| env::var("COPILOT_API_TOKEN").ok())
+                .or_else(|| env::var("GITHUB_TOKEN").ok());
+
+            println!("Generating task plan for goal: {}", goal);
+            let task_planner = planner::TaskPlanner::new(
+                config.model_provider.clone(),
+                config.api_endpoint.clone(),
+                config.api_token.clone(),
+            );
+            let tasks = task_planner.generate_task_plan(&goal).await?;
+            println!("Generated {} task(s)", tasks.len());
+
+            task_manager::save_tasks(&output, &tasks)?;
+            println!("Task plan written to {}", output.display());
         }
 
         Commands::Init { output } => {
