@@ -1,7 +1,7 @@
 use crate::agent_memory::AgentMemory;
 use crate::types::{
-    EvaluationMode, ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
-    LLAMA_PROVIDER_TYPE,
+    CriticResult, EvaluationMode, ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL,
+    DEFAULT_LLAMA_MODEL, LLAMA_PROVIDER_TYPE,
 };
 use anyhow::{bail, Context, Result};
 use copilot_sdk_supercharged::*;
@@ -613,6 +613,173 @@ impl AgentClient {
         Ok(output.status.success())
     }
 
+    /// Get the current git diff (all uncommitted changes against HEAD).
+    fn get_git_diff(&self) -> Result<String> {
+        let output = Command::new("git")
+            .args(["diff", "HEAD"])
+            .current_dir(&self.work_dir)
+            .output()
+            .context("Failed to get git diff")?;
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// Critique a git diff against a task description using the configured LLM.
+    ///
+    /// Returns a [`CriticResult`] with a quality score, a list of issues, and
+    /// an approval decision.
+    pub async fn critique_diff(&mut self, diff: &str, task: &Task) -> Result<CriticResult> {
+        let prompt = format!(
+            "You are a code reviewer evaluating a git diff against a task description.\n\
+             Task: {task_desc}\n\n\
+             Git diff:\n{diff}\n\n\
+             Evaluate whether this diff correctly and completely implements the task.\n\
+             Respond ONLY with a JSON object in this exact format (no other text):\n\
+             {{\"score\": <float 0.0-1.0>, \"issues\": [\"issue1\", \"issue2\"], \"approved\": <true|false>}}\n\
+             - score: 0.0 (completely wrong) to 1.0 (perfect)\n\
+             - issues: list of specific problems found (empty array if approved)\n\
+             - approved: true if the implementation adequately addresses the task",
+            task_desc = task.description,
+            diff = diff,
+        );
+
+        let response = if self.model_provider == ModelProvider::GithubModels {
+            self.chat_via_http(&prompt).await?
+        } else {
+            self.critique_via_copilot(&prompt).await?
+        };
+
+        parse_critic_result(&response)
+    }
+
+    /// Send a critic prompt through the Copilot SDK and return the raw text response.
+    async fn critique_via_copilot(&mut self, prompt: &str) -> Result<String> {
+        let client = self.ensure_client().await?;
+
+        let config = SessionConfig {
+            request_permission: Some(false),
+            request_user_input: Some(false),
+            model: if self.model_provider == ModelProvider::Llama {
+                Some(DEFAULT_LLAMA_MODEL.to_string())
+            } else {
+                None
+            },
+            provider: if self.model_provider == ModelProvider::Llama {
+                Some(ProviderConfig {
+                    provider_type: Some(LLAMA_PROVIDER_TYPE.to_string()),
+                    wire_api: None,
+                    base_url: self.api_endpoint.clone(),
+                    api_key: self.api_token.clone(),
+                    bearer_token: None,
+                    azure: None,
+                })
+            } else {
+                None
+            },
+            ..Default::default()
+        };
+
+        let session = client
+            .create_session(config)
+            .await
+            .context("Failed to create critic session")?;
+
+        let response = session
+            .send_and_wait(
+                MessageOptions {
+                    prompt: prompt.to_string(),
+                    attachments: None,
+                    mode: None,
+                },
+                Some(60_000),
+            )
+            .await
+            .context("Failed to get critic response from Copilot")?;
+
+        session.destroy().await.ok();
+
+        Ok(response
+            .as_ref()
+            .and_then(|e| e.assistant_message_content())
+            .unwrap_or("")
+            .to_string())
+    }
+
+    /// Execute a task and run up to `rounds` critic-actor reflection cycles
+    /// before returning.  The commit is **not** performed here; it remains the
+    /// responsibility of the caller.
+    ///
+    /// Flow:
+    /// 1. Actor executes the task.
+    /// 2. Critic evaluates the resulting diff.
+    /// 3. If the critic approves (or rounds are exhausted) → return.
+    /// 4. Otherwise re-invoke the actor with the critic issues as additional
+    ///    context and go to step 2.
+    pub async fn execute_task_with_reflection(&mut self, task: &Task, rounds: u8) -> Result<()> {
+        tracing::info!(
+            "Executing task with {} reflection round(s): {}",
+            rounds,
+            task.description
+        );
+
+        // Initial actor execution.
+        self.execute_task(task).await?;
+
+        // Reflection loop: critique then optionally re-execute.
+        for round in 1..=rounds {
+            let diff = self.get_git_diff()?;
+
+            if diff.is_empty() {
+                tracing::info!("No diff to critique after execution (reflection round {})", round);
+                break;
+            }
+
+            let critic_result = match self.critique_diff(&diff, task).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(
+                        "Critic evaluation failed (reflection round {}/{}): {}",
+                        round,
+                        rounds,
+                        e
+                    );
+                    break;
+                }
+            };
+
+            tracing::info!(
+                "Critic reflection round {}/{}: score={:.2}, approved={}, issues={}",
+                round,
+                rounds,
+                critic_result.score,
+                critic_result.approved,
+                critic_result.issues.len()
+            );
+
+            if critic_result.approved {
+                tracing::info!("Critic approved the implementation – reflection complete");
+                break;
+            }
+
+            if critic_result.issues.is_empty() {
+                tracing::info!("Critic found no substantive issues – skipping re-invocation");
+                break;
+            }
+
+            // Re-invoke the actor with critic issues as additional context.
+            let issues_text = critic_result.issues.join("\n- ");
+            let mut revised_task = task.clone();
+            revised_task.description = format!(
+                "{}\n\nCritic feedback (reflection round {}):\n- {}",
+                task.description,
+                round,
+                issues_text
+            );
+            self.execute_task(&revised_task).await?;
+        }
+
+        Ok(())
+    }
+
     /// Commit changes to the repository
     pub fn commit_changes(&self, message: &str) -> Result<()> {
         // Validate work directory first
@@ -676,6 +843,34 @@ impl Drop for AgentClient {
             tracing::debug!("AgentClient dropped, Copilot client will be cleaned up");
         }
     }
+}
+
+/// Parse a [`CriticResult`] from an LLM response string.
+///
+/// Handles raw JSON as well as JSON embedded in markdown code fences.
+pub fn parse_critic_result(response: &str) -> Result<CriticResult> {
+    // Strip markdown code fences if present.
+    let stripped: String = response
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            !t.starts_with("```")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Find the JSON object boundaries.
+    let start = stripped
+        .find('{')
+        .context("No JSON object found in critic response")?;
+    let end = stripped
+        .rfind('}')
+        .context("No closing brace in critic response")?
+        + 1;
+    let json_part = &stripped[start..end];
+
+    serde_json::from_str::<CriticResult>(json_part)
+        .context("Failed to parse CriticResult from LLM response")
 }
 
 #[cfg(test)]
@@ -812,6 +1007,99 @@ mod tests {
         };
 
         let result = client.execute_task(&task).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("API token is required"));
+    }
+
+    // ---- CriticResult / parse_critic_result tests ----
+
+    #[test]
+    fn parse_critic_result_parses_valid_json() {
+        let json = r#"{"score": 0.8, "issues": ["Missing error handling"], "approved": false}"#;
+        let result = parse_critic_result(json).unwrap();
+        assert!(!result.approved);
+        assert_eq!(result.issues.len(), 1);
+        assert_eq!(result.issues[0], "Missing error handling");
+        assert!((result.score - 0.8).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_critic_result_parses_approved_with_no_issues() {
+        let json = r#"{"score": 0.95, "issues": [], "approved": true}"#;
+        let result = parse_critic_result(json).unwrap();
+        assert!(result.approved);
+        assert!(result.issues.is_empty());
+        assert!((result.score - 0.95).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_critic_result_strips_markdown_code_fences() {
+        let markdown = "```json\n{\"score\": 0.7, \"issues\": [\"needs tests\"], \"approved\": false}\n```";
+        let result = parse_critic_result(markdown).unwrap();
+        assert!(!result.approved);
+        assert_eq!(result.issues.len(), 1);
+        assert_eq!(result.issues[0], "needs tests");
+    }
+
+    #[test]
+    fn parse_critic_result_extracts_json_from_surrounding_text() {
+        let response =
+            "Here is my evaluation:\n{\"score\": 0.6, \"issues\": [\"a\", \"b\"], \"approved\": false}\nEnd.";
+        let result = parse_critic_result(response).unwrap();
+        assert!(!result.approved);
+        assert_eq!(result.issues.len(), 2);
+    }
+
+    #[test]
+    fn parse_critic_result_returns_error_on_invalid_json() {
+        let bad = "not json at all";
+        assert!(parse_critic_result(bad).is_err());
+    }
+
+    #[test]
+    fn parse_critic_result_returns_error_on_missing_brace() {
+        let bad = "score: 0.5";
+        assert!(parse_critic_result(bad).is_err());
+    }
+
+    /// Verify that execute_task_with_reflection with rounds=0 behaves identically
+    /// to a bare execute_task call: it should propagate the first error immediately
+    /// (no retry / no critique).
+    #[tokio::test]
+    async fn execute_task_with_reflection_rounds_zero_propagates_first_error() {
+        let dir = tempdir().unwrap();
+        init_git_repo(dir.path());
+        let mut client = AgentClient::with_evaluation(
+            ModelProvider::GithubModels,
+            "https://models.github.ai/inference/chat/completions".to_string(),
+            None, // no token → execute_task will fail
+            dir.path().to_string_lossy().to_string(),
+            None,
+            EvaluationMode::Command,
+            None,
+            ".task-complete".to_string(),
+        );
+
+        let task = Task {
+            id: "r0".to_string(),
+            description: "task for reflection=0 test".to_string(),
+            status: crate::types::TaskStatus::Pending,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
+        };
+
+        // rounds=0 → no reflection loop; error comes from execute_task
+        let result = client.execute_task_with_reflection(&task, 0).await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()

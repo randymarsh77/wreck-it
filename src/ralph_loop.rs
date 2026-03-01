@@ -210,11 +210,12 @@ impl RalphLoop {
         let task_desc = self.state.tasks[task_idx].description.clone();
         self.state.add_log(format!("Starting task: {}", task_desc));
 
-        // Execute the task
-        let task = &self.state.tasks[task_idx];
-        match self.agent.execute_task(task).await {
-            Ok(result) => {
-                self.state.add_log(format!("Task completed: {}", result));
+        // Execute the task with reflection rounds
+        let task = self.state.tasks[task_idx].clone();
+        let reflection_rounds = self.config.reflection_rounds;
+        match self.agent.execute_task_with_reflection(&task, reflection_rounds).await {
+            Ok(()) => {
+                self.state.add_log("Task completed".to_string());
                 self.state.tasks[task_idx].status = TaskStatus::Completed;
             }
             Err(e) => {

@@ -61,6 +61,10 @@ pub enum Commands {
         #[arg(long)]
         headless: bool,
 
+        /// Maximum number of critic-actor reflection rounds (0 = disabled, default 2)
+        #[arg(long)]
+        reflection_rounds: Option<u8>,
+
         /// Named ralph context to use (from repo config `[[ralphs]]`).
         /// When set, task file and state file paths are taken from the
         /// matching ralph entry in `.wreck-it/config.toml`.

@@ -10,6 +10,7 @@ pub const DEFAULT_LLAMA_MODEL: &str = "llama3.2";
 pub const DEFAULT_GITHUB_MODELS_MODEL: &str = "anthropic/claude-opus-4.6";
 pub const LLAMA_PROVIDER_TYPE: &str = "openai";
 pub const DEFAULT_COMPLETION_MARKER: &str = ".task-complete";
+pub const DEFAULT_REFLECTION_ROUNDS: u8 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -28,6 +29,17 @@ pub enum EvaluationMode {
     Command,
     /// Ask an agent to evaluate completeness; it writes a marker file if done.
     AgentFile,
+}
+
+/// Result of a critic evaluation of a git diff against a task description.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CriticResult {
+    /// Quality score from 0.0 (completely wrong) to 1.0 (perfect).
+    pub score: f32,
+    /// List of specific issues found in the implementation.
+    pub issues: Vec<String>,
+    /// Whether the critic approves the implementation as-is.
+    pub approved: bool,
 }
 
 /// Configuration for the Ralph Wiggum loop
@@ -75,6 +87,11 @@ pub struct Config {
     /// runs.
     #[serde(default = "default_completion_marker")]
     pub completion_marker_file: PathBuf,
+
+    /// Maximum number of critic-actor reflection rounds after the actor
+    /// completes a task.  A value of 0 disables reflection entirely.
+    #[serde(default = "default_reflection_rounds")]
+    pub reflection_rounds: u8,
 }
 
 fn default_max_iterations() -> usize {
@@ -101,6 +118,10 @@ fn default_completion_marker() -> PathBuf {
     PathBuf::from(DEFAULT_COMPLETION_MARKER)
 }
 
+fn default_reflection_rounds() -> u8 {
+    DEFAULT_REFLECTION_ROUNDS
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -114,6 +135,7 @@ impl Default for Config {
             evaluation_mode: EvaluationMode::default(),
             completeness_prompt: None,
             completion_marker_file: default_completion_marker(),
+            reflection_rounds: default_reflection_rounds(),
         }
     }
 }
@@ -427,6 +449,23 @@ mod tests {
             config.completion_marker_file,
             PathBuf::from(DEFAULT_COMPLETION_MARKER)
         );
+        assert_eq!(config.reflection_rounds, DEFAULT_REFLECTION_ROUNDS);
+    }
+
+    #[test]
+    fn config_reflection_rounds_roundtrip() {
+        let mut config = Config::default();
+        config.reflection_rounds = 5;
+        let json = serde_json::to_string(&config).unwrap();
+        let loaded: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.reflection_rounds, 5);
+    }
+
+    #[test]
+    fn config_reflection_rounds_defaults_when_absent() {
+        let json = r#"{"max_iterations":10}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.reflection_rounds, DEFAULT_REFLECTION_ROUNDS);
     }
 
     #[test]
