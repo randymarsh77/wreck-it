@@ -171,7 +171,7 @@
   {
     "id": "eval-7",
     "description": "Perform full end-to-end integration evaluation of all Horizon 2 and Horizon 3 features (impl-5 through impl-10) working together. Design a realistic scenario: provide a natural-language goal to 'wreck-it plan', let role-based routing assign specialist agents, observe critic-actor reflection improving output quality, trigger a deliberate failure to test adaptive re-planning, verify artefact chaining passes context between tasks, confirm provenance records are written for every step, and export the full run to openclaw format. Run 'cargo test --verbose' to confirm no regressions. Update docs/architecture.md to document the complete feature set. This task is the acceptance gate for the entire Horizon 2–3 roadmap.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 6,
     "depends_on": [
       "eval-4",
