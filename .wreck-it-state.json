@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 19,
-  "current_task_id": "eval-6",
-  "issue_number": 79,
-  "pr_number": 80,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/80",
-  "last_prompt": "Evaluate the Gastown cloud runtime integration (impl-9) and Openclaw provenance tracking integration (impl-10). Verify: 1) The task graph is correctly serialised as a gastown-compatible workflow DAG; 2) When gastown_endpoint is absent in config, the gastown runtime is silently disabled and wreck-it falls back to local execution; 3) Provenance records are written to .wreck-it-provenance/ for each task execution; 4) 'wreck-it provenance --task <id>' correctly prints the provenance chain; 5) 'wreck-it export-openclaw' produces valid openclaw plan-graph JSON; 6) All new unit tests pass with 'cargo test'; 7) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
+  "phase": "agent_working",
+  "iteration": 20,
+  "current_task_id": "eval-7",
+  "issue_number": 81,
+  "last_prompt": "Perform full end-to-end integration evaluation of all Horizon 2 and Horizon 3 features (impl-5 through impl-10) working together. Design a realistic scenario: provide a natural-language goal to 'wreck-it plan', let role-based routing assign specialist agents, observe critic-actor reflection improving output quality, trigger a deliberate failure to test adaptive re-planning, verify artefact chaining passes context between tasks, confirm provenance records are written for every step, and export the full run to openclaw format. Run 'cargo test --verbose' to confirm no regressions. Update docs/architecture.md to document the complete feature set. This task is the acceptance gate for the entire Horizon 2–3 roadmap.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
     "iteration 1: agent created PR #16 for task Some(\"ideas-1\")",
@@ -89,12 +87,8 @@
     "advance: merged PR #78",
     "iteration 19: triggered cloud agent for task eval-6 (issue #79)",
     "iteration 19: agent created PR #80 for task Some(\"eval-6\")",
-    "iteration 19: marked PR #80 as ready for review"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 80,
-      "task_id": "eval-6"
-    }
+    "iteration 19: marked PR #80 as ready for review",
+    "advance: merged PR #80",
+    "iteration 20: triggered cloud agent for task eval-7 (issue #81)"
   ]
 }
