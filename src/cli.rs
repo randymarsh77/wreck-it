@@ -66,6 +66,36 @@ pub enum Commands {
         /// matching ralph entry in `.wreck-it/config.toml`.
         #[arg(long)]
         ralph: Option<String>,
+
+        /// Natural-language goal: when provided, a task plan is generated via
+        /// the configured LLM before the loop starts and written to the task
+        /// file (overwriting any existing tasks).
+        #[arg(long)]
+        goal: Option<String>,
+    },
+
+    /// Generate a structured task plan from a natural-language goal using the
+    /// configured LLM and write it to a JSON task file.
+    Plan {
+        /// Natural-language goal to plan tasks for (required)
+        #[arg(short, long)]
+        goal: String,
+
+        /// Path to write the generated task file
+        #[arg(short, long, default_value = "tasks.json")]
+        output: PathBuf,
+
+        /// GitHub Copilot API endpoint
+        #[arg(long)]
+        api_endpoint: Option<String>,
+
+        /// API token (can also be set via COPILOT_API_TOKEN or GITHUB_TOKEN env vars)
+        #[arg(long)]
+        api_token: Option<String>,
+
+        /// Model provider
+        #[arg(long, value_enum)]
+        model_provider: Option<ModelProvider>,
     },
 
     /// Initialize a new task file
