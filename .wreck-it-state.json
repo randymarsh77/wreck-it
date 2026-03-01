@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 16,
   "current_task_id": "impl-10",
   "issue_number": 73,
+  "pr_number": 74,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/74",
   "last_prompt": "Implement Openclaw provenance tracking integration. During task execution in ralph_loop.rs, record a provenance record for every agent invocation: { task_id, agent_role, model, prompt_hash, tool_calls: [...], git_diff_hash, timestamp, outcome }. Persist provenance records to .wreck-it-provenance/<task_id>.json. Add a 'wreck-it provenance --task <id>' sub-command that prints the human-readable provenance chain for a task. Add a 'wreck-it export-openclaw [--output path]' sub-command that serialises the full run provenance in the openclaw plan-graph JSON format for import into the openclaw visualiser. Add unit tests for provenance record serialisation and the export format. Document the integration in docs/roadmap.md.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
@@ -73,6 +75,14 @@
     "iteration 15: agent created PR #72 for task Some(\"impl-9\")",
     "iteration 15: marked PR #72 as ready for review",
     "advance: merged PR #72",
-    "iteration 16: triggered cloud agent for task impl-10 (issue #73)"
+    "iteration 16: triggered cloud agent for task impl-10 (issue #73)",
+    "iteration 16: agent created PR #74 for task Some(\"impl-10\")",
+    "iteration 16: marked PR #74 as ready for review"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 74,
+      "task_id": "impl-10"
+    }
   ]
 }
