@@ -96,7 +96,7 @@
   {
     "id": "impl-6",
     "description": "Implement a critic-actor reflection loop inspired by Openclaw and the Reflexion paper. After an actor agent completes a task and before committing, run a lightweight 'critic' prompt that reads the git diff and evaluates it against the original task description. The critic returns a structured CriticResult { score: f32, issues: Vec<String>, approved: bool }. If approved is false and there are substantive issues, re-invoke the actor with the issues as additional context (up to a configurable --reflection-rounds limit, default 2). Only after the critic approves (or rounds are exhausted) should tests run. Add 'critique_diff(diff: &str, task: &Task) -> Result<CriticResult>' and 'execute_task_with_reflection(task: &Task, rounds: u8) -> Result<()>' to AgentClient. Integrate into ralph_loop.rs. Add unit tests for the reflection round-counting logic.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 4,
     "depends_on": [
       "eval-3"
@@ -105,7 +105,7 @@
   {
     "id": "impl-7",
     "description": "Implement adaptive re-planning on failure inspired by LangGraph's re-planner node and MetaGPT's iterative planning. After a configurable number of consecutive task failures (--replan-threshold, default 2), invoke a 're-planner' agent that receives: the full current task list, the failed task's description and error output, and the current git status. The re-planner may (a) rewrite the failed task's description, (b) split it into smaller sub-tasks with new IDs, or (c) inject a new prerequisite task. The modified task list must be validated (no duplicate IDs, no new circular dependencies) and persisted to the task file before the loop continues. Add a 'replan(tasks: &[Task], failed: &Task, error: &str) -> Result<Vec<Task>>' method to AgentClient. Integrate into ralph_loop.rs with the threshold check. Add unit tests for the circular-dependency guard and ID-deduplication.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 4,
     "depends_on": [
       "eval-3"
