@@ -105,7 +105,7 @@
   {
     "id": "impl-7",
     "description": "Implement adaptive re-planning on failure inspired by LangGraph's re-planner node and MetaGPT's iterative planning. After a configurable number of consecutive task failures (--replan-threshold, default 2), invoke a 're-planner' agent that receives: the full current task list, the failed task's description and error output, and the current git status. The re-planner may (a) rewrite the failed task's description, (b) split it into smaller sub-tasks with new IDs, or (c) inject a new prerequisite task. The modified task list must be validated (no duplicate IDs, no new circular dependencies) and persisted to the task file before the loop continues. Add a 'replan(tasks: &[Task], failed: &Task, error: &str) -> Result<Vec<Task>>' method to AgentClient. Integrate into ralph_loop.rs with the threshold check. Add unit tests for the circular-dependency guard and ID-deduplication.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 4,
     "depends_on": [
       "eval-3"
@@ -114,7 +114,7 @@
   {
     "id": "impl-8",
     "description": "Implement a typed artefact store and context chain inspired by MetaGPT artefacts and CrewAI's task context field. Extend the Task struct in types.rs with optional 'inputs: Vec<String>' (referencing 'task-id/artefact-name') and 'outputs: Vec<TaskArtefact>' fields, where TaskArtefact has 'kind: ArtefactKind (file | json | summary)', 'name: String', and 'path: String'. When a task completes, persist declared output artefacts into an artefact manifest stored alongside .wreck-it-state.json. Before executing a task, resolve its 'inputs' references by reading the manifest and injecting the artefact contents into the agent's prompt context. Ensure backward compatibility: tasks without inputs/outputs fields behave identically to today. Add unit tests for artefact serialisation, resolution, and missing-artefact error handling.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 4,
     "depends_on": [
       "eval-3"

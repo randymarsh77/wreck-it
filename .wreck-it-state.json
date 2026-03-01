@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 13,
-  "current_task_id": "impl-7",
-  "issue_number": 67,
-  "pr_number": 68,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/68",
-  "last_prompt": "Implement adaptive re-planning on failure inspired by LangGraph's re-planner node and MetaGPT's iterative planning. After a configurable number of consecutive task failures (--replan-threshold, default 2), invoke a 're-planner' agent that receives: the full current task list, the failed task's description and error output, and the current git status. The re-planner may (a) rewrite the failed task's description, (b) split it into smaller sub-tasks with new IDs, or (c) inject a new prerequisite task. The modified task list must be validated (no duplicate IDs, no new circular dependencies) and persisted to the task file before the loop continues. Add a 'replan(tasks: &[Task], failed: &Task, error: &str) -> Result<Vec<Task>>' method to AgentClient. Integrate into ralph_loop.rs with the threshold check. Add unit tests for the circular-dependency guard and ID-deduplication.",
+  "phase": "agent_working",
+  "iteration": 14,
+  "current_task_id": "impl-8",
+  "issue_number": 69,
+  "last_prompt": "Implement a typed artefact store and context chain inspired by MetaGPT artefacts and CrewAI's task context field. Extend the Task struct in types.rs with optional 'inputs: Vec<String>' (referencing 'task-id/artefact-name') and 'outputs: Vec<TaskArtefact>' fields, where TaskArtefact has 'kind: ArtefactKind (file | json | summary)', 'name: String', and 'path: String'. When a task completes, persist declared output artefacts into an artefact manifest stored alongside .wreck-it-state.json. Before executing a task, resolve its 'inputs' references by reading the manifest and injecting the artefact contents into the agent's prompt context. Ensure backward compatibility: tasks without inputs/outputs fields behave identically to today. Add unit tests for artefact serialisation, resolution, and missing-artefact error handling.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
     "iteration 1: agent created PR #16 for task Some(\"ideas-1\")",
@@ -65,12 +63,8 @@
     "advance: merged PR #66",
     "iteration 13: triggered cloud agent for task impl-7 (issue #67)",
     "iteration 13: agent created PR #68 for task Some(\"impl-7\")",
-    "iteration 13: marked PR #68 as ready for review"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 68,
-      "task_id": "impl-7"
-    }
+    "iteration 13: marked PR #68 as ready for review",
+    "advance: merged PR #68",
+    "iteration 14: triggered cloud agent for task impl-8 (issue #69)"
   ]
 }
