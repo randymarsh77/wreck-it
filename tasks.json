@@ -132,7 +132,7 @@
   {
     "id": "impl-10",
     "description": "Implement Openclaw provenance tracking integration. During task execution in ralph_loop.rs, record a provenance record for every agent invocation: { task_id, agent_role, model, prompt_hash, tool_calls: [...], git_diff_hash, timestamp, outcome }. Persist provenance records to .wreck-it-provenance/<task_id>.json. Add a 'wreck-it provenance --task <id>' sub-command that prints the human-readable provenance chain for a task. Add a 'wreck-it export-openclaw [--output path]' sub-command that serialises the full run provenance in the openclaw plan-graph JSON format for import into the openclaw visualiser. Add unit tests for provenance record serialisation and the export format. Document the integration in docs/roadmap.md.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 4,
     "depends_on": [
       "eval-3"
@@ -141,7 +141,7 @@
   {
     "id": "eval-4",
     "description": "Evaluate the LLM-powered dynamic task planning (impl-5) and critic-actor reflection loop (impl-6) implementations. Verify: 1) 'wreck-it plan --goal' generates a valid tasks.json with correct schema, unique IDs, and sensible dependency structure for a realistic goal; 2) The critic prompt correctly identifies an intentionally flawed diff (e.g., missing function body, wrong file edited) and triggers a reflection round; 3) The reflection round counter is respected and the loop does not spin infinitely; 4) All new unit tests pass with 'cargo test'; 5) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 5,
     "depends_on": [
       "impl-5",

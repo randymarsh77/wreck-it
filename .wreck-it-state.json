@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 16,
-  "current_task_id": "impl-10",
-  "issue_number": 73,
-  "pr_number": 74,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/74",
-  "last_prompt": "Implement Openclaw provenance tracking integration. During task execution in ralph_loop.rs, record a provenance record for every agent invocation: { task_id, agent_role, model, prompt_hash, tool_calls: [...], git_diff_hash, timestamp, outcome }. Persist provenance records to .wreck-it-provenance/<task_id>.json. Add a 'wreck-it provenance --task <id>' sub-command that prints the human-readable provenance chain for a task. Add a 'wreck-it export-openclaw [--output path]' sub-command that serialises the full run provenance in the openclaw plan-graph JSON format for import into the openclaw visualiser. Add unit tests for provenance record serialisation and the export format. Document the integration in docs/roadmap.md.",
+  "phase": "agent_working",
+  "iteration": 17,
+  "current_task_id": "eval-4",
+  "issue_number": 75,
+  "last_prompt": "Evaluate the LLM-powered dynamic task planning (impl-5) and critic-actor reflection loop (impl-6) implementations. Verify: 1) 'wreck-it plan --goal' generates a valid tasks.json with correct schema, unique IDs, and sensible dependency structure for a realistic goal; 2) The critic prompt correctly identifies an intentionally flawed diff (e.g., missing function body, wrong file edited) and triggers a reflection round; 3) The reflection round counter is respected and the loop does not spin infinitely; 4) All new unit tests pass with 'cargo test'; 5) 'cargo clippy -- -D warnings' reports no issues. Document any defects found as new fix tasks.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-1 (issue #14)",
     "iteration 1: agent created PR #16 for task Some(\"ideas-1\")",
@@ -77,12 +75,8 @@
     "advance: merged PR #72",
     "iteration 16: triggered cloud agent for task impl-10 (issue #73)",
     "iteration 16: agent created PR #74 for task Some(\"impl-10\")",
-    "iteration 16: marked PR #74 as ready for review"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 74,
-      "task_id": "impl-10"
-    }
+    "iteration 16: marked PR #74 as ready for review",
+    "advance: merged PR #74",
+    "iteration 17: triggered cloud agent for task eval-4 (issue #75)"
   ]
 }
