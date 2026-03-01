@@ -1053,7 +1053,16 @@ impl CloudAgentClient {
         // Use the GraphQL API to enable auto-merge.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
         let query = serde_json::json!({
-            "query": "mutation($prId: ID!) { enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) { pullRequest { autoMergeRequest { enabledAt } } } }",
+            "query": concat!(
+                "mutation($prId: ID!) { ",
+                  "enablePullRequestAutoMerge(input: { ",
+                    "pullRequestId: $prId, ",
+                    "mergeMethod: SQUASH ",
+                  "}) { ",
+                    "pullRequest { autoMergeRequest { enabledAt } } ",
+                  "} ",
+                "}"
+            ),
             "variables": { "prId": node_id },
         });
 

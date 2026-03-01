@@ -249,10 +249,16 @@ async fn advance_tracked_prs(
             }
             Ok(PrMergeStatus::NotMergeable) => {
                 // Check whether the base branch requires status checks.
-                let has_checks = client
-                    .has_required_checks_for_pr(pr_number)
-                    .await
-                    .unwrap_or(false);
+                let has_checks = match client.has_required_checks_for_pr(pr_number).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        println!(
+                            "[wreck-it] advance: failed to check required checks for PR #{}: {}",
+                            pr_number, e
+                        );
+                        false
+                    }
+                };
                 if has_checks {
                     println!(
                         "[wreck-it] advance: PR #{} not yet mergeable, approving workflows and enabling auto-merge",
@@ -279,10 +285,16 @@ async fn advance_tracked_prs(
             }
             Ok(PrMergeStatus::Mergeable) => {
                 // Check whether the base branch requires status checks.
-                let has_checks = client
-                    .has_required_checks_for_pr(pr_number)
-                    .await
-                    .unwrap_or(false);
+                let has_checks = match client.has_required_checks_for_pr(pr_number).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        println!(
+                            "[wreck-it] advance: failed to check required checks for PR #{}: {}",
+                            pr_number, e
+                        );
+                        false
+                    }
+                };
                 if has_checks {
                     // Required checks exist and pass; enable auto-merge and
                     // approve workflows in case any are still pending.
@@ -643,10 +655,16 @@ async fn run_needs_verification(
         }
         Ok(PrMergeStatus::NotMergeable) => {
             // Check whether the base branch requires status checks.
-            let has_checks = client
-                .has_required_checks_for_pr(pr_number)
-                .await
-                .unwrap_or(false);
+            let has_checks = match client.has_required_checks_for_pr(pr_number).await {
+                Ok(v) => v,
+                Err(e) => {
+                    println!(
+                        "[wreck-it] failed to check required checks for PR #{}: {}",
+                        pr_number, e
+                    );
+                    false
+                }
+            };
             if has_checks {
                 println!(
                     "[wreck-it] PR #{} is not yet mergeable, approving workflows and enabling auto-merge",
@@ -708,10 +726,16 @@ async fn run_needs_verification(
     }
 
     // PR is mergeable.  Check for required checks to decide the strategy.
-    let has_checks = client
-        .has_required_checks_for_pr(pr_number)
-        .await
-        .unwrap_or(false);
+    let has_checks = match client.has_required_checks_for_pr(pr_number).await {
+        Ok(v) => v,
+        Err(e) => {
+            println!(
+                "[wreck-it] failed to check required checks for PR #{}: {}",
+                pr_number, e
+            );
+            false
+        }
+    };
 
     if has_checks {
         // Required checks exist and pass; enable auto-merge and approve
