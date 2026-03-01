@@ -801,6 +801,8 @@ mod tests {
             description: "test task".to_string(),
             status: crate::types::TaskStatus::Pending,
             role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
             phase: 1,
             depends_on: vec![],
             priority: 0,

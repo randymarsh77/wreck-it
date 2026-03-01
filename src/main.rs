@@ -56,6 +56,7 @@ async fn main() -> Result<()> {
             completeness_prompt,
             completion_marker_file,
             headless,
+            ralph,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -71,6 +72,23 @@ async fn main() -> Result<()> {
                 }
             };
 
+            // If a named ralph was requested, resolve its task and state paths.
+            let ralph_overrides = match &ralph {
+                Some(name) => match repo_config::find_ralph(&repo_cfg, name) {
+                    Some(rc) => Some(rc.clone()),
+                    None => {
+                        let available: Vec<&str> =
+                            repo_cfg.ralphs.iter().map(|r| r.name.as_str()).collect();
+                        println!(
+                            "ralph '{}' not found in repo config. available: {:?}",
+                            name, available,
+                        );
+                        return Ok(());
+                    }
+                },
+                None => None,
+            };
+
             // Set up the state worktree.
             let state_dir =
                 state_worktree::ensure_state_worktree(&resolved_work_dir, &repo_cfg.state_branch)?;
@@ -82,6 +100,13 @@ async fn main() -> Result<()> {
             }
 
             let mut config = load_user_config().unwrap_or_default();
+
+            // Apply ralph overrides before explicit CLI flags so that
+            // `--task-file` can still override the ralph default.
+            if let Some(ref rc) = ralph_overrides {
+                config.task_file = rc.task_file.clone().into();
+            }
+
             if let Some(task_file) = task_file {
                 config.task_file = task_file;
             }
@@ -127,7 +152,7 @@ async fn main() -> Result<()> {
             save_user_config(&config)?;
 
             if headless {
-                headless::run_headless(config).await?;
+                headless::run_headless(config, ralph_overrides.as_ref()).await?;
             } else {
                 let ralph_loop = RalphLoop::new(config);
                 let mut app = TuiApp::new(ralph_loop);
@@ -163,6 +188,7 @@ async fn main() -> Result<()> {
                         RepoConfig {
                             state_branch: branch,
                             state_root: root,
+                            ralphs: vec![],
                         }
                     } else {
                         RepoConfig::default()
@@ -226,6 +252,8 @@ async fn main() -> Result<()> {
                     description: "First task - implement feature X".to_string(),
                     status: TaskStatus::Pending,
                     role: types::AgentRole::default(),
+                    kind: types::TaskKind::default(),
+                    cooldown_seconds: None,
                     phase: 1,
                     depends_on: vec![],
                     priority: 0,
@@ -238,6 +266,8 @@ async fn main() -> Result<()> {
                     description: "Second task - add tests for feature X".to_string(),
                     status: TaskStatus::Pending,
                     role: types::AgentRole::default(),
+                    kind: types::TaskKind::default(),
+                    cooldown_seconds: None,
                     phase: 1,
                     depends_on: vec![],
                     priority: 0,
@@ -250,6 +280,8 @@ async fn main() -> Result<()> {
                     description: "Third task - update documentation".to_string(),
                     status: TaskStatus::Pending,
                     role: types::AgentRole::default(),
+                    kind: types::TaskKind::default(),
+                    cooldown_seconds: None,
                     phase: 2,
                     depends_on: vec!["1".to_string(), "2".to_string()],
                     priority: 0,

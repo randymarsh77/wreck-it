@@ -1,4 +1,4 @@
-use crate::types::{AgentRole, Task, TaskStatus};
+use crate::types::{AgentRole, Task, TaskKind, TaskStatus};
 use anyhow::{bail, Context, Result};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -145,10 +145,38 @@ pub fn append_task(path: &Path, new_task: Task) -> Result<()> {
     save_tasks(path, &tasks)
 }
 
+/// Reset completed recurring tasks whose cooldown has elapsed back to
+/// `Pending` so that the scheduler picks them up again.
+///
+/// - Tasks with `kind == Milestone` (the default) are never touched.
+/// - Tasks with `kind == Recurring` and `status == Completed` are reset
+///   to `Pending` when either no `cooldown_seconds` is set, or enough
+///   time has passed since `last_attempt_at`.
+///
+/// Returns the number of tasks that were reset.
+pub fn reset_recurring_tasks(tasks: &mut [Task], now_secs: u64) -> usize {
+    let mut count = 0;
+    for task in tasks.iter_mut() {
+        if task.kind != TaskKind::Recurring || task.status != TaskStatus::Completed {
+            continue;
+        }
+        let ready = match (task.cooldown_seconds, task.last_attempt_at) {
+            (Some(cd), Some(last)) => now_secs.saturating_sub(last) >= cd,
+            // No cooldown → always eligible; no last_attempt → first run.
+            _ => true,
+        };
+        if ready {
+            task.status = TaskStatus::Pending;
+            count += 1;
+        }
+    }
+    count
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::AgentRole;
+    use crate::types::{AgentRole, TaskKind};
     use tempfile::tempdir;
 
     fn make_task(id: &str, status: TaskStatus, depends_on: Vec<&str>) -> Task {
@@ -157,6 +185,8 @@ mod tests {
             description: format!("task {}", id),
             status,
             role: AgentRole::default(),
+            kind: TaskKind::default(),
+            cooldown_seconds: None,
             phase: 1,
             depends_on: depends_on.into_iter().map(String::from).collect(),
             priority: 0,
@@ -176,6 +206,8 @@ mod tests {
             description: "Test task".to_string(),
             status: TaskStatus::Pending,
             role: AgentRole::default(),
+            kind: TaskKind::default(),
+            cooldown_seconds: None,
             phase: 1,
             depends_on: vec![],
             priority: 0,
@@ -199,6 +231,8 @@ mod tests {
                 description: "Completed".to_string(),
                 status: TaskStatus::Completed,
                 role: AgentRole::default(),
+                kind: TaskKind::default(),
+                cooldown_seconds: None,
                 phase: 1,
                 depends_on: vec![],
                 priority: 0,
@@ -211,6 +245,8 @@ mod tests {
                 description: "Pending".to_string(),
                 status: TaskStatus::Pending,
                 role: AgentRole::default(),
+                kind: TaskKind::default(),
+                cooldown_seconds: None,
                 phase: 1,
                 depends_on: vec![],
                 priority: 0,
@@ -398,5 +434,79 @@ mod tests {
         let result = append_task(&path, extra);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("task limit"));
+    }
+
+    // ---- reset_recurring_tasks tests ----
+
+    #[test]
+    fn reset_recurring_resets_completed_recurring_task() {
+        let mut tasks = vec![{
+            let mut t = make_task("a", TaskStatus::Completed, vec![]);
+            t.kind = TaskKind::Recurring;
+            t.last_attempt_at = Some(100);
+            t
+        }];
+        let count = reset_recurring_tasks(&mut tasks, 200);
+        assert_eq!(count, 1);
+        assert_eq!(tasks[0].status, TaskStatus::Pending);
+    }
+
+    #[test]
+    fn reset_recurring_skips_milestone_tasks() {
+        let mut tasks = vec![make_task("a", TaskStatus::Completed, vec![])];
+        let count = reset_recurring_tasks(&mut tasks, 200);
+        assert_eq!(count, 0);
+        assert_eq!(tasks[0].status, TaskStatus::Completed);
+    }
+
+    #[test]
+    fn reset_recurring_respects_cooldown() {
+        let mut tasks = vec![{
+            let mut t = make_task("a", TaskStatus::Completed, vec![]);
+            t.kind = TaskKind::Recurring;
+            t.cooldown_seconds = Some(3600);
+            t.last_attempt_at = Some(100);
+            t
+        }];
+        // Only 100 seconds have passed, cooldown is 3600.
+        let count = reset_recurring_tasks(&mut tasks, 200);
+        assert_eq!(count, 0);
+        assert_eq!(tasks[0].status, TaskStatus::Completed);
+
+        // Now enough time has passed.
+        let count = reset_recurring_tasks(&mut tasks, 3800);
+        assert_eq!(count, 1);
+        assert_eq!(tasks[0].status, TaskStatus::Pending);
+    }
+
+    #[test]
+    fn reset_recurring_without_cooldown_always_resets() {
+        let mut tasks = vec![{
+            let mut t = make_task("a", TaskStatus::Completed, vec![]);
+            t.kind = TaskKind::Recurring;
+            t.last_attempt_at = Some(100);
+            t
+        }];
+        let count = reset_recurring_tasks(&mut tasks, 101);
+        assert_eq!(count, 1);
+        assert_eq!(tasks[0].status, TaskStatus::Pending);
+    }
+
+    #[test]
+    fn reset_recurring_skips_pending_and_in_progress() {
+        let mut tasks = vec![
+            {
+                let mut t = make_task("a", TaskStatus::Pending, vec![]);
+                t.kind = TaskKind::Recurring;
+                t
+            },
+            {
+                let mut t = make_task("b", TaskStatus::InProgress, vec![]);
+                t.kind = TaskKind::Recurring;
+                t
+            },
+        ];
+        let count = reset_recurring_tasks(&mut tasks, 9999);
+        assert_eq!(count, 0);
     }
 }

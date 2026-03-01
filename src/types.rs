@@ -118,6 +118,21 @@ impl Default for Config {
     }
 }
 
+/// The lifecycle kind of a task.
+///
+/// When absent in a JSON task file, the field defaults to [`TaskKind::Milestone`]
+/// so that pre-existing task files continue to work without modification.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskKind {
+    /// A one-shot goal that completes permanently.
+    #[default]
+    Milestone,
+    /// A long-running goal that resets to pending after completion, subject to
+    /// an optional cooldown period.
+    Recurring,
+}
+
 /// The role of the agent assigned to execute this task.
 ///
 /// When absent in a JSON task file the field defaults to [`AgentRole::Implementer`]
@@ -145,6 +160,18 @@ pub struct Task {
     /// backward compatibility with task files that pre-date this field.
     #[serde(default, skip_serializing_if = "is_default_role")]
     pub role: AgentRole,
+
+    /// Lifecycle kind of the task.  Defaults to `milestone` (one-shot).
+    /// Set to `recurring` for long-running goals that reset to pending after
+    /// completion, subject to an optional cooldown.
+    #[serde(default, skip_serializing_if = "is_default_kind")]
+    pub kind: TaskKind,
+
+    /// Minimum number of seconds that must elapse after a recurring task
+    /// completes before it is eligible to run again.  Only meaningful when
+    /// `kind` is `recurring`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cooldown_seconds: Option<u64>,
 
     /// Execution phase (tasks in the same phase may run in parallel).
     /// Tasks in a lower phase run before tasks in a higher phase.
@@ -178,6 +205,10 @@ pub struct Task {
 
 fn is_default_role(r: &AgentRole) -> bool {
     *r == AgentRole::Implementer
+}
+
+fn is_default_kind(k: &TaskKind) -> bool {
+    *k == TaskKind::Milestone
 }
 
 fn default_phase() -> u32 {
@@ -301,6 +332,8 @@ mod tests {
             description: format!("task {}", id),
             status,
             role: AgentRole::default(),
+            kind: TaskKind::default(),
+            cooldown_seconds: None,
             phase,
             depends_on: depends_on.into_iter().map(String::from).collect(),
             priority: 0,
@@ -451,5 +484,53 @@ mod tests {
     #[test]
     fn agent_role_default_is_implementer() {
         assert_eq!(AgentRole::default(), AgentRole::Implementer);
+    }
+
+    // ---- TaskKind tests ----
+
+    #[test]
+    fn task_kind_default_is_milestone() {
+        assert_eq!(TaskKind::default(), TaskKind::Milestone);
+    }
+
+    #[test]
+    fn task_kind_defaults_to_milestone_when_absent() {
+        let json = r#"{"id":"x","description":"d","status":"pending"}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert_eq!(task.kind, TaskKind::Milestone);
+        assert!(task.cooldown_seconds.is_none());
+    }
+
+    #[test]
+    fn task_kind_milestone_is_omitted_in_serialization() {
+        let task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(!json.contains("\"kind\""), "default kind should be omitted");
+    }
+
+    #[test]
+    fn task_kind_recurring_is_serialized() {
+        let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        task.kind = TaskKind::Recurring;
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(json.contains("\"kind\":\"recurring\""));
+    }
+
+    #[test]
+    fn task_kind_recurring_roundtrip() {
+        let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        task.kind = TaskKind::Recurring;
+        task.cooldown_seconds = Some(3600);
+        let json = serde_json::to_string(&task).unwrap();
+        let loaded: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.kind, TaskKind::Recurring);
+        assert_eq!(loaded.cooldown_seconds, Some(3600));
+    }
+
+    #[test]
+    fn task_cooldown_seconds_omitted_when_none() {
+        let task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(!json.contains("cooldown_seconds"));
     }
 }

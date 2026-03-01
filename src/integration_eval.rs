@@ -29,6 +29,8 @@ mod tests {
             description: format!("task {}", id),
             status,
             role,
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
             phase,
             depends_on: depends_on.into_iter().map(String::from).collect(),
             priority,
