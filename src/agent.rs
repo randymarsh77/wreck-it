@@ -1,4 +1,5 @@
 use crate::agent_memory::AgentMemory;
+use crate::artefact_store;
 use crate::types::{
     CriticResult, EvaluationMode, ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL,
     DEFAULT_LLAMA_MODEL, LLAMA_PROVIDER_TYPE,
@@ -202,15 +203,16 @@ impl AgentClient {
         } else {
             format!("\nPrior attempts for this task:\n{}\n", prior_context)
         };
+        let artefact_section = self.build_artefact_context(task);
         let iteration = memory.attempt_count(&task.id) + 1;
         let prompt = format!(
             "You are an AI coding agent working on a task in a git repository.\n\
              Working directory: {}\n\n\
              Task: {}\n\n\
-             Context:\n{}\n{}\
+             Context:\n{}\n{}{}\
              Please implement the necessary code changes to complete this task. \
              Be specific and provide complete, working code.",
-            self.work_dir, task.description, context, memory_section
+            self.work_dir, task.description, context, memory_section, artefact_section
         );
 
         // Send the message and wait for response
@@ -268,15 +270,16 @@ impl AgentClient {
         } else {
             format!("\nPrior attempts for this task:\n{}\n", prior_context)
         };
+        let artefact_section = self.build_artefact_context(task);
         let iteration = memory.attempt_count(&task.id) + 1;
         let prompt = format!(
             "You are an AI coding agent working on a task in a git repository.\n\
              Working directory: {}\n\n\
              Task: {}\n\n\
-             Context:\n{}\n{}\
+             Context:\n{}\n{}{}\
              Please implement the necessary code changes to complete this task. \
              Be specific and provide complete, working code.",
-            self.work_dir, task.description, context, memory_section
+            self.work_dir, task.description, context, memory_section, artefact_section
         );
 
         let response = self.chat_via_http(&prompt).await;
@@ -394,6 +397,34 @@ impl AgentClient {
             .to_string();
 
         Ok(content)
+    }
+
+    /// Return the path to the artefact manifest file inside the work directory.
+    fn manifest_path(&self) -> std::path::PathBuf {
+        Path::new(&self.work_dir).join(".wreck-it-artefacts.json")
+    }
+
+    /// Resolve input artefact references for `task` and build a prompt section
+    /// that lists each artefact's content.  Returns an empty string when the
+    /// task declares no inputs or when resolution encounters a non-fatal warning.
+    fn build_artefact_context(&self, task: &Task) -> String {
+        if task.inputs.is_empty() {
+            return String::new();
+        }
+        let manifest_path = self.manifest_path();
+        match artefact_store::resolve_input_artefacts(&manifest_path, &task.inputs) {
+            Ok(resolved) => {
+                let mut section = String::from("\nInput artefacts:\n");
+                for (key, content) in &resolved {
+                    section.push_str(&format!("\n--- {} ---\n{}\n", key, content));
+                }
+                section
+            }
+            Err(e) => {
+                tracing::warn!("Failed to resolve input artefacts: {}", e);
+                String::new()
+            }
+        }
     }
 
     fn read_codebase_context(&self) -> Result<String> {
@@ -1004,6 +1035,8 @@ mod tests {
             complexity: 1,
             failed_attempts: 0,
             last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
         };
 
         let result = client.execute_task(&task).await;
@@ -1096,6 +1129,8 @@ mod tests {
             complexity: 1,
             failed_attempts: 0,
             last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
         };
 
         // rounds=0 → no reflection loop; error comes from execute_task

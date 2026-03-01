@@ -2,6 +2,28 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// The kind of an artefact produced or consumed by a task.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtefactKind {
+    /// A raw file on disk.
+    File,
+    /// A structured JSON document.
+    Json,
+    /// A human-readable summary or notes.
+    Summary,
+}
+
+/// An artefact declared as an input or output of a task.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskArtefact {
+    pub kind: ArtefactKind,
+    /// Logical name used as the manifest key (combined with the task id).
+    pub name: String,
+    /// Path relative to the work directory where the artefact file resides.
+    pub path: String,
+}
+
 pub const DEFAULT_COPILOT_ENDPOINT: &str = "https://api.githubcopilot.com";
 pub const DEFAULT_LLAMA_ENDPOINT: &str = "http://localhost:11434/v1";
 pub const DEFAULT_GITHUB_MODELS_ENDPOINT: &str =
@@ -234,6 +256,17 @@ pub struct Task {
     /// Unix timestamp (seconds) of the most recent execution attempt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_attempt_at: Option<u64>,
+
+    /// Input artefact references in the form `"task-id/artefact-name"`.
+    /// The referenced artefacts are resolved from the manifest and injected
+    /// into the agent's prompt context before execution.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<String>,
+
+    /// Output artefacts that should be persisted to the manifest when this
+    /// task completes successfully.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<TaskArtefact>,
 }
 
 fn is_default_role(r: &AgentRole) -> bool {
@@ -376,6 +409,8 @@ mod tests {
             complexity: 1,
             failed_attempts: 0,
             last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
         }
     }
 
@@ -587,5 +622,78 @@ mod tests {
         let task = make_task("x", TaskStatus::Pending, 1, vec![]);
         let json = serde_json::to_string(&task).unwrap();
         assert!(!json.contains("cooldown_seconds"));
+    }
+
+    // ---- ArtefactKind / TaskArtefact tests ----
+
+    #[test]
+    fn artefact_kind_serialises_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&ArtefactKind::File).unwrap(),
+            "\"file\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ArtefactKind::Json).unwrap(),
+            "\"json\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ArtefactKind::Summary).unwrap(),
+            "\"summary\""
+        );
+    }
+
+    #[test]
+    fn artefact_kind_roundtrip() {
+        for kind in [ArtefactKind::File, ArtefactKind::Json, ArtefactKind::Summary] {
+            let json = serde_json::to_string(&kind).unwrap();
+            let loaded: ArtefactKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(loaded, kind);
+        }
+    }
+
+    #[test]
+    fn task_artefact_roundtrip() {
+        let artefact = TaskArtefact {
+            kind: ArtefactKind::Json,
+            name: "result".to_string(),
+            path: "output/result.json".to_string(),
+        };
+        let json = serde_json::to_string(&artefact).unwrap();
+        let loaded: TaskArtefact = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, artefact);
+    }
+
+    #[test]
+    fn task_inputs_outputs_default_to_empty() {
+        let json = r#"{"id":"x","description":"d","status":"pending"}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.inputs.is_empty());
+        assert!(task.outputs.is_empty());
+    }
+
+    #[test]
+    fn task_inputs_outputs_omitted_when_empty() {
+        let task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(!json.contains("\"inputs\""), "empty inputs should be omitted");
+        assert!(!json.contains("\"outputs\""), "empty outputs should be omitted");
+    }
+
+    #[test]
+    fn task_with_inputs_outputs_roundtrip() {
+        let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        task.inputs = vec!["prev-task/report".to_string()];
+        task.outputs = vec![TaskArtefact {
+            kind: ArtefactKind::File,
+            name: "report".to_string(),
+            path: "reports/out.txt".to_string(),
+        }];
+        let json = serde_json::to_string(&task).unwrap();
+        let loaded: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.inputs, vec!["prev-task/report"]);
+        assert_eq!(loaded.outputs.len(), 1);
+        assert_eq!(loaded.outputs[0].kind, ArtefactKind::File);
+        assert_eq!(loaded.outputs[0].name, "report");
+        assert_eq!(loaded.outputs[0].path, "reports/out.txt");
     }
 }

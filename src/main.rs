@@ -1,5 +1,6 @@
 mod agent;
 mod agent_memory;
+mod artefact_store;
 mod cli;
 mod cloud_agent;
 mod config_manager;
@@ -335,6 +336,8 @@ async fn main() -> Result<()> {
                     complexity: 1,
                     failed_attempts: 0,
                     last_attempt_at: None,
+                    inputs: vec![],
+                    outputs: vec![],
                 },
                 Task {
                     id: "2".to_string(),
@@ -349,6 +352,8 @@ async fn main() -> Result<()> {
                     complexity: 1,
                     failed_attempts: 0,
                     last_attempt_at: None,
+                    inputs: vec![],
+                    outputs: vec![],
                 },
                 Task {
                     id: "3".to_string(),
@@ -363,6 +368,8 @@ async fn main() -> Result<()> {
                     complexity: 1,
                     failed_attempts: 0,
                     last_attempt_at: None,
+                    inputs: vec![],
+                    outputs: vec![],
                 },
             ];
 
