@@ -3,13 +3,14 @@ use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::headless_state::{
     load_headless_state, save_headless_state, AgentPhase, HeadlessState, TrackedPr,
 };
-use crate::repo_config::load_repo_config;
+use crate::repo_config::{load_repo_config, RalphConfig};
 use crate::state_worktree::{commit_and_push_state, ensure_state_worktree};
-use crate::task_manager::{load_tasks, save_tasks};
+use crate::task_manager::{load_tasks, reset_recurring_tasks, save_tasks};
 use crate::types::Config;
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Default name for the repo-committed config file.
 const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
@@ -57,7 +58,7 @@ enum StepOutcome {
 ///
 /// State is persisted between invocations so subsequent cron runs pick up
 /// where the previous one left off.
-pub async fn run_headless(config: Config) -> Result<()> {
+pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result<()> {
     // `work_dir` is the main checkout – agents work here.
     let work_dir = config.work_dir.clone();
 
@@ -87,12 +88,23 @@ pub async fn run_headless(config: Config) -> Result<()> {
 
     // Prefer the config from the state worktree when available.
     let headless_cfg_path = state_dir.join(DEFAULT_CONFIG_FILE);
-    let headless_cfg = if headless_cfg_path.exists() {
+    let mut headless_cfg = if headless_cfg_path.exists() {
         load_headless_config(&headless_cfg_path)
             .context("Failed to load .wreck-it.toml from state worktree")?
     } else {
         bootstrap_cfg
     };
+
+    // When a named ralph was requested, override the task and state file
+    // paths from the ralph config so each loop operates independently.
+    if let Some(rc) = ralph {
+        headless_cfg.task_file = rc.task_file.clone().into();
+        headless_cfg.state_file = rc.state_file.clone().into();
+        println!(
+            "[wreck-it] using ralph '{}' (tasks={}, state={})",
+            rc.name, rc.task_file, rc.state_file
+        );
+    }
 
     let state_path = state_dir.join(&headless_cfg.state_file);
     let mut state = load_headless_state(&state_path).context("Failed to load headless state")?;
@@ -432,7 +444,21 @@ async fn run_needs_trigger(
     state_dir: &Path,
 ) -> Result<StepOutcome> {
     let task_file = state_dir.join(&headless_cfg.task_file);
-    let tasks = load_tasks(&task_file)?;
+    let mut tasks = load_tasks(&task_file)?;
+
+    // Reset any recurring tasks whose cooldown has elapsed.
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let reset_count = reset_recurring_tasks(&mut tasks, now);
+    if reset_count > 0 {
+        println!(
+            "[wreck-it] reset {} recurring task(s) back to pending",
+            reset_count
+        );
+        save_tasks(&task_file, &tasks)?;
+    }
 
     // Build the set of completed task IDs for dependency checking.
     let completed_ids: HashSet<&str> = tasks
@@ -889,6 +915,8 @@ mod tests {
             description: "task one".to_string(),
             status: crate::types::TaskStatus::InProgress,
             role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
             phase: 1,
             depends_on: vec![],
             priority: 0,
@@ -914,6 +942,8 @@ mod tests {
             description: "task one".to_string(),
             status: crate::types::TaskStatus::Pending,
             role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
             phase: 1,
             depends_on: vec![],
             priority: 0,

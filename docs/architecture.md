@@ -238,6 +238,97 @@ spawns a separate `AgentClient` per task and executes them concurrently via
 `tokio::spawn`.  Results are merged back into the shared `LoopState` once
 all handles complete.
 
+### Task Lifecycle Kinds
+
+Each task has a `kind` field that controls its lifecycle after completion:
+
+| Kind | Behaviour |
+|------|-----------|
+| `milestone` (default) | Completes permanently. Standard one-shot work. |
+| `recurring` | Resets to `pending` after completion, subject to an optional `cooldown_seconds` delay. |
+
+Recurring tasks are ideal for long-running goals that periodically need
+fresh work — for example keeping documentation up-to-date or maintaining a
+test coverage threshold.  Before each scheduling pass the headless runner
+calls `reset_recurring_tasks`, which moves any completed recurring task
+whose cooldown has elapsed back to `pending`.
+
+Example task file mixing both kinds:
+
+```json
+[
+  {
+    "id": "docs",
+    "description": "Review project structure and update documentation",
+    "status": "pending",
+    "kind": "recurring",
+    "cooldown_seconds": 86400
+  },
+  {
+    "id": "coverage",
+    "description": "Review test coverage. If below 90%, create and execute a plan to increase it",
+    "status": "pending",
+    "kind": "recurring",
+    "cooldown_seconds": 604800
+  },
+  {
+    "id": "auth",
+    "description": "Implement OAuth2 authentication",
+    "status": "pending"
+  }
+]
+```
+
+### Parallel Persistent Ralph Loops (Multi-Ralph)
+
+A repository can define multiple independent ralph contexts in
+`.wreck-it/config.toml` using `[[ralphs]]` table arrays.  Each ralph has
+its own task file and state file so loops are fully isolated.
+
+```toml
+state_branch = "wreck-it-state"
+state_root   = ".wreck-it"
+
+[[ralphs]]
+name       = "docs"
+task_file  = "docs-tasks.json"
+state_file = ".docs-state.json"
+
+[[ralphs]]
+name       = "coverage"
+task_file  = "coverage-tasks.json"
+state_file = ".coverage-state.json"
+```
+
+Select which ralph to run via the `--ralph` CLI flag:
+
+```bash
+wreck-it run --headless --ralph docs
+wreck-it run --headless --ralph coverage
+```
+
+Each ralph can be driven by a separate GitHub Actions workflow so they run
+on independent schedules:
+
+```yaml
+# .github/workflows/ralph-docs.yml
+- run: ./target/release/wreck-it run --headless --ralph docs
+
+# .github/workflows/ralph-coverage.yml
+- run: ./target/release/wreck-it run --headless --ralph coverage
+```
+
+When no `--ralph` flag is provided, wreck-it falls back to the default
+single-ralph behaviour (task file and state file come from the headless
+config or CLI flags).
+
+#### Single-Workflow Alternative
+
+Multi-ralph is not required.  A single workflow with a single task file
+that contains both `milestone` and `recurring` tasks is often sufficient.
+The scheduler handles both kinds transparently, and recurring tasks
+automatically reset after their cooldown elapses.
+
 ## Future Enhancements
 
 - Custom test commands

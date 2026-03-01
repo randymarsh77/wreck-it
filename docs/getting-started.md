@@ -240,6 +240,60 @@ wreck-it run --task-file bugfix-b.json
 wreck-it run --task-file refactor-c.json
 ```
 
+### Recurring Tasks
+
+Use `"kind": "recurring"` to create tasks that automatically reset to
+`pending` after completion.  An optional `cooldown_seconds` field sets the
+minimum wait between runs:
+
+```json
+[
+  {
+    "id": "docs",
+    "description": "Review project structure and update documentation to reflect the current state",
+    "status": "pending",
+    "kind": "recurring",
+    "cooldown_seconds": 86400
+  },
+  {
+    "id": "coverage",
+    "description": "Review test coverage. If below 90%, create and execute a plan to increase it",
+    "status": "pending",
+    "kind": "recurring",
+    "cooldown_seconds": 604800
+  }
+]
+```
+
+Tasks without a `kind` field default to `"milestone"` (one-shot) for
+backward compatibility.
+
+### Named Ralph Contexts (Multi-Ralph)
+
+For fully independent loops, define named ralphs in `.wreck-it/config.toml`:
+
+```toml
+[[ralphs]]
+name       = "docs"
+task_file  = "docs-tasks.json"
+state_file = ".docs-state.json"
+
+[[ralphs]]
+name       = "coverage"
+task_file  = "coverage-tasks.json"
+state_file = ".coverage-state.json"
+```
+
+Then run a specific ralph:
+
+```bash
+wreck-it run --headless --ralph docs
+wreck-it run --headless --ralph coverage
+```
+
+Each ralph can have its own GitHub Actions workflow with a separate
+schedule.
+
 ## Next Steps
 
 - Read [Architecture](architecture.md) to understand how it works

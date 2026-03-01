@@ -23,6 +23,41 @@ pub struct RepoConfig {
     /// Root directory for state files (inside the state worktree).
     #[serde(default = "default_state_root")]
     pub state_root: String,
+
+    /// Named ralph contexts.  Each entry defines an independent long-running
+    /// loop with its own task file, state file, and optional scheduling config.
+    /// When empty, wreck-it falls back to the default single-ralph behaviour
+    /// (task file and state file come from the headless config or CLI flags).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ralphs: Vec<RalphConfig>,
+}
+
+/// Configuration for a named ralph context.
+///
+/// A repository can declare multiple ralphs in `.wreck-it/config.toml` to
+/// manage parallel persistent loops — for example one that maintains
+/// documentation and another that monitors test coverage.  Each ralph has its
+/// own task file and state file so the loops are fully independent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RalphConfig {
+    /// Unique name for this ralph context (e.g. `"docs"`, `"coverage"`).
+    pub name: String,
+
+    /// Path to the task file, relative to the state root.
+    #[serde(default = "default_ralph_task_file")]
+    pub task_file: String,
+
+    /// Path to the persistent state file, relative to the state root.
+    #[serde(default = "default_ralph_state_file")]
+    pub state_file: String,
+}
+
+fn default_ralph_task_file() -> String {
+    "tasks.json".to_string()
+}
+
+fn default_ralph_state_file() -> String {
+    ".wreck-it-state.json".to_string()
 }
 
 fn default_state_branch() -> String {
@@ -38,6 +73,7 @@ impl Default for RepoConfig {
         Self {
             state_branch: default_state_branch(),
             state_root: default_state_root(),
+            ralphs: Vec::new(),
         }
     }
 }
@@ -78,6 +114,13 @@ pub fn save_repo_config(repo_root: &Path, config: &RepoConfig) -> Result<()> {
 /// Return `true` when stdin and stdout are both connected to a terminal.
 pub fn is_interactive() -> bool {
     io::stdin().is_terminal() && io::stdout().is_terminal()
+}
+
+/// Look up a named ralph context from the repo config.
+///
+/// Returns `None` if the config has no `[[ralphs]]` entry with the given name.
+pub fn find_ralph<'a>(config: &'a RepoConfig, name: &str) -> Option<&'a RalphConfig> {
+    config.ralphs.iter().find(|r| r.name == name)
 }
 
 /// Prompt the user for a value, showing a default.  Returns the default when
@@ -122,6 +165,7 @@ mod tests {
         let cfg = RepoConfig::default();
         assert_eq!(cfg.state_branch, "wreck-it-state");
         assert_eq!(cfg.state_root, ".wreck-it");
+        assert!(cfg.ralphs.is_empty());
     }
 
     #[test]
@@ -129,6 +173,7 @@ mod tests {
         let cfg = RepoConfig {
             state_branch: "my-state".to_string(),
             state_root: ".my-state-dir".to_string(),
+            ralphs: vec![],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
         let loaded: RepoConfig = toml::from_str(&toml_str).unwrap();
@@ -141,6 +186,7 @@ mod tests {
         let cfg = RepoConfig {
             state_branch: "custom-branch".to_string(),
             state_root: ".custom-root".to_string(),
+            ralphs: vec![],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
         let loaded = load_repo_config(dir.path()).unwrap();
@@ -193,5 +239,101 @@ mod tests {
     #[test]
     fn test_is_state_uninitialized_true_for_nonexistent() {
         assert!(is_state_uninitialized(Path::new("/nonexistent/path")));
+    }
+
+    // ---- RalphConfig / multi-ralph tests ----
+
+    #[test]
+    fn test_repo_config_with_ralphs_roundtrip() {
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![
+                RalphConfig {
+                    name: "docs".to_string(),
+                    task_file: "docs-tasks.json".to_string(),
+                    state_file: ".docs-state.json".to_string(),
+                },
+                RalphConfig {
+                    name: "coverage".to_string(),
+                    task_file: "coverage-tasks.json".to_string(),
+                    state_file: ".coverage-state.json".to_string(),
+                },
+            ],
+        };
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        let loaded: RepoConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(loaded, cfg);
+        assert_eq!(loaded.ralphs.len(), 2);
+        assert_eq!(loaded.ralphs[0].name, "docs");
+        assert_eq!(loaded.ralphs[1].name, "coverage");
+    }
+
+    #[test]
+    fn test_repo_config_ralphs_default_to_empty() {
+        let dir = tempdir().unwrap();
+        let config_dir = dir.path().join(CONFIG_DIR);
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(config_dir.join(CONFIG_FILE), "").unwrap();
+
+        let loaded = load_repo_config(dir.path()).unwrap().unwrap();
+        assert!(loaded.ralphs.is_empty());
+    }
+
+    #[test]
+    fn test_ralph_config_default_paths() {
+        let toml_str = r#"
+[[ralphs]]
+name = "docs"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.ralphs.len(), 1);
+        assert_eq!(cfg.ralphs[0].task_file, "tasks.json");
+        assert_eq!(cfg.ralphs[0].state_file, ".wreck-it-state.json");
+    }
+
+    #[test]
+    fn test_find_ralph_returns_match() {
+        let cfg = RepoConfig {
+            ralphs: vec![
+                RalphConfig {
+                    name: "docs".to_string(),
+                    task_file: "docs-tasks.json".to_string(),
+                    state_file: ".docs-state.json".to_string(),
+                },
+                RalphConfig {
+                    name: "coverage".to_string(),
+                    task_file: "coverage-tasks.json".to_string(),
+                    state_file: ".coverage-state.json".to_string(),
+                },
+            ],
+            ..RepoConfig::default()
+        };
+        let found = find_ralph(&cfg, "coverage").unwrap();
+        assert_eq!(found.task_file, "coverage-tasks.json");
+    }
+
+    #[test]
+    fn test_find_ralph_returns_none_for_unknown() {
+        let cfg = RepoConfig::default();
+        assert!(find_ralph(&cfg, "nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_save_and_load_repo_config_with_ralphs() {
+        let dir = tempdir().unwrap();
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![RalphConfig {
+                name: "docs".to_string(),
+                task_file: "docs-tasks.json".to_string(),
+                state_file: ".docs-state.json".to_string(),
+            }],
+        };
+        save_repo_config(dir.path(), &cfg).unwrap();
+        let loaded = load_repo_config(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ralphs.len(), 1);
+        assert_eq!(loaded.ralphs[0].name, "docs");
     }
 }

@@ -60,6 +60,12 @@ pub enum Commands {
         /// Run in headless mode (no TUI, for CI environments)
         #[arg(long)]
         headless: bool,
+
+        /// Named ralph context to use (from repo config `[[ralphs]]`).
+        /// When set, task file and state file paths are taken from the
+        /// matching ralph entry in `.wreck-it/config.toml`.
+        #[arg(long)]
+        ralph: Option<String>,
     },
 
     /// Initialize a new task file
