@@ -65,6 +65,11 @@ pub enum Commands {
         #[arg(long)]
         reflection_rounds: Option<u8>,
 
+        /// Number of consecutive failures before triggering adaptive re-planning
+        /// (0 = disabled, default 2)
+        #[arg(long)]
+        replan_threshold: Option<u32>,
+
         /// Named ralph context to use (from repo config `[[ralphs]]`).
         /// When set, task file and state file paths are taken from the
         /// matching ralph entry in `.wreck-it/config.toml`.
