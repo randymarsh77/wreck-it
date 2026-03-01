@@ -11,6 +11,7 @@ mod headless_state;
 #[cfg(test)]
 mod integration_eval;
 mod planner;
+mod provenance;
 mod ralph_loop;
 mod replanner;
 mod repo_config;
