@@ -11,22 +11,30 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         overlays = [ (import rust-overlay) ];
-        pkgs = import nixpkgs {
-          inherit system overlays;
-        };
+        pkgs = import nixpkgs { inherit system overlays; };
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
         };
-      in
-      {
+        wreck-it = pkgs.rustPlatform.buildRustPackage {
+          pname = "wreck-it";
+          version = "0.1.0";
+          src = ./.;
+          cargoLock.lockFile = ./Cargo.lock;
+          nativeCheckInputs = with pkgs; [ git ];
+        };
+        wreck-it-dev = pkgs.writeShellScriptBin "wreck-it" ''
+          exec cargo run -- "$@"
+        '';
+      in {
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
+          packages = with pkgs; [
             rustToolchain
             cargo
             rustc
             rust-analyzer
             pkg-config
             openssl
+            wreck-it-dev
           ];
 
           shellHook = ''
@@ -35,12 +43,9 @@
           '';
         };
 
-        packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "wreck-it";
-          version = "0.1.0";
-          src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
+        packages = {
+          default = wreck-it;
+          wreck-it = wreck-it;
         };
-      }
-    );
+      });
 }
