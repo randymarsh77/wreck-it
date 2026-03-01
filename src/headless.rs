@@ -3,7 +3,8 @@ use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::headless_state::{
     load_headless_state, save_headless_state, AgentPhase, HeadlessState, TrackedPr,
 };
-use crate::state_worktree::{commit_state_worktree, ensure_state_worktree};
+use crate::repo_config::load_repo_config;
+use crate::state_worktree::{commit_state_worktree, ensure_state_worktree, push_state_branch};
 use crate::task_manager::{load_tasks, save_tasks};
 use crate::types::Config;
 use anyhow::{Context, Result};
@@ -60,6 +61,11 @@ pub async fn run_headless(config: Config) -> Result<()> {
     // `work_dir` is the main checkout – agents work here.
     let work_dir = config.work_dir.clone();
 
+    // Try to load the repo-level config (.wreck-it/config.toml on the main
+    // branch).  When available it is the canonical source for the state branch
+    // name.  Fall back to the bootstrap headless config or defaults.
+    let repo_cfg = load_repo_config(&work_dir).ok().flatten();
+
     // Set up the state worktree.  First, try loading a headless config from
     // the main checkout (it may have been placed there before migration, or
     // the user may prefer it there for bootstrapping).  Then set up the
@@ -72,7 +78,10 @@ pub async fn run_headless(config: Config) -> Result<()> {
         HeadlessConfig::default()
     };
 
-    let state_branch = bootstrap_cfg.state_branch.clone();
+    let state_branch = repo_cfg
+        .as_ref()
+        .map(|c| c.state_branch.clone())
+        .unwrap_or_else(|| bootstrap_cfg.state_branch.clone());
     let state_dir = ensure_state_worktree(&work_dir, &state_branch)
         .context("Failed to set up state worktree")?;
 
@@ -143,9 +152,17 @@ pub async fn run_headless(config: Config) -> Result<()> {
 
     save_headless_state(&state_path, &state).context("Failed to save headless state")?;
 
-    // Commit state changes in the worktree.
-    if let Err(e) = commit_state_worktree(&work_dir, "wreck-it: update headless state") {
-        println!("[wreck-it] warning: failed to commit state changes: {}", e);
+    // Commit state changes in the worktree and push if anything was committed.
+    match commit_state_worktree(&work_dir, "wreck-it: update headless state") {
+        Ok(true) => {
+            if let Err(e) = push_state_branch(&work_dir, &state_branch) {
+                println!("[wreck-it] warning: failed to push state: {}", e);
+            }
+        }
+        Ok(false) => {}
+        Err(e) => {
+            println!("[wreck-it] warning: failed to commit state changes: {}", e);
+        }
     }
 
     println!(

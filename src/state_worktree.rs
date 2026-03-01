@@ -9,7 +9,7 @@ pub const DEFAULT_STATE_BRANCH: &str = "wreck-it-state";
 const WORKTREE_SUBDIR: &str = ".wreck-it/state";
 
 /// Run a git command in `work_dir` and return trimmed stdout on success.
-fn git_cmd(work_dir: &Path, args: &[&str]) -> Result<String> {
+pub(crate) fn git_cmd(work_dir: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(work_dir)
@@ -31,21 +31,34 @@ pub fn state_worktree_path(repo_root: &Path) -> PathBuf {
     repo_root.join(WORKTREE_SUBDIR)
 }
 
-/// Ensure the state branch exists as a local ref.
+/// Ensure the state branch exists as a local ref and is in sync with the
+/// remote (if one exists).
 ///
-/// If neither a local branch nor a remote tracking branch exist, an empty
-/// orphan commit is created and the local branch ref is pointed at it.
+/// Resolution order:
+/// 1. If the local branch exists **and** a remote tracking branch exists,
+///    synchronise them: fast-forward if behind, leave alone if ahead, attempt
+///    a rebase if they have diverged.
+/// 2. If only the local branch exists, nothing to do.
+/// 3. If only a remote tracking branch exists, create a local branch from it.
+/// 4. If neither exist, create an empty orphan commit and point the local ref.
 fn ensure_state_branch(repo_root: &Path, branch: &str) -> Result<()> {
     let local_ref = format!("refs/heads/{}", branch);
+    let remote_ref = format!("origin/{}", branch);
 
-    // Check if the local branch already exists.
-    if git_cmd(repo_root, &["rev-parse", "--verify", &local_ref]).is_ok() {
+    let local_exists = git_cmd(repo_root, &["rev-parse", "--verify", &local_ref]).is_ok();
+    let remote_exists = git_cmd(repo_root, &["rev-parse", "--verify", &remote_ref]).is_ok();
+
+    if local_exists && remote_exists {
+        sync_local_with_remote(repo_root, branch)?;
         return Ok(());
     }
 
-    // Check if a remote tracking branch exists (e.g. origin/<branch>).
-    let remote_ref = format!("origin/{}", branch);
-    if let Ok(sha) = git_cmd(repo_root, &["rev-parse", "--verify", &remote_ref]) {
+    if local_exists {
+        return Ok(());
+    }
+
+    if remote_exists {
+        let sha = git_cmd(repo_root, &["rev-parse", "--verify", &remote_ref])?;
         git_cmd(repo_root, &["branch", branch, &sha])?;
         return Ok(());
     }
@@ -74,6 +87,52 @@ fn ensure_state_branch(repo_root: &Path, branch: &str) -> Result<()> {
     git_cmd(repo_root, &["update-ref", &local_ref, &commit])
         .context("Failed to create state branch ref")?;
 
+    Ok(())
+}
+
+/// Synchronise a local state branch with its remote counterpart.
+///
+/// * Ahead of remote → OK (no action).
+/// * Behind remote → fast-forward the local ref.
+/// * Diverged → error (must be resolved manually).
+fn sync_local_with_remote(repo_root: &Path, branch: &str) -> Result<()> {
+    let local_ref = format!("refs/heads/{}", branch);
+    let remote_ref = format!("origin/{}", branch);
+
+    let local_sha = git_cmd(repo_root, &["rev-parse", &local_ref])?;
+    let remote_sha = git_cmd(repo_root, &["rev-parse", &remote_ref])?;
+
+    if local_sha == remote_sha {
+        return Ok(());
+    }
+
+    let merge_base =
+        git_cmd(repo_root, &["merge-base", &local_ref, &remote_ref]).unwrap_or_default();
+
+    if merge_base == local_sha {
+        // Local is behind remote – fast-forward.
+        println!("[wreck-it] fast-forwarding local '{}' to remote", branch);
+        git_cmd(repo_root, &["update-ref", &local_ref, &remote_sha])?;
+    } else if merge_base == remote_sha {
+        // Local is ahead of remote – this is fine.
+        println!(
+            "[wreck-it] local '{}' is ahead of remote, continuing",
+            branch
+        );
+    } else {
+        // Diverged – cannot be resolved automatically.
+        anyhow::bail!("Local wreck-it state is out of sync, this must be resolved manually");
+    }
+
+    Ok(())
+}
+
+/// Push the state branch to the remote.
+///
+/// This is a best-effort operation: if there is no `origin` remote or the push
+/// fails for network reasons a warning is printed but no error is returned.
+pub fn push_state_branch(repo_root: &Path, branch: &str) -> Result<()> {
+    git_cmd(repo_root, &["push", "origin", branch]).context("Failed to push state branch")?;
     Ok(())
 }
 
