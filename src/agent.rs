@@ -760,7 +760,10 @@ impl AgentClient {
             let diff = self.get_git_diff()?;
 
             if diff.is_empty() {
-                tracing::info!("No diff to critique after execution (reflection round {})", round);
+                tracing::info!(
+                    "No diff to critique after execution (reflection round {})",
+                    round
+                );
                 break;
             }
 
@@ -801,9 +804,7 @@ impl AgentClient {
             let mut revised_task = task.clone();
             revised_task.description = format!(
                 "{}\n\nCritic feedback (reflection round {}):\n- {}",
-                task.description,
-                round,
-                issues_text
+                task.description, round, issues_text
             );
             self.execute_task(&revised_task).await?;
         }
@@ -1071,7 +1072,8 @@ mod tests {
 
     #[test]
     fn parse_critic_result_strips_markdown_code_fences() {
-        let markdown = "```json\n{\"score\": 0.7, \"issues\": [\"needs tests\"], \"approved\": false}\n```";
+        let markdown =
+            "```json\n{\"score\": 0.7, \"issues\": [\"needs tests\"], \"approved\": false}\n```";
         let result = parse_critic_result(markdown).unwrap();
         assert!(!result.approved);
         assert_eq!(result.issues.len(), 1);

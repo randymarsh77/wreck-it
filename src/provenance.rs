@@ -58,6 +58,34 @@ pub fn now_timestamp() -> u64 {
         .as_secs()
 }
 
+/// Load all provenance records for `task_id` from `<work_dir>/.wreck-it-provenance/`.
+///
+/// Files are matched by the prefix `<task_id>-`.  An empty `Vec` is returned
+/// when no matching records exist (or when the directory does not exist yet).
+pub fn load_provenance_records(task_id: &str, work_dir: &Path) -> Result<Vec<ProvenanceRecord>> {
+    let dir = work_dir.join(".wreck-it-provenance");
+    if !dir.exists() {
+        return Ok(vec![]);
+    }
+    let prefix = format!("{}-", task_id);
+    let mut records = Vec::new();
+    for entry in std::fs::read_dir(&dir).context("Failed to read provenance directory")? {
+        let entry = entry.context("Failed to read provenance directory entry")?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.starts_with(&prefix) && name_str.ends_with(".json") {
+            let content =
+                std::fs::read_to_string(entry.path()).context("Failed to read provenance file")?;
+            let record: ProvenanceRecord =
+                serde_json::from_str(&content).context("Failed to parse provenance record")?;
+            records.push(record);
+        }
+    }
+    // Sort by timestamp ascending so the most recent record is last.
+    records.sort_by_key(|r| r.timestamp);
+    Ok(records)
+}
+
 /// Persist `record` as a JSON file inside `<work_dir>/.wreck-it-provenance/`.
 ///
 /// Files are named `<task_id>-<timestamp>.json` so that multiple records for
@@ -136,10 +164,16 @@ mod tests {
     #[test]
     fn provenance_record_tool_calls_roundtrip() {
         let mut record = make_record();
-        record.tool_calls = vec!["execute_task".to_string(), "evaluate_completeness".to_string()];
+        record.tool_calls = vec![
+            "execute_task".to_string(),
+            "evaluate_completeness".to_string(),
+        ];
         let json = serde_json::to_string(&record).unwrap();
         let loaded: ProvenanceRecord = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.tool_calls, vec!["execute_task", "evaluate_completeness"]);
+        assert_eq!(
+            loaded.tool_calls,
+            vec!["execute_task", "evaluate_completeness"]
+        );
     }
 
     // ---- persist_provenance_record tests ----
@@ -151,8 +185,7 @@ mod tests {
         persist_provenance_record(&record, dir.path()).unwrap();
         let prov_dir = dir.path().join(".wreck-it-provenance");
         assert!(prov_dir.exists());
-        let expected_file =
-            prov_dir.join(format!("{}-{}.json", record.task_id, record.timestamp));
+        let expected_file = prov_dir.join(format!("{}-{}.json", record.task_id, record.timestamp));
         assert!(expected_file.exists());
     }
 

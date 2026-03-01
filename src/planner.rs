@@ -56,9 +56,7 @@ impl TaskPlanner {
 
     async fn call_llm(&self, prompt: &str) -> Result<String> {
         match self.model_provider {
-            ModelProvider::GithubModels | ModelProvider::Llama => {
-                self.call_via_http(prompt).await
-            }
+            ModelProvider::GithubModels | ModelProvider::Llama => self.call_via_http(prompt).await,
             ModelProvider::Copilot => self.call_via_copilot_sdk(prompt).await,
         }
     }
@@ -229,10 +227,7 @@ pub fn parse_and_validate_plan(raw: &str) -> Result<Vec<Task>> {
                 bail!("Task '{}' has an empty description", e.id);
             }
             if e.phase == 0 {
-                bail!(
-                    "Task '{}' has an invalid phase 0 (must be >= 1)",
-                    e.id
-                );
+                bail!("Task '{}' has an invalid phase 0 (must be >= 1)", e.id);
             }
             Ok(Task {
                 id: e.id,
@@ -414,10 +409,7 @@ mod tests {
     #[test]
     fn extract_array_with_surrounding_text() {
         let s = r#"Here you go: [{"id":"1"}] That's all."#;
-        assert_eq!(
-            extract_json_array(s).unwrap(),
-            r#"[{"id":"1"}]"#
-        );
+        assert_eq!(extract_json_array(s).unwrap(), r#"[{"id":"1"}]"#);
     }
 
     #[test]

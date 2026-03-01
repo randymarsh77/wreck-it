@@ -155,11 +155,7 @@ impl GastownClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            bail!(
-                "Gastown submission failed with HTTP {}: {}",
-                status,
-                body
-            );
+            bail!("Gastown submission failed with HTTP {}: {}", status, body);
         }
 
         #[derive(Deserialize)]
@@ -193,11 +189,7 @@ impl GastownClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            bail!(
-                "Gastown status poll failed with HTTP {}: {}",
-                status,
-                body
-            );
+            bail!("Gastown status poll failed with HTTP {}: {}", status, body);
         }
 
         #[derive(Deserialize)]
@@ -218,10 +210,7 @@ impl GastownClient {
     /// Tasks reported as `completed` are marked [`TaskStatus::Completed`];
     /// tasks reported as `failed` are marked [`TaskStatus::Failed`].
     /// Events for unknown task IDs are silently ignored.
-    pub fn apply_status_events(
-        events: &[GastownStatusEvent],
-        task_path: &Path,
-    ) -> Result<()> {
+    pub fn apply_status_events(events: &[GastownStatusEvent], task_path: &Path) -> Result<()> {
         use crate::task_manager::{load_tasks, save_tasks};
 
         let mut tasks = load_tasks(task_path)?;
@@ -490,11 +479,7 @@ mod tests {
 
     #[test]
     fn client_new_returns_some_when_both_present() {
-        assert!(GastownClient::new(
-            Some("https://gastown.example.com"),
-            Some("tok")
-        )
-        .is_some());
+        assert!(GastownClient::new(Some("https://gastown.example.com"), Some("tok")).is_some());
     }
 
     #[test]

@@ -34,12 +34,7 @@ impl TaskReplanner {
 
     /// Invoke the re-planner agent with the current task list, the failed
     /// task, and the error output.  Returns the updated (validated) task list.
-    pub async fn replan(
-        &self,
-        tasks: &[Task],
-        failed: &Task,
-        error: &str,
-    ) -> Result<Vec<Task>> {
+    pub async fn replan(&self, tasks: &[Task], failed: &Task, error: &str) -> Result<Vec<Task>> {
         let git_status = self.get_git_status();
         let prompt = build_replan_prompt(tasks, failed, error, &git_status);
         let raw = self.call_llm(&prompt).await?;
@@ -57,9 +52,7 @@ impl TaskReplanner {
 
     async fn call_llm(&self, prompt: &str) -> Result<String> {
         match self.model_provider {
-            ModelProvider::GithubModels | ModelProvider::Llama => {
-                self.call_via_http(prompt).await
-            }
+            ModelProvider::GithubModels | ModelProvider::Llama => self.call_via_http(prompt).await,
             ModelProvider::Copilot => self.call_via_copilot_sdk(prompt).await,
         }
     }
@@ -197,12 +190,7 @@ const MAX_ERROR_LEN: usize = 4096;
 /// controlled data embedded in the prompt.  All three are included as
 /// informational context for the LLM; the response is validated structurally
 /// before being used.
-pub fn build_replan_prompt(
-    tasks: &[Task],
-    failed: &Task,
-    error: &str,
-    git_status: &str,
-) -> String {
+pub fn build_replan_prompt(tasks: &[Task], failed: &Task, error: &str, git_status: &str) -> String {
     let tasks_json = serde_json::to_string_pretty(tasks).unwrap_or_else(|_| "[]".to_string());
     let git_section = if git_status.trim().is_empty() {
         "(no changes)".to_string()

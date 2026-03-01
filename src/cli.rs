@@ -113,4 +113,15 @@ pub enum Commands {
         #[arg(short, long, default_value = "tasks.json")]
         output: PathBuf,
     },
+
+    /// Display provenance records for a specific task
+    Provenance {
+        /// Task ID whose provenance records should be displayed
+        #[arg(short, long)]
+        task: String,
+
+        /// Working directory to look for .wreck-it-provenance/ records
+        #[arg(short, long)]
+        work_dir: Option<PathBuf>,
+    },
 }

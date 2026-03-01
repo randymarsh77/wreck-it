@@ -4,8 +4,8 @@ use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{
-    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus, DEFAULT_GITHUB_MODELS_MODEL,
-    DEFAULT_LLAMA_MODEL,
+    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus,
+    DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
 use std::collections::HashSet;
@@ -229,7 +229,11 @@ impl RalphLoop {
         let task = self.state.tasks[task_idx].clone();
         let reflection_rounds = self.config.reflection_rounds;
         let mut task_error = String::new();
-        match self.agent.execute_task_with_reflection(&task, reflection_rounds).await {
+        match self
+            .agent
+            .execute_task_with_reflection(&task, reflection_rounds)
+            .await
+        {
             Ok(()) => {
                 self.state.add_log("Task completed".to_string());
                 self.state.tasks[task_idx].status = TaskStatus::Completed;
@@ -244,7 +248,11 @@ impl RalphLoop {
 
         // Record provenance for this agent invocation (before committing so
         // the git diff hash reflects the agent's actual changes).
-        let prov_outcome = if task_error.is_empty() { "success" } else { "failure" };
+        let prov_outcome = if task_error.is_empty() {
+            "success"
+        } else {
+            "failure"
+        };
         let prov_record = ProvenanceRecord {
             task_id: task.id.clone(),
             agent_role: task.role,
@@ -256,8 +264,10 @@ impl RalphLoop {
             outcome: prov_outcome.to_string(),
         };
         if let Err(e) = provenance::persist_provenance_record(&prov_record, &self.config.work_dir) {
-            self.state
-                .add_log(format!("Warning: failed to persist provenance record: {}", e));
+            self.state.add_log(format!(
+                "Warning: failed to persist provenance record: {}",
+                e
+            ));
         }
 
         // Run tests / evaluation
@@ -295,8 +305,10 @@ impl RalphLoop {
                         self.state.add_log("Output artefacts persisted".to_string());
                     }
                     Err(e) => {
-                        self.state
-                            .add_log(format!("Warning: failed to persist output artefacts: {}", e));
+                        self.state.add_log(format!(
+                            "Warning: failed to persist output artefacts: {}",
+                            e
+                        ));
                     }
                 }
             }
