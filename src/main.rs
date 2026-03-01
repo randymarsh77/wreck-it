@@ -9,6 +9,7 @@ mod headless_state;
 #[cfg(test)]
 mod integration_eval;
 mod ralph_loop;
+mod repo_config;
 mod state_worktree;
 mod task_manager;
 mod tui;
@@ -19,6 +20,10 @@ use clap::Parser;
 use cli::{Cli, Commands};
 use config_manager::{load_user_config, save_user_config};
 use ralph_loop::RalphLoop;
+use repo_config::{
+    is_interactive, is_state_uninitialized, load_repo_config, prompt_with_default,
+    repo_config_path, save_repo_config, RepoConfig,
+};
 use std::env;
 use tui::TuiApp;
 use types::{
@@ -52,6 +57,30 @@ async fn main() -> Result<()> {
             completion_marker_file,
             headless,
         } => {
+            // Determine work directory early so we can look for the repo config.
+            let resolved_work_dir = work_dir
+                .clone()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+            // Check for repo-level config.
+            let repo_cfg = match load_repo_config(&resolved_work_dir)? {
+                Some(cfg) => cfg,
+                None => {
+                    println!("wreck-it config not found; run wreck-it init");
+                    return Ok(());
+                }
+            };
+
+            // Set up the state worktree.
+            let state_dir =
+                state_worktree::ensure_state_worktree(&resolved_work_dir, &repo_cfg.state_branch)?;
+
+            // If state is empty, nothing to do.
+            if is_state_uninitialized(&state_dir) {
+                println!("wreck-it state is empty; nothing to do");
+                return Ok(());
+            }
+
             let mut config = load_user_config().unwrap_or_default();
             if let Some(task_file) = task_file {
                 config.task_file = task_file;
@@ -104,23 +133,93 @@ async fn main() -> Result<()> {
                 let mut app = TuiApp::new(ralph_loop);
                 app.run().await?;
             }
+
+            // Commit any pending state changes and push.
+            let _ = state_worktree::commit_and_push_state(
+                &resolved_work_dir,
+                &repo_cfg.state_branch,
+                "wreck-it: update state",
+            );
         }
 
         Commands::Init { output } => {
-            // Set up the state worktree: create the orphan branch (if needed)
-            // and check out a worktree at .wreck-it/state.
             let work_dir = std::env::current_dir()?;
-            let state_branch = state_worktree::DEFAULT_STATE_BRANCH;
-            let state_dir = state_worktree::ensure_state_worktree(&work_dir, state_branch)?;
+            let interactive = is_interactive();
+
+            // ── Phase 1: Repo-level config ──────────────────────────────
+            let repo_cfg = match load_repo_config(&work_dir)? {
+                Some(cfg) => {
+                    println!("Found existing wreck-it configuration");
+                    cfg
+                }
+                None => {
+                    let cfg = if interactive {
+                        let branch = prompt_with_default(
+                            "State branch",
+                            state_worktree::DEFAULT_STATE_BRANCH,
+                        );
+                        let root =
+                            prompt_with_default("State root directory", repo_config::CONFIG_DIR);
+                        RepoConfig {
+                            state_branch: branch,
+                            state_root: root,
+                        }
+                    } else {
+                        RepoConfig::default()
+                    };
+
+                    save_repo_config(&work_dir, &cfg)?;
+
+                    // Commit the config to the current branch.
+                    let cfg_path = repo_config_path(&work_dir);
+                    let cfg_path_str = cfg_path
+                        .to_str()
+                        .ok_or_else(|| anyhow::anyhow!("config path contains invalid UTF-8"))?;
+                    state_worktree::git_cmd(&work_dir, &["add", cfg_path_str])?;
+                    state_worktree::git_cmd(
+                        &work_dir,
+                        &["commit", "-m", "Initialize wreck-it configuration"],
+                    )?;
+
+                    println!(
+                        "Initialized wreck-it configuration (branch='{}', root='{}')",
+                        cfg.state_branch, cfg.state_root,
+                    );
+                    cfg
+                }
+            };
+
+            // ── Phase 2: State worktree ─────────────────────────────────
+            let state_dir =
+                state_worktree::ensure_state_worktree(&work_dir, &repo_cfg.state_branch)?;
 
             println!(
-                "Initialized state worktree at {} (branch '{}')",
+                "State worktree at {} (branch '{}')",
                 state_dir.display(),
-                state_branch,
+                repo_cfg.state_branch,
             );
 
-            // Write sample task file into the state worktree.
+            // ── Phase 3: Task creation ──────────────────────────────────
             let task_path = state_dir.join(&output);
+
+            // If tasks already exist, we are already initialized.
+            if task_path.exists() {
+                let tasks = task_manager::load_tasks(&task_path)?;
+                println!("wreck-it is initialized");
+                println!(
+                    "  config: state_branch={}, state_root={}",
+                    repo_cfg.state_branch, repo_cfg.state_root,
+                );
+                println!("  tasks: {} task(s) in {}", tasks.len(), output.display());
+                return Ok(());
+            }
+
+            // Non-interactive: don't create tasks (empty state is fine).
+            if !interactive {
+                return Ok(());
+            }
+
+            // Interactive: create sample tasks.
             let sample_tasks = vec![
                 Task {
                     id: "1".to_string(),
@@ -173,7 +272,7 @@ async fn main() -> Result<()> {
                      task_file = \"{}\"\n\
                      state_file = \".wreck-it-state.json\"\n\
                      max_iterations = 100\n",
-                    state_branch,
+                    repo_cfg.state_branch,
                     output.display(),
                 );
                 std::fs::write(&config_path, default_toml)?;
@@ -184,7 +283,10 @@ async fn main() -> Result<()> {
             if let Ok(true) =
                 state_worktree::commit_state_worktree(&work_dir, "wreck-it: init state")
             {
-                println!("Committed initial state to branch '{}'", state_branch);
+                println!(
+                    "Committed initial state to branch '{}'",
+                    repo_cfg.state_branch,
+                );
             }
         }
     }

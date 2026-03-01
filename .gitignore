@@ -31,7 +31,8 @@ tasks/
 test-e2e.sh
 
 # wreck-it state worktree (managed by `wreck-it init` / headless mode)
-.wreck-it/
+.wreck-it/*
+!.wreck-it/config.toml
 
 # Site build artifacts
 site/docs/node_modules/
