@@ -18,6 +18,7 @@ mod replanner;
 mod repo_config;
 mod state_worktree;
 mod task_manager;
+mod templates;
 mod tui;
 mod types;
 
@@ -435,6 +436,84 @@ async fn main() -> Result<()> {
                 }
             }
         }
+
+        Commands::Template { action } => match action {
+            cli::TemplateAction::List => {
+                let templates = templates::builtin_templates();
+                if templates.is_empty() {
+                    println!("No built-in templates available.");
+                } else {
+                    println!("Available templates:\n");
+                    for tmpl in &templates {
+                        println!("  {}",  tmpl.manifest.name);
+                        println!("    {}", tmpl.manifest.description);
+                        if !tmpl.manifest.ralphs.is_empty() {
+                            let names: Vec<&str> =
+                                tmpl.manifest.ralphs.iter().map(|r| r.name.as_str()).collect();
+                            println!("    ralphs: {}", names.join(", "));
+                        }
+                        println!();
+                    }
+                }
+            }
+            cli::TemplateAction::Apply { name } => {
+                let tmpl = templates::find_template(&name)
+                    .ok_or_else(|| anyhow::anyhow!("Unknown template: '{}'", name))?;
+
+                let work_dir = std::env::current_dir()?;
+
+                // Ensure we have a repo config (create default if missing).
+                let mut repo_cfg = load_repo_config(&work_dir)?
+                    .unwrap_or_else(RepoConfig::default);
+
+                // Ensure the state worktree exists.
+                let state_dir = state_worktree::ensure_state_worktree(
+                    &work_dir,
+                    &repo_cfg.state_branch,
+                )?;
+
+                // Apply the template.
+                let result = templates::apply_template(&tmpl, &state_dir, &mut repo_cfg)?;
+
+                // Persist the updated config.
+                save_repo_config(&work_dir, &repo_cfg)?;
+
+                // Report what happened.
+                if !result.written.is_empty() {
+                    println!("Wrote task files:");
+                    for f in &result.written {
+                        println!("  {}", f);
+                    }
+                }
+                if !result.skipped.is_empty() {
+                    println!("Skipped (already exist):");
+                    for f in &result.skipped {
+                        println!("  {}", f);
+                    }
+                }
+                if !result.ralphs_added.is_empty() {
+                    println!("Added ralph contexts:");
+                    for r in &result.ralphs_added {
+                        println!("  {}", r);
+                    }
+                }
+                println!(
+                    "\nTemplate '{}' applied successfully.",
+                    tmpl.manifest.name,
+                );
+
+                // Commit state worktree changes.
+                if let Ok(true) = state_worktree::commit_state_worktree(
+                    &work_dir,
+                    &format!("wreck-it: apply template '{}'", name),
+                ) {
+                    println!(
+                        "Committed template state to branch '{}'",
+                        repo_cfg.state_branch,
+                    );
+                }
+            }
+        },
 
         Commands::ExportOpenclaw {
             task_file,

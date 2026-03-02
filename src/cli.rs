@@ -125,6 +125,12 @@ pub enum Commands {
         work_dir: Option<PathBuf>,
     },
 
+    /// Manage built-in task templates
+    Template {
+        #[command(subcommand)]
+        action: TemplateAction,
+    },
+
     /// Export the full run provenance as an openclaw-compatible JSON document
     ExportOpenclaw {
         /// Path to the task file to read (default: tasks.json)
@@ -143,5 +149,17 @@ pub enum Commands {
         /// Path to write the openclaw JSON document (default: stdout)
         #[arg(short, long)]
         output: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TemplateAction {
+    /// List available built-in templates
+    List,
+
+    /// Apply a built-in template to the current project
+    Apply {
+        /// Name of the template to apply (e.g. "engineering-team")
+        name: String,
     },
 }
