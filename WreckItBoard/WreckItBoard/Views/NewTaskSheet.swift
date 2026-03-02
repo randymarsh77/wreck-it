@@ -50,7 +50,7 @@ struct NewTaskSheet: View {
                         .map { $0.trimmingCharacters(in: .whitespaces) }
                         .filter { !$0.isEmpty }
                     store.createTask(
-                        id: id.isEmpty ? UUID().uuidString.prefix(8).lowercased() + "" : id,
+                        id: id.isEmpty ? String(UUID().uuidString.prefix(8).lowercased()) : id,
                         description: description,
                         parentId: selectedParent,
                         labels: labels
