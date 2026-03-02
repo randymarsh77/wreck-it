@@ -180,7 +180,7 @@ A task with all available fields:
 | `status` | `pending`, `inprogress`, `completed`, or `failed` | *(required)* |
 | `role` | Agent role: `ideas`, `implementer`, `evaluator` | `implementer` |
 | `kind` | `milestone` (one-shot) or `recurring` (resets after cooldown) | `milestone` |
-| `cooldown_seconds` | Seconds before a recurring task resets | *(none)* |
+| `cooldown_seconds` | Seconds before a recurring task resets (optional, only used with `recurring`) | *(none)* |
 | `phase` | Execution phase (lower runs first; same phase may run in parallel) | `1` |
 | `depends_on` | IDs of tasks that must complete first | `[]` |
 | `priority` | Scheduling priority (higher = sooner) | `0` |
