@@ -1198,6 +1198,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         };
 
         let result = client.execute_task(&task).await;
@@ -1295,6 +1297,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         };
 
         // rounds=0 → no reflection loop; error comes from execute_task
@@ -1337,6 +1341,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         };
 
         // No precondition prompt → always eligible
@@ -1388,6 +1394,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: Some("Check if documentation is stale".to_string()),
+            parent_id: None,
+            labels: vec![],
         };
 
         // Without a running Copilot server the session creation will fail

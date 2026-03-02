@@ -256,6 +256,8 @@ mod tests {
             outputs: vec![],
             runtime,
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         }
     }
 

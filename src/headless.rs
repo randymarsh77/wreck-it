@@ -927,6 +927,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
@@ -958,6 +960,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         }];
         save_tasks(&task_file, &tasks).unwrap();
 

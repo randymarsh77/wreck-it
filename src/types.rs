@@ -309,6 +309,16 @@ pub struct Task {
     /// cooldown timer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub precondition_prompt: Option<String>,
+
+    /// ID of the parent task (epic).  When set, this task is a sub-task of
+    /// the referenced parent.  A task with no `parent_id` that has children
+    /// pointing to it is considered an **epic**.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+
+    /// Free-form labels for categorization (e.g. board columns, tags).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
 }
 
 fn is_default_role(r: &AgentRole) -> bool {
@@ -459,6 +469,8 @@ mod tests {
             outputs: vec![],
             runtime: TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         }
     }
 
@@ -882,5 +894,79 @@ mod tests {
             loaded.precondition_prompt.as_deref(),
             Some("Only run if README.md has changed since last update")
         );
+    }
+
+    // ---- parent_id tests ----
+
+    #[test]
+    fn task_parent_id_defaults_to_none_when_absent() {
+        let json = r#"{"id":"x","description":"d","status":"pending"}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.parent_id.is_none());
+    }
+
+    #[test]
+    fn task_parent_id_omitted_when_none() {
+        let task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(
+            !json.contains("parent_id"),
+            "absent parent_id should be omitted"
+        );
+    }
+
+    #[test]
+    fn task_parent_id_roundtrip() {
+        let mut task = make_task("sub-1", TaskStatus::Pending, 1, vec![]);
+        task.parent_id = Some("epic-1".to_string());
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(json.contains("\"parent_id\":\"epic-1\""));
+        let loaded: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.parent_id.as_deref(), Some("epic-1"));
+    }
+
+    // ---- labels tests ----
+
+    #[test]
+    fn task_labels_default_to_empty_when_absent() {
+        let json = r#"{"id":"x","description":"d","status":"pending"}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.labels.is_empty());
+    }
+
+    #[test]
+    fn task_labels_omitted_when_empty() {
+        let task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(
+            !json.contains("\"labels\""),
+            "empty labels should be omitted"
+        );
+    }
+
+    #[test]
+    fn task_labels_roundtrip() {
+        let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        task.labels = vec!["frontend".to_string(), "urgent".to_string()];
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(json.contains("\"labels\""));
+        let loaded: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.labels, vec!["frontend", "urgent"]);
+    }
+
+    #[test]
+    fn task_epic_with_subtask_roundtrip() {
+        let epic = make_task("epic-1", TaskStatus::Pending, 1, vec![]);
+        let mut sub = make_task("sub-1", TaskStatus::Pending, 1, vec!["epic-1"]);
+        sub.parent_id = Some("epic-1".to_string());
+        sub.labels = vec!["backend".to_string()];
+
+        let tasks = vec![epic, sub];
+        let json = serde_json::to_string(&tasks).unwrap();
+        let loaded: Vec<Task> = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert!(loaded[0].parent_id.is_none());
+        assert_eq!(loaded[1].parent_id.as_deref(), Some("epic-1"));
+        assert_eq!(loaded[1].labels, vec!["backend"]);
     }
 }

@@ -657,6 +657,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         }
     }
 
@@ -767,6 +769,8 @@ mod tests {
                 outputs: vec![],
                 runtime: crate::types::TaskRuntime::default(),
                 precondition_prompt: None,
+                parent_id: None,
+                labels: vec![],
             },
             Task {
                 id: "old".to_string(),
@@ -785,6 +789,8 @@ mod tests {
                 outputs: vec![],
                 runtime: crate::types::TaskRuntime::default(),
                 precondition_prompt: None,
+                parent_id: None,
+                labels: vec![],
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -821,6 +827,8 @@ mod tests {
                 outputs: vec![],
                 runtime: crate::types::TaskRuntime::default(),
                 precondition_prompt: None,
+                parent_id: None,
+                labels: vec![],
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
