@@ -45,6 +45,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         }
     }
 
@@ -243,6 +244,7 @@ mod tests {
                 path: "spec.md".to_string(),
             }],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         };
 
         let impl_task = Task {
@@ -261,6 +263,7 @@ mod tests {
             inputs: vec!["design-1/spec".to_string()],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         };
 
         let review = make_task(

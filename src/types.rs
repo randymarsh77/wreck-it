@@ -32,6 +32,7 @@ pub const DEFAULT_LLAMA_MODEL: &str = "llama3.2";
 pub const DEFAULT_GITHUB_MODELS_MODEL: &str = "anthropic/claude-opus-4.6";
 pub const LLAMA_PROVIDER_TYPE: &str = "openai";
 pub const DEFAULT_COMPLETION_MARKER: &str = ".task-complete";
+pub const DEFAULT_PRECONDITION_MARKER: &str = ".task-precondition-met";
 pub const DEFAULT_REFLECTION_ROUNDS: u8 = 2;
 pub const DEFAULT_REPLAN_THRESHOLD: u32 = 2;
 
@@ -299,6 +300,15 @@ pub struct Task {
     /// `gastown` to offload execution to the gastown cloud agent service.
     #[serde(default, skip_serializing_if = "is_default_runtime")]
     pub runtime: TaskRuntime,
+
+    /// Optional agent-evaluated precondition prompt.  When present, an
+    /// evaluation agent checks this condition before the task is eligible
+    /// to execute.  If the agent determines the precondition is not met the
+    /// task is skipped for that iteration.  This is especially useful for
+    /// recurring tasks that need nuanced re-run criteria beyond a simple
+    /// cooldown timer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precondition_prompt: Option<String>,
 }
 
 fn is_default_role(r: &AgentRole) -> bool {
@@ -448,6 +458,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: TaskRuntime::default(),
+            precondition_prompt: None,
         }
     }
 

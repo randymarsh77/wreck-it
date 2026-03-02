@@ -342,6 +342,7 @@ async fn main() -> Result<()> {
                     inputs: vec![],
                     outputs: vec![],
                     runtime: types::TaskRuntime::default(),
+                    precondition_prompt: None,
                 },
                 Task {
                     id: "2".to_string(),
@@ -359,6 +360,7 @@ async fn main() -> Result<()> {
                     inputs: vec![],
                     outputs: vec![],
                     runtime: types::TaskRuntime::default(),
+                    precondition_prompt: None,
                 },
                 Task {
                     id: "3".to_string(),
@@ -376,6 +378,7 @@ async fn main() -> Result<()> {
                     inputs: vec![],
                     outputs: vec![],
                     runtime: types::TaskRuntime::default(),
+                    precondition_prompt: None,
                 },
             ];
 

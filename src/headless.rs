@@ -926,6 +926,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
@@ -956,6 +957,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         }];
         save_tasks(&task_file, &tasks).unwrap();
 

@@ -233,6 +233,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: TaskRuntime::default(),
+            precondition_prompt: None,
         }
     }
 

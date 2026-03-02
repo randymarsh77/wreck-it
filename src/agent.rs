@@ -1039,6 +1039,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         };
 
         let result = client.execute_task(&task).await;
@@ -1135,6 +1136,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         };
 
         // rounds=0 → no reflection loop; error comes from execute_task
