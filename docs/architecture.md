@@ -141,7 +141,16 @@ Terminal UI for monitoring:
 - `--task-file`: Path to task JSON (default: tasks.json)
 - `--max-iterations`: Safety limit (default: 100)
 - `--work-dir`: Repository directory (default: .)
-- `--api-endpoint`: Copilot API endpoint
+- `--api-endpoint`: API endpoint
+- `--api-token`: API token (or set `COPILOT_API_TOKEN` env var)
+- `--model-provider`: `copilot`, `llama`, or `github-models`
+- `--verify-command`: Custom verification command
+- `--evaluation-mode`: `command` or `agent-file`
+- `--headless`: Run without TUI for CI environments
+- `--reflection-rounds`: Critic-actor rounds (default: 2, 0 to disable)
+- `--replan-threshold`: Failures before re-planning (default: 2, 0 to disable)
+- `--ralph`: Named ralph context from `.wreck-it/config.toml`
+- `--goal`: Generate tasks from a natural-language goal before starting
 
 ## Best Practices
 
@@ -479,6 +488,6 @@ All Horizon 2–3 features are exercised together in the
 
 ## Future Enhancements
 
-- Custom test commands
-- Integration with CI/CD webhooks
 - Plugin hooks for custom role types
+- Task dependency visualization in the TUI
+- Interactive task editing from within the TUI

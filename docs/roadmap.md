@@ -16,27 +16,27 @@ This roadmap translates the findings from the multi-agent orchestration research
 
 ---
 
-## Horizon 1: Foundation (Phases 2–3 — In Progress)
+## Horizon 1: Foundation (Phases 2–3 — ✅ Complete)
 
-These tasks are already committed to `dogfood-tasks.json` and cover the core agent swarm capabilities.
+These tasks are implemented and cover the core agent swarm capabilities.
 
 | ID | Feature | Inspired By | Status |
 |---|---|---|---|
-| impl-1 | Role-based specialist agents | CrewAI, MetaGPT | pending |
-| impl-2 | Dynamic task generation by agents at runtime | AutoGen, LangGraph | pending |
-| impl-3 | Per-task agent memory / context persistence | LangGraph Checkpointer, MetaGPT Memory | pending |
-| impl-4 | Intelligent task routing and scheduling | Gastown capability negotiation | pending |
-| eval-1 | Evaluate impl-1 + impl-2 | — | pending |
-| eval-2 | Evaluate impl-3 + impl-4 | — | pending |
-| eval-3 | End-to-end integration of Horizon 1 features | — | pending |
+| impl-1 | Role-based specialist agents | CrewAI, MetaGPT | ✅ complete |
+| impl-2 | Dynamic task generation by agents at runtime | AutoGen, LangGraph | ✅ complete |
+| impl-3 | Per-task agent memory / context persistence | LangGraph Checkpointer, MetaGPT Memory | ✅ complete |
+| impl-4 | Intelligent task routing and scheduling | Gastown capability negotiation | ✅ complete |
+| eval-1 | Evaluate impl-1 + impl-2 | — | ✅ complete |
+| eval-2 | Evaluate impl-3 + impl-4 | — | ✅ complete |
+| eval-3 | End-to-end integration of Horizon 1 features | — | ✅ complete |
 
 ---
 
-## Horizon 2: Intelligence (Phases 4–5)
+## Horizon 2: Intelligence (Phases 4–5 — ✅ Complete)
 
 These features make wreck-it self-aware: it can plan from a goal, evaluate its own work, and recover from failures autonomously.
 
-### Priority 1 — Critic-Actor Reflection Loop (High Impact, Low–Medium Effort)
+### Priority 1 — Critic-Actor Reflection Loop (High Impact, Low–Medium Effort) — ✅ Implemented
 
 **Inspired by**: Openclaw critic-actor separation, AutoGen reflector agent, Reflexion paper.
 
@@ -46,7 +46,7 @@ After an actor agent completes a task and before committing, a lightweight **cri
 
 ---
 
-### Priority 2 — Adaptive Re-Planning on Failure (High Impact, Medium Effort)
+### Priority 2 — Adaptive Re-Planning on Failure (High Impact, Medium Effort) — ✅ Implemented
 
 **Inspired by**: LangGraph re-planner node, MetaGPT iterative planning, Openclaw adaptive re-planning.
 
@@ -56,7 +56,7 @@ After a configurable number of consecutive failures (`--replan-threshold`, defau
 
 ---
 
-### Priority 3 — LLM-Powered Dynamic Task Planning (High Impact, Medium Effort)
+### Priority 3 — LLM-Powered Dynamic Task Planning (High Impact, Medium Effort) — ✅ Implemented
 
 **Inspired by**: LangGraph plan-and-execute, AutoGen planner agent, CrewAI hierarchical process.
 
@@ -66,7 +66,7 @@ Add a `wreck-it plan --goal "..."` sub-command (and an optional pre-loop plannin
 
 ---
 
-### Priority 4 — Typed Artefact Store / Context Chain (Medium Impact, Medium Effort)
+### Priority 4 — Typed Artefact Store / Context Chain (Medium Impact, Medium Effort) — ✅ Implemented
 
 **Inspired by**: MetaGPT artefacts, CrewAI task `context` field.
 
@@ -76,7 +76,7 @@ Extend `Task` with optional `inputs: Vec<String>` (e.g., `"task-id/artefact-name
 
 ---
 
-## Horizon 3: Integration (Phases 4–6)
+## Horizon 3: Integration (Phases 4–6 — ✅ Complete)
 
 These features connect wreck-it to the broader ecosystem: cloud-native execution via gastown and observability/auditability via openclaw.
 
@@ -110,7 +110,7 @@ When either `gastown_endpoint` or `gastown_token` is absent, gastown integration
 
 ---
 
-### Priority 6 — Openclaw Provenance Tracking and Visualisation Integration (Medium Impact, Medium–High Effort)
+### Priority 6 — Openclaw Provenance Tracking and Visualisation Integration (Medium Impact, Medium–High Effort) — ✅ Implemented
 
 **Inspired by**: Openclaw provenance tracking, plan graph visualisation, critic-actor separation.
 
@@ -125,14 +125,14 @@ Add provenance metadata to every task execution: record the agent ID, model, pro
 
 ## Summary Prioritization Table
 
-| Priority | ID | Feature | Inspired by | Effort | Impact | Phase |
+| Priority | ID | Feature | Inspired by | Effort | Impact | Status |
 |---|---|---|---|---|---|---|
-| 1 | impl-6 | Critic-actor reflection loop | Openclaw, Reflexion | Low–Medium | High | 4 |
-| 2 | impl-7 | Adaptive re-planning on failure | LangGraph, MetaGPT, Openclaw | Medium | High | 4 |
-| 3 | impl-5 | LLM-powered dynamic task planning | LangGraph, AutoGen | Medium | High | 4 |
-| 4 | impl-8 | Typed artefact store / context chain | MetaGPT, CrewAI | Medium | Medium | 4 |
-| 5 | impl-9 | Gastown cloud runtime integration | Gastown | Medium–High | High | 4 |
-| 6 | impl-10 | Openclaw provenance tracking | Openclaw | Medium–High | Medium | 4 |
+| 1 | impl-6 | Critic-actor reflection loop | Openclaw, Reflexion | Low–Medium | High | ✅ Implemented |
+| 2 | impl-7 | Adaptive re-planning on failure | LangGraph, MetaGPT, Openclaw | Medium | High | ✅ Implemented |
+| 3 | impl-5 | LLM-powered dynamic task planning | LangGraph, AutoGen | Medium | High | ✅ Implemented |
+| 4 | impl-8 | Typed artefact store / context chain | MetaGPT, CrewAI | Medium | Medium | ✅ Implemented |
+| 5 | impl-9 | Gastown cloud runtime integration | Gastown | Medium–High | High | ✅ Implemented |
+| 6 | impl-10 | Openclaw provenance tracking | Openclaw | Medium–High | Medium | ✅ Implemented |
 
 ---
 

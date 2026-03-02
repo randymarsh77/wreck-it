@@ -221,6 +221,20 @@ If you hit max iterations:
 
 ## Advanced Usage
 
+### Plan Tasks from a Goal
+
+Use the `plan` command to generate a task file from a natural-language description:
+
+```bash
+wreck-it plan --goal "Build a REST API with authentication and tests" --output tasks.json
+```
+
+You can also plan and run in a single step with the `--goal` flag on `run`:
+
+```bash
+wreck-it run --goal "Refactor the auth module into separate files" --max-iterations 30
+```
+
 ### Custom Test Commands
 
 The agent will try common test commands:
@@ -239,6 +253,72 @@ wreck-it run --task-file feature-a.json
 wreck-it run --task-file bugfix-b.json
 wreck-it run --task-file refactor-c.json
 ```
+
+### Role-Based Tasks
+
+Assign agent roles to tasks for specialised handling:
+
+```json
+[
+  { "id": "research", "description": "Explore auth libraries and suggest an approach", "status": "pending", "role": "ideas" },
+  { "id": "impl", "description": "Implement JWT authentication", "status": "pending", "depends_on": ["research"] },
+  { "id": "review", "description": "Evaluate the auth implementation for security issues", "status": "pending", "role": "evaluator", "depends_on": ["impl"] }
+]
+```
+
+| Role | Purpose |
+|------|---------|
+| `ideas` | Research, explore, and generate follow-up tasks |
+| `implementer` (default) | Write code and make changes |
+| `evaluator` | Review and validate completed work |
+
+### Artefact Chaining
+
+Tasks can produce outputs that are automatically injected into downstream tasks:
+
+```json
+[
+  {
+    "id": "design",
+    "description": "Write a design spec for the user API",
+    "status": "pending",
+    "outputs": [{ "kind": "summary", "name": "spec", "path": "spec.md" }]
+  },
+  {
+    "id": "impl",
+    "description": "Implement the user API based on the design spec",
+    "status": "pending",
+    "inputs": ["design/spec"],
+    "depends_on": ["design"]
+  }
+]
+```
+
+### Reflection and Re-Planning
+
+Configure the critic-actor reflection loop and adaptive re-planner:
+
+```bash
+# Enable 3 reflection rounds (critic reviews each diff before tests)
+wreck-it run --reflection-rounds 3
+
+# Trigger re-planning after 3 consecutive failures (default: 2)
+wreck-it run --replan-threshold 3
+
+# Disable reflection and re-planning
+wreck-it run --reflection-rounds 0 --replan-threshold 0
+```
+
+### Provenance and Audit Trail
+
+Inspect the execution history for any task, or export the full run:
+
+```bash
+wreck-it provenance --task impl-1
+wreck-it export-openclaw --task-file tasks.json --output run.openclaw.json
+```
+
+The openclaw export is compatible with the openclaw plan-graph visualiser.
 
 ### Recurring Tasks
 
