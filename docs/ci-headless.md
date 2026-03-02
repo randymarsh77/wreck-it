@@ -6,7 +6,9 @@ sidebar_position: 3
 
 wreck-it is designed to run autonomously in CI environments. In **headless mode** the TUI is disabled and the Ralph Wiggum loop drives a cloud-agent state machine — creating GitHub issues, assigning Copilot, polling for PRs, and merging them when checks pass — all on a cron schedule.
 
-The bundled Docker action uses **GitHub Models** by default, so no extra subscription or SDK setup is needed — just a `GITHUB_TOKEN` with `models:read` permission.
+The bundled Docker action uses **GitHub Models** by default, so no extra subscription or SDK setup is needed — just a Personal Access Token with `repo` and `models:read` scopes.
+
+> **Why a PAT?** wreck-it assigns coding agents to issues (via GraphQL) and merges the PRs they produce. The default `GITHUB_TOKEN` does not have permission for these operations, so a Personal Access Token is always required.
 
 ## How It Works
 
@@ -49,19 +51,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0    # needed to access the state branch
 
       - name: Run wreck-it
         uses: randymarsh77/wreck-it/action@main
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 ```
 
-### 2. Push and trigger
+### 2. Create a `PAT_TOKEN` secret
 
-Push the workflow file. You can trigger the first run immediately via **Actions → wreck-it loop → Run workflow**. No secrets need to be configured — the default `GITHUB_TOKEN` provided by GitHub Actions works out of the box.
+Create a [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with `repo` and `models:read` scopes. Then go to **Settings → Secrets and variables → Actions** in your repository and add it as a `PAT_TOKEN` secret.
 
-> **Tip**: If you need to push commits or merge PRs as part of the agent loop, use a Personal Access Token (`PAT_TOKEN`) secret instead of the default `GITHUB_TOKEN`.
+A PAT is required because wreck-it assigns coding agents to issues and merges their PRs — operations the default `GITHUB_TOKEN` cannot perform.
+
+### 3. Push and trigger
+
+Push the workflow file. You can trigger the first run immediately via **Actions → wreck-it loop → Run workflow**.
 
 ## Action Inputs
 
@@ -100,12 +107,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
 
       - name: Run wreck-it
         uses: randymarsh77/wreck-it/action@main
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 ```
 
 ### Custom Verify Command
@@ -132,6 +140,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
 
       - name: Run wreck-it
@@ -140,7 +149,7 @@ jobs:
           max_iterations: '50'
           verify_command: 'cargo test'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 ```
 
 ### Using Copilot SDK
@@ -153,6 +162,7 @@ To use the Copilot SDK instead of GitHub Models, set the `model_provider` input:
         with:
           model_provider: 'copilot'
         env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
 ```
 
@@ -259,6 +269,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  models: read
 
 jobs:
   wreck-it:
@@ -266,6 +277,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
@@ -317,7 +329,16 @@ This means every cron invocation resumes exactly where the previous run left off
 
 ## Required Permissions
 
-When running in GitHub Actions, the workflow needs the following permissions:
+A **Personal Access Token** is always required for wreck-it CI workflows. The default `GITHUB_TOKEN` cannot assign agents to issues or merge agent-produced PRs.
+
+Create a [fine-grained or classic PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with these scopes and store it as a `PAT_TOKEN` repository secret:
+
+| Scope | Reason |
+|-------|--------|
+| `repo` | Push commits, create/merge PRs, create/assign issues |
+| `models:read` | *(only for `github-models` provider)* Access GitHub Models API |
+
+The workflow also needs these `permissions` declarations:
 
 | Permission | Reason |
 |------------|--------|
@@ -325,8 +346,6 @@ When running in GitHub Actions, the workflow needs the following permissions:
 | `pull-requests: write` | Cloud agents create PRs against the default branch |
 | `issues: write` | wreck-it creates issues to trigger cloud agents |
 | `models: read` | *(only for `github-models` provider)* Access GitHub Models API |
-
-If using a Personal Access Token (`PAT_TOKEN`) instead of the default `GITHUB_TOKEN`, the token needs `repo` and `workflow` scopes.
 
 ## Tips
 

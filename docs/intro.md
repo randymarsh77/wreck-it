@@ -17,10 +17,16 @@ The headline feature: run wreck-it in **GitHub Actions** on a cron schedule. In 
 
 ```yaml
 # .github/workflows/wreck-it.yml
+- uses: actions/checkout@v4
+  with:
+    token: ${{ secrets.PAT_TOKEN }}
+    fetch-depth: 0
 - uses: randymarsh77/wreck-it/action@main
   env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 ```
+
+> A Personal Access Token (`PAT_TOKEN`) is required because wreck-it assigns coding agents to issues and merges their PRs — operations the default `GITHUB_TOKEN` cannot perform.
 
 👉 **[CI & Headless Guide](ci-headless.md)** — full setup instructions and example workflows.
 
