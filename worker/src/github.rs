@@ -75,7 +75,10 @@ impl GitHubClient {
     pub async fn get_file(&self, path: &str, branch: &str) -> Result<Option<ContentFile>, String> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/contents/{}?ref={}",
-            self.owner, self.repo, path, branch,
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            url_encode(path),
+            url_encode(branch),
         );
 
         let mut headers = worker::Headers::new();
@@ -143,7 +146,9 @@ impl GitHubClient {
     ) -> Result<(), String> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/contents/{}",
-            self.owner, self.repo, path,
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            url_encode(path),
         );
 
         let encoded = base64_encode(content.as_bytes());
@@ -193,7 +198,9 @@ impl GitHubClient {
     pub async fn branch_exists(&self, branch: &str) -> Result<bool, String> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/git/ref/heads/{}",
-            self.owner, self.repo, branch,
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            url_encode(branch),
         );
 
         let mut headers = worker::Headers::new();
@@ -230,6 +237,32 @@ impl GitHubClient {
         &self.repo
     }
 }
+
+// ---------------------------------------------------------------------------
+// URL encoding helper
+// ---------------------------------------------------------------------------
+
+/// Percent-encode a string for use in a URL path segment or query value.
+/// Encodes all characters except unreserved ones (RFC 3986 §2.3): A-Z a-z 0-9 - . _ ~
+/// Also preserves `/` in path segments since the GitHub Contents API expects paths like `dir/file`.
+fn url_encode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                result.push(byte as char)
+            }
+            _ => {
+                result.push('%');
+                result.push(HEX_CHARS[(byte >> 4) as usize] as char);
+                result.push(HEX_CHARS[(byte & 0x0F) as usize] as char);
+            }
+        }
+    }
+    result
+}
+
+const HEX_CHARS: &[u8; 16] = b"0123456789ABCDEF";
 
 // ---------------------------------------------------------------------------
 // Base64 helpers (no external crate needed for this minimal subset)
@@ -313,5 +346,20 @@ mod tests {
         let cleaned: String = encoded.chars().filter(|c| !c.is_whitespace()).collect();
         let decoded = base64_decode(&cleaned).unwrap();
         assert_eq!(String::from_utf8(decoded).unwrap(), "Hello");
+    }
+
+    #[test]
+    fn url_encode_preserves_safe_chars() {
+        assert_eq!(url_encode("simple"), "simple");
+        assert_eq!(url_encode("dir/file.json"), "dir/file.json");
+        assert_eq!(url_encode("a-b_c.d~e"), "a-b_c.d~e");
+    }
+
+    #[test]
+    fn url_encode_encodes_special_chars() {
+        assert_eq!(url_encode("a b"), "a%20b");
+        assert_eq!(url_encode("a?b=c"), "a%3Fb%3Dc");
+        assert_eq!(url_encode("a#b"), "a%23b");
+        assert_eq!(url_encode("a&b"), "a%26b");
     }
 }
