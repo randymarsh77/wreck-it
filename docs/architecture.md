@@ -263,7 +263,8 @@ test coverage threshold.  Before each scheduling pass the headless runner
 calls `reset_recurring_tasks`, which moves any completed recurring task
 whose cooldown has elapsed back to `pending`.
 
-Example task file mixing both kinds:
+Example task file mixing both kinds, with an agent-evaluated precondition
+on the docs task so it only runs when source files have changed:
 
 ```json
 [
@@ -272,7 +273,8 @@ Example task file mixing both kinds:
     "description": "Review project structure and update documentation",
     "status": "pending",
     "kind": "recurring",
-    "cooldown_seconds": 86400
+    "cooldown_seconds": 86400,
+    "precondition_prompt": "Check if any source files have been modified since the last documentation update."
   },
   {
     "id": "coverage",
@@ -288,6 +290,63 @@ Example task file mixing both kinds:
   }
 ]
 ```
+
+### Agent-Evaluated Preconditions
+
+While `cooldown_seconds` provides a simple timer-based gate for recurring
+tasks, many real-world workflows need more nuanced checks.  The
+`precondition_prompt` field lets an **evaluation agent** decide whether a
+task should run in a given iteration.
+
+When a task has a `precondition_prompt`, the ralph loop spawns a dedicated
+precondition-evaluation agent before execution.  The agent receives the
+task description, the precondition criteria, and access to the working
+directory.  If the agent determines the precondition is satisfied it writes
+a marker file (`.task-precondition-met`); the loop checks for this file
+and only proceeds when it is present.  If the precondition is not met the
+task is skipped and remains in `pending` status for the next iteration.
+
+This is a key building block for **powerful ralph loops**: combined with
+recurring tasks and the intelligent scheduler, agent-evaluated
+preconditions allow you to build sophisticated, self-regulating automation
+that responds to the actual state of your codebase rather than just a
+clock.
+
+#### Examples
+
+A recurring documentation task that only runs when source files have
+actually changed:
+
+```json
+{
+  "id": "docs",
+  "description": "Review project structure and update documentation",
+  "status": "pending",
+  "kind": "recurring",
+  "cooldown_seconds": 86400,
+  "precondition_prompt": "Check if any .rs source files have been modified since the last documentation update. Only proceed if the documentation may be stale."
+}
+```
+
+A test-coverage guardian that only activates when coverage drops:
+
+```json
+{
+  "id": "coverage",
+  "description": "Add tests to bring coverage back above 90%",
+  "status": "pending",
+  "kind": "recurring",
+  "cooldown_seconds": 604800,
+  "precondition_prompt": "Run the test suite and check if code coverage is below 90%. Only proceed if coverage is insufficient."
+}
+```
+
+**Implementation**: `src/types.rs` — `Task.precondition_prompt`,
+`src/agent.rs` — `AgentClient::evaluate_precondition`,
+`src/ralph_loop.rs` — precondition gate in `run_single_task` /
+`run_parallel_tasks`.
+
+---
 
 ### Parallel Persistent Ralph Loops (Multi-Ralph)
 
