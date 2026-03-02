@@ -39,3 +39,12 @@ site/docs/node_modules/
 site/docs/build/
 site/docs/.docusaurus/
 site/output/
+
+# Xcode / Swift
+WreckItBoard/build/
+WreckItBoard/DerivedData/
+WreckItBoard/**/*.xcuserdata/
+WreckItBoard/**/*.xcworkspace/xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
