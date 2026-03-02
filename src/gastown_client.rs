@@ -255,6 +255,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime,
+            precondition_prompt: None,
         }
     }
 

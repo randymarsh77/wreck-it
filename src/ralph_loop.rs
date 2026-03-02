@@ -217,6 +217,33 @@ impl RalphLoop {
     /// Execute a single task by index, running evaluation & commit logic.
     async fn run_single_task(&mut self, task_idx: usize) -> Result<bool> {
         self.state.current_task = Some(task_idx);
+
+        // Evaluate agent-based precondition before executing the task.
+        if self.state.tasks[task_idx].precondition_prompt.is_some() {
+            let task = self.state.tasks[task_idx].clone();
+            self.state.add_log(format!(
+                "Evaluating precondition for task: {}",
+                task.description
+            ));
+            match self.agent.evaluate_precondition(&task).await {
+                Ok(true) => {
+                    self.state.add_log("Precondition met".to_string());
+                }
+                Ok(false) => {
+                    self.state
+                        .add_log("Precondition not met – skipping task".to_string());
+                    return Ok(true); // Continue the loop, but skip this task
+                }
+                Err(e) => {
+                    self.state.add_log(format!(
+                        "Precondition evaluation error: {} – skipping task",
+                        e
+                    ));
+                    return Ok(true);
+                }
+            }
+        }
+
         self.state.tasks[task_idx].status = TaskStatus::InProgress;
         let invocation_timestamp = provenance::now_timestamp();
         self.state.tasks[task_idx].last_attempt_at = Some(invocation_timestamp);
@@ -387,8 +414,49 @@ impl RalphLoop {
         ));
 
         // Mark all as in-progress and collect task data with per-task timestamps.
-        let mut task_data: Vec<(usize, crate::types::Task, u64)> = Vec::new();
+        // First evaluate agent-based preconditions for tasks that have them.
+        let mut eligible_indices = Vec::new();
         for &idx in &indices {
+            if self.state.tasks[idx].precondition_prompt.is_some() {
+                let task = self.state.tasks[idx].clone();
+                self.state.add_log(format!(
+                    "Evaluating precondition for task: {}",
+                    task.description
+                ));
+                match self.agent.evaluate_precondition(&task).await {
+                    Ok(true) => {
+                        self.state.add_log(format!(
+                            "Task [{}] precondition met",
+                            self.state.tasks[idx].id
+                        ));
+                        eligible_indices.push(idx);
+                    }
+                    Ok(false) => {
+                        self.state.add_log(format!(
+                            "Task [{}] precondition not met – skipping",
+                            self.state.tasks[idx].id
+                        ));
+                    }
+                    Err(e) => {
+                        self.state.add_log(format!(
+                            "Task [{}] precondition evaluation error: {} – skipping",
+                            self.state.tasks[idx].id, e
+                        ));
+                    }
+                }
+            } else {
+                eligible_indices.push(idx);
+            }
+        }
+
+        if eligible_indices.is_empty() {
+            self.state
+                .add_log("No tasks eligible after precondition evaluation".to_string());
+            return Ok(true);
+        }
+
+        let mut task_data: Vec<(usize, crate::types::Task, u64)> = Vec::new();
+        for &idx in &eligible_indices {
             let ts = provenance::now_timestamp();
             self.state.tasks[idx].status = TaskStatus::InProgress;
             self.state.tasks[idx].last_attempt_at = Some(ts);
@@ -477,7 +545,7 @@ impl RalphLoop {
         }
 
         // Run evaluation for each completed task.
-        for &idx in &indices {
+        for &idx in &eligible_indices {
             if self.state.tasks[idx].status == TaskStatus::Completed {
                 let eval = self.evaluate_task(idx).await;
                 match eval {
@@ -588,6 +656,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         }
     }
 
@@ -697,6 +766,7 @@ mod tests {
                 inputs: vec![],
                 outputs: vec![],
                 runtime: crate::types::TaskRuntime::default(),
+                precondition_prompt: None,
             },
             Task {
                 id: "old".to_string(),
@@ -714,6 +784,7 @@ mod tests {
                 inputs: vec![],
                 outputs: vec![],
                 runtime: crate::types::TaskRuntime::default(),
+                precondition_prompt: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -749,6 +820,7 @@ mod tests {
                 inputs: vec![],
                 outputs: vec![],
                 runtime: crate::types::TaskRuntime::default(),
+                precondition_prompt: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);

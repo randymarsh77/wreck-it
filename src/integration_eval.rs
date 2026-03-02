@@ -45,6 +45,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         }
     }
 
@@ -243,6 +244,7 @@ mod tests {
                 path: "spec.md".to_string(),
             }],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         };
 
         let impl_task = Task {
@@ -261,6 +263,7 @@ mod tests {
             inputs: vec!["design-1/spec".to_string()],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         };
 
         let review = make_task(
@@ -714,7 +717,11 @@ mod tests {
         tasks[1].status = TaskStatus::Completed; // design-1
         save_tasks(&task_file, &tasks).unwrap();
 
-        fs::write(dir.path().join("spec.md"), "# REST API Spec\n\nEndpoints: /users, /items").unwrap();
+        fs::write(
+            dir.path().join("spec.md"),
+            "# REST API Spec\n\nEndpoints: /users, /items",
+        )
+        .unwrap();
         let design_outputs = vec![TaskArtefact {
             kind: ArtefactKind::Summary,
             name: "spec".to_string(),
@@ -779,7 +786,10 @@ mod tests {
 
         let prov_dir = dir.path().join(".wreck-it-provenance");
         assert!(prov_dir.exists(), "R4: provenance dir created");
-        let entries: Vec<_> = fs::read_dir(&prov_dir).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        let entries: Vec<_> = fs::read_dir(&prov_dir)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(entries.len(), 3, "R4: three provenance files written");
 
         // ── R5: Adaptive re-planning fires on repeated review-1 failure ──────
@@ -801,13 +811,27 @@ mod tests {
 
         let current_tasks = load_tasks(&task_file).unwrap();
         let replanned = parse_and_validate_replan(&current_tasks, replan_output).unwrap();
-        assert_eq!(replanned.len(), 5, "R5: re-planner split review-1 into two tasks");
-        assert!(replanned.iter().any(|t| t.id == "review-1a"), "R5: review-1a present");
-        assert!(replanned.iter().any(|t| t.id == "review-1b"), "R5: review-1b present");
+        assert_eq!(
+            replanned.len(),
+            5,
+            "R5: re-planner split review-1 into two tasks"
+        );
+        assert!(
+            replanned.iter().any(|t| t.id == "review-1a"),
+            "R5: review-1a present"
+        );
+        assert!(
+            replanned.iter().any(|t| t.id == "review-1b"),
+            "R5: review-1b present"
+        );
 
         // Completed tasks must remain completed regardless of LLM output.
         let plan1_status = replanned.iter().find(|t| t.id == "plan-1").unwrap().status;
-        assert_eq!(plan1_status, TaskStatus::Completed, "R5: plan-1 stays completed");
+        assert_eq!(
+            plan1_status,
+            TaskStatus::Completed,
+            "R5: plan-1 stays completed"
+        );
 
         save_tasks(&task_file, &replanned).unwrap();
 
@@ -838,7 +862,9 @@ mod tests {
         // ── R6: Openclaw export covers all nodes, provenance, artefacts ──────
         let final_tasks = load_tasks(&task_file).unwrap();
         assert!(
-            final_tasks.iter().all(|t| t.status == TaskStatus::Completed),
+            final_tasks
+                .iter()
+                .all(|t| t.status == TaskStatus::Completed),
             "R6: all tasks completed before export"
         );
 
@@ -846,15 +872,37 @@ mod tests {
         assert_eq!(doc.schema_version, "1.0");
         assert_eq!(doc.workflow.name, "Build REST API");
         // 5 tasks in the final (re-planned) task list.
-        assert_eq!(doc.workflow.nodes.len(), 5, "R6: 5 nodes in openclaw export");
+        assert_eq!(
+            doc.workflow.nodes.len(),
+            5,
+            "R6: 5 nodes in openclaw export"
+        );
 
         // Every node that had provenance written should appear in the export.
-        let plan1_node = doc.workflow.nodes.iter().find(|n| n.id == "plan-1").unwrap();
-        assert_eq!(plan1_node.provenance.len(), 1, "R6: plan-1 has one provenance record");
+        let plan1_node = doc
+            .workflow
+            .nodes
+            .iter()
+            .find(|n| n.id == "plan-1")
+            .unwrap();
+        assert_eq!(
+            plan1_node.provenance.len(),
+            1,
+            "R6: plan-1 has one provenance record"
+        );
         assert_eq!(plan1_node.provenance[0].outcome, "success");
 
-        let impl1_node = doc.workflow.nodes.iter().find(|n| n.id == "impl-1").unwrap();
-        assert_eq!(impl1_node.provenance.len(), 1, "R6: impl-1 has one provenance record");
+        let impl1_node = doc
+            .workflow
+            .nodes
+            .iter()
+            .find(|n| n.id == "impl-1")
+            .unwrap();
+        assert_eq!(
+            impl1_node.provenance.len(),
+            1,
+            "R6: impl-1 has one provenance record"
+        );
         // impl-1 should list its consumed input artefact.
         assert_eq!(
             impl1_node.artefacts.inputs,
@@ -863,7 +911,10 @@ mod tests {
         );
         // impl-1 should list its produced output artefact.
         assert!(
-            impl1_node.artefacts.outputs.contains(&"impl-1/code".to_string()),
+            impl1_node
+                .artefacts
+                .outputs
+                .contains(&"impl-1/code".to_string()),
             "R6: impl-1/code output artefact in export"
         );
 
@@ -874,14 +925,21 @@ mod tests {
             .find(|n| n.id == "design-1")
             .unwrap();
         assert!(
-            design1_node.artefacts.outputs.contains(&"design-1/spec".to_string()),
+            design1_node
+                .artefacts
+                .outputs
+                .contains(&"design-1/spec".to_string()),
             "R6: design-1/spec output artefact in export"
         );
 
         // The document must serialise to valid JSON.
         let json = serialise_document(&doc).unwrap();
         let reparsed: crate::openclaw::OpenclawDocument = serde_json::from_str(&json).unwrap();
-        assert_eq!(reparsed.workflow.nodes.len(), 5, "R6: export round-trips correctly");
+        assert_eq!(
+            reparsed.workflow.nodes.len(),
+            5,
+            "R6: export round-trips correctly"
+        );
 
         // ── R6b: Gastown DAG serialisation is consistent with openclaw export ─
         // Mark review-1a/b as gastown tasks and verify the DAG includes them.
@@ -895,7 +953,11 @@ mod tests {
 
         let tasks_for_dag = load_tasks(&task_file).unwrap();
         let dag = GastownClient::build_dag(&tasks_for_dag, "REST-API-review");
-        assert_eq!(dag.nodes.len(), 2, "R6b: gastown DAG contains two review nodes");
+        assert_eq!(
+            dag.nodes.len(),
+            2,
+            "R6b: gastown DAG contains two review nodes"
+        );
         assert_eq!(dag.nodes[0].id, "review-1a");
         assert_eq!(dag.nodes[1].id, "review-1b");
 
@@ -913,7 +975,10 @@ mod tests {
         GastownClient::apply_status_events(&events, &task_file).unwrap();
 
         let after_events = load_tasks(&task_file).unwrap();
-        for task in after_events.iter().filter(|t| t.runtime == TaskRuntime::Gastown) {
+        for task in after_events
+            .iter()
+            .filter(|t| t.runtime == TaskRuntime::Gastown)
+        {
             assert_eq!(
                 task.status,
                 TaskStatus::Completed,
@@ -925,20 +990,30 @@ mod tests {
         // ── R7: Agent memory persists across invocations ─────────────────────
         let mut state = load_headless_state(&state_file).unwrap();
         state.iteration = 1;
-        state.memory.push("iteration 1: plan-1 completed".to_string());
+        state
+            .memory
+            .push("iteration 1: plan-1 completed".to_string());
         save_headless_state(&state_file, &state).unwrap();
 
         let mut state = load_headless_state(&state_file).unwrap();
         state.iteration = 2;
         state.phase = AgentPhase::NeedsVerification;
-        state.memory.push("iteration 2: review re-plan triggered".to_string());
+        state
+            .memory
+            .push("iteration 2: review re-plan triggered".to_string());
         save_headless_state(&state_file, &state).unwrap();
 
         let state = load_headless_state(&state_file).unwrap();
         assert_eq!(state.iteration, 2, "R7: iteration persisted");
         assert_eq!(state.memory.len(), 2, "R7: both memory entries survive");
-        assert!(state.memory[0].contains("plan-1"), "R7: first memory entry intact");
-        assert!(state.memory[1].contains("re-plan"), "R7: second memory entry intact");
+        assert!(
+            state.memory[0].contains("plan-1"),
+            "R7: first memory entry intact"
+        );
+        assert!(
+            state.memory[1].contains("re-plan"),
+            "R7: second memory entry intact"
+        );
 
         // All tasks completed – scheduler returns nothing.
         let final_tasks = load_tasks(&task_file).unwrap();

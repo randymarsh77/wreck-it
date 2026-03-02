@@ -245,6 +245,7 @@ pub fn parse_and_validate_plan(raw: &str) -> Result<Vec<Task>> {
                 inputs: vec![],
                 outputs: vec![],
                 runtime: crate::types::TaskRuntime::default(),
+                precondition_prompt: None,
             })
         })
         .collect::<Result<Vec<Task>>>()?;

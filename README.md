@@ -38,6 +38,7 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 📊 **Intelligent Scheduling**: Multi-factor scoring (priority, complexity, fan-out, failure history)
 - 🌐 **Gastown Cloud Runtime**: Offload tasks to the gastown cloud agent service
 - 🎯 **Multi-Ralph Contexts**: Run independent loops with separate task/state files per context
+- 🧐 **Agent-Evaluated Preconditions**: Let an agent decide whether a task should run, enabling nuanced re-run criteria for recurring tasks in powerful ralph loops
 
 ## Installation
 
@@ -183,6 +184,7 @@ A task with all available fields:
 | `inputs` | Artefact references (`"task-id/artefact-name"`) injected into prompt | `[]` |
 | `outputs` | Artefacts to persist on completion (`kind`, `name`, `path`) | `[]` |
 | `runtime` | `local` or `gastown` (cloud execution) | `local` |
+| `precondition_prompt` | Agent-evaluated precondition; task is skipped when the agent determines the condition is not met | *(none)* |
 
 ## GitHub Action
 

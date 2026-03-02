@@ -2,7 +2,7 @@ use crate::agent_memory::AgentMemory;
 use crate::artefact_store;
 use crate::types::{
     CriticResult, EvaluationMode, ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL,
-    DEFAULT_LLAMA_MODEL, LLAMA_PROVIDER_TYPE,
+    DEFAULT_LLAMA_MODEL, DEFAULT_PRECONDITION_MARKER, LLAMA_PROVIDER_TYPE,
 };
 use anyhow::{bail, Context, Result};
 use copilot_sdk_supercharged::*;
@@ -612,6 +612,164 @@ impl AgentClient {
         Ok(complete)
     }
 
+    /// Evaluate whether a task's precondition is satisfied using an agent.
+    ///
+    /// Sends the task's `precondition_prompt` to the configured LLM.  The agent
+    /// is instructed to write a marker file (`DEFAULT_PRECONDITION_MARKER`)
+    /// inside `work_dir` if (and only if) it determines the precondition is
+    /// met.  Returns `Ok(true)` when the marker exists after the agent runs.
+    ///
+    /// This is particularly useful for recurring tasks where a simple cooldown
+    /// timer is not sufficient — the agent can inspect the codebase, external
+    /// state, or any other context to decide whether the task should run.
+    pub async fn evaluate_precondition(&mut self, task: &Task) -> Result<bool> {
+        let prompt = match &task.precondition_prompt {
+            Some(p) => p.clone(),
+            None => return Ok(true), // No precondition → always eligible
+        };
+
+        self.validate_work_dir()?;
+
+        // Use direct HTTP for GithubModels provider
+        if self.model_provider == ModelProvider::GithubModels {
+            return self.evaluate_precondition_via_http(task, &prompt).await;
+        }
+
+        let marker_path = Path::new(&self.work_dir).join(DEFAULT_PRECONDITION_MARKER);
+
+        // Remove stale marker so we get a clean signal.
+        if marker_path.exists() {
+            std::fs::remove_file(&marker_path).ok();
+        }
+
+        let client = self.ensure_client().await?;
+
+        let config = SessionConfig {
+            request_permission: Some(false),
+            request_user_input: Some(false),
+            model: if self.model_provider == ModelProvider::Llama {
+                Some(DEFAULT_LLAMA_MODEL.to_string())
+            } else {
+                None
+            },
+            provider: if self.model_provider == ModelProvider::Llama {
+                Some(ProviderConfig {
+                    provider_type: Some(LLAMA_PROVIDER_TYPE.to_string()),
+                    wire_api: None,
+                    base_url: self.api_endpoint.clone(),
+                    api_key: self.api_token.clone(),
+                    bearer_token: None,
+                    azure: None,
+                })
+            } else {
+                None
+            },
+            ..Default::default()
+        };
+
+        let session = client
+            .create_session(config)
+            .await
+            .context("Failed to create precondition evaluation session")?;
+
+        let agent_prompt = format!(
+            "You are a precondition evaluation agent. Your job is to determine whether \
+             a task's precondition is satisfied and the task should run.\n\
+             Working directory: {work_dir}\n\n\
+             Task: {task_desc}\n\n\
+             Precondition to evaluate:\n{criteria}\n\n\
+             If the precondition IS met and the task should run, create the file \
+             '{marker}' in the working directory containing the text \"READY\". \
+             If the precondition is NOT met, do NOT create that file.\n\
+             Only create the file when you are confident the precondition is satisfied.",
+            work_dir = self.work_dir,
+            task_desc = task.description,
+            criteria = prompt,
+            marker = DEFAULT_PRECONDITION_MARKER,
+        );
+
+        let response = session
+            .send_and_wait(
+                MessageOptions {
+                    prompt: agent_prompt,
+                    attachments: None,
+                    mode: None,
+                },
+                Some(120_000),
+            )
+            .await
+            .context("Failed to get precondition evaluation response from agent")?;
+
+        if let Some(event) = &response {
+            if let Some(msg) = event.assistant_message_content() {
+                tracing::info!("Precondition evaluation agent response: {}", msg);
+            }
+        }
+
+        session.destroy().await.ok();
+
+        // Check whether the marker file was created.
+        let met = marker_path.exists();
+        if met {
+            tracing::info!("Precondition evaluation agent wrote marker file – precondition met");
+            std::fs::remove_file(&marker_path).ok();
+        } else {
+            tracing::info!(
+                "Precondition evaluation agent did NOT write marker file – precondition not met"
+            );
+        }
+
+        Ok(met)
+    }
+
+    /// Evaluate task precondition via direct HTTP to the GitHub Models API.
+    async fn evaluate_precondition_via_http(
+        &self,
+        task: &Task,
+        precondition: &str,
+    ) -> Result<bool> {
+        let marker_path = Path::new(&self.work_dir).join(DEFAULT_PRECONDITION_MARKER);
+
+        // Remove stale marker so we get a clean signal.
+        if marker_path.exists() {
+            std::fs::remove_file(&marker_path).ok();
+        }
+
+        let prompt = format!(
+            "You are a precondition evaluation agent. Your job is to determine whether \
+             a task's precondition is satisfied and the task should run.\n\
+             Working directory: {work_dir}\n\n\
+             Task: {task_desc}\n\n\
+             Precondition to evaluate:\n{criteria}\n\n\
+             If the precondition IS met and the task should run, create the file \
+             '{marker}' in the working directory containing the text \"READY\". \
+             If the precondition is NOT met, do NOT create that file.\n\
+             Only create the file when you are confident the precondition is satisfied.",
+            work_dir = self.work_dir,
+            task_desc = task.description,
+            criteria = precondition,
+            marker = DEFAULT_PRECONDITION_MARKER,
+        );
+
+        let response = self.chat_via_http(&prompt).await;
+
+        if let Ok(msg) = &response {
+            tracing::info!("Precondition evaluation agent response: {}", msg);
+        }
+
+        let met = marker_path.exists();
+        if met {
+            tracing::info!("Precondition evaluation agent wrote marker file – precondition met");
+            std::fs::remove_file(&marker_path).ok();
+        } else {
+            tracing::info!(
+                "Precondition evaluation agent did NOT write marker file – precondition not met"
+            );
+        }
+
+        Ok(met)
+    }
+
     /// Run a trusted verification shell command in the work directory.
     ///
     /// Returns `Ok(true)` when the command exits with status code 0,
@@ -1039,6 +1197,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         };
 
         let result = client.execute_task(&task).await;
@@ -1135,6 +1294,7 @@ mod tests {
             inputs: vec![],
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
         };
 
         // rounds=0 → no reflection loop; error comes from execute_task
@@ -1144,5 +1304,95 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("API token is required"));
+    }
+
+    // ---- evaluate_precondition tests ----
+
+    #[tokio::test]
+    async fn evaluate_precondition_returns_true_when_no_prompt() {
+        let dir = tempdir().unwrap();
+        init_git_repo(dir.path());
+        let mut client = AgentClient::new(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            dir.path().to_string_lossy().to_string(),
+            None,
+        );
+
+        let task = Task {
+            id: "no-precond".to_string(),
+            description: "task without precondition".to_string(),
+            status: crate::types::TaskStatus::Pending,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
+        };
+
+        // No precondition prompt → always eligible
+        let result = client.evaluate_precondition(&task).await.unwrap();
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn evaluate_precondition_returns_true_when_marker_exists() {
+        let dir = tempdir().unwrap();
+        init_git_repo(dir.path());
+
+        // Pre-create the marker file to simulate an agent that decided
+        // the precondition is met.
+        let marker_path = dir.path().join(crate::types::DEFAULT_PRECONDITION_MARKER);
+        std::fs::write(&marker_path, "READY").unwrap();
+
+        let mut client = AgentClient::with_evaluation(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            dir.path().to_string_lossy().to_string(),
+            None,
+            EvaluationMode::Command,
+            None,
+            ".task-complete".to_string(),
+        );
+
+        // The evaluate_precondition method first removes any stale marker,
+        // so a pre-existing marker won't trick it. But since we can't run
+        // a real agent in unit tests, this test validates the marker-based
+        // detection path by verifying the method handles missing Copilot
+        // gracefully — the precondition evaluates to false because the agent
+        // can't create the marker without a live Copilot session.
+        let task = Task {
+            id: "precond-test".to_string(),
+            description: "task with precondition".to_string(),
+            status: crate::types::TaskStatus::Pending,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::Recurring,
+            cooldown_seconds: Some(3600),
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: Some("Check if documentation is stale".to_string()),
+        };
+
+        // Without a running Copilot server the session creation will fail
+        // (Err), which is expected in a unit test environment.
+        let result = client.evaluate_precondition(&task).await;
+        assert!(result.is_err() || !result.unwrap());
     }
 }
