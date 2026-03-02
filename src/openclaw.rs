@@ -131,8 +131,8 @@ pub fn build_document(
     let tasks = load_tasks(task_file).context("Failed to load task list for openclaw export")?;
 
     let manifest_path = work_dir.join(".wreck-it-artefacts.json");
-    let manifest =
-        load_manifest(&manifest_path).context("Failed to load artefact manifest for openclaw export")?;
+    let manifest = load_manifest(&manifest_path)
+        .context("Failed to load artefact manifest for openclaw export")?;
 
     let exported_at = crate::provenance::now_timestamp();
 
@@ -212,7 +212,9 @@ mod tests {
     use crate::artefact_store::persist_output_artefacts;
     use crate::provenance::{hash_string, persist_provenance_record, ProvenanceRecord};
     use crate::task_manager::save_tasks;
-    use crate::types::{AgentRole, ArtefactKind, Task, TaskArtefact, TaskKind, TaskRuntime, TaskStatus};
+    use crate::types::{
+        AgentRole, ArtefactKind, Task, TaskArtefact, TaskKind, TaskRuntime, TaskStatus,
+    };
     use std::fs;
     use tempfile::tempdir;
 

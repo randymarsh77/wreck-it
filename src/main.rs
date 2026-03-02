@@ -444,13 +444,13 @@ async fn main() -> Result<()> {
         } => {
             let resolved_work_dir =
                 work_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-            let doc =
-                openclaw::build_document(&task_file, &resolved_work_dir, &workflow_name)?;
+            let doc = openclaw::build_document(&task_file, &resolved_work_dir, &workflow_name)?;
             let json = openclaw::serialise_document(&doc)?;
             match output {
                 Some(path) => {
-                    std::fs::write(&path, &json)
-                        .with_context(|| format!("Failed to write openclaw export to {}", path.display()))?;
+                    std::fs::write(&path, &json).with_context(|| {
+                        format!("Failed to write openclaw export to {}", path.display())
+                    })?;
                     println!("Openclaw export written to {}", path.display());
                 }
                 None => println!("{}", json),

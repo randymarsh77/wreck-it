@@ -834,4 +834,53 @@ mod tests {
             "absent token should be omitted"
         );
     }
+
+    // ---- precondition_prompt tests ----
+
+    #[test]
+    fn task_precondition_prompt_defaults_to_none_when_absent() {
+        let json = r#"{"id":"x","description":"d","status":"pending"}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.precondition_prompt.is_none());
+    }
+
+    #[test]
+    fn task_precondition_prompt_omitted_when_none() {
+        let task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(
+            !json.contains("precondition_prompt"),
+            "absent precondition_prompt should be omitted"
+        );
+    }
+
+    #[test]
+    fn task_precondition_prompt_roundtrip() {
+        let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
+        task.precondition_prompt = Some("Check if docs are stale".to_string());
+        let json = serde_json::to_string(&task).unwrap();
+        assert!(json.contains("precondition_prompt"));
+        let loaded: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            loaded.precondition_prompt.as_deref(),
+            Some("Check if docs are stale")
+        );
+    }
+
+    #[test]
+    fn task_precondition_prompt_with_recurring_kind_roundtrip() {
+        let mut task = make_task("docs", TaskStatus::Pending, 1, vec![]);
+        task.kind = TaskKind::Recurring;
+        task.cooldown_seconds = Some(3600);
+        task.precondition_prompt =
+            Some("Only run if README.md has changed since last update".to_string());
+        let json = serde_json::to_string(&task).unwrap();
+        let loaded: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.kind, TaskKind::Recurring);
+        assert_eq!(loaded.cooldown_seconds, Some(3600));
+        assert_eq!(
+            loaded.precondition_prompt.as_deref(),
+            Some("Only run if README.md has changed since last update")
+        );
+    }
 }
