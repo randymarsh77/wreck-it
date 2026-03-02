@@ -67,8 +67,10 @@ Push the workflow file. You can trigger the first run immediately via **Actions 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `max_iterations` | Maximum loop iterations per run | `100` |
-| `verify_command` | Shell command to verify task completion (trusted input only) | *(none)* |
+| `verify_command` | Shell command to verify task completion | *(none)* |
 | `state_branch` | Orphan branch used to persist state between runs | `wreck-it-state` |
+
+> **Security note**: The `verify_command` input is executed as a shell command inside the runner. Only use trusted commands — never pass untrusted or user-supplied input.
 
 ## Example Workflows
 
