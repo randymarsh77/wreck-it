@@ -1,0 +1,11 @@
+[
+  {
+    "id": "docs-review",
+    "description": "Assess the state of documentation across the wreck-it project. Review README.md, docs/, IMPLEMENTATION.md, and inline code comments for accuracy, completeness, and currency. Update any outdated sections, add missing documentation for new features, ensure examples are working, and verify links are valid. Focus on: API documentation, architecture docs, getting-started guide, CI/headless guide, research notes, and any recently added features that lack documentation.",
+    "status": "pending",
+    "role": "evaluator",
+    "kind": "recurring",
+    "cooldown_seconds": 86400,
+    "precondition_prompt": "Check if any documentation in the wreck-it project is outdated, missing, or inaccurate by reviewing recent commits and comparing them with the current docs/ directory, README.md, and IMPLEMENTATION.md. Return true if documentation needs updating, false if everything is current and accurate."
+  }
+]

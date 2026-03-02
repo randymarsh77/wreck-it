@@ -1,0 +1,11 @@
+[
+  {
+    "id": "feature-planner",
+    "description": "Research the AI agent orchestration and developer tools space to identify emerging trends, novel approaches, and opportunities that wreck-it can leverage. Review recent developments in: multi-agent systems, LLM-based coding tools, CI/CD automation, autonomous development workflows, and related projects (gastown, openclaw). Compare findings against wreck-it's current capabilities and the roadmap in docs/roadmap.md. Propose novel feature combinations that leverage wreck-it's unique capabilities — the Ralph Wiggum loop, multi-ralph contexts, recurring tasks, agent-evaluated preconditions, artefact chaining, and cloud runtimes — to create differentiated features with novel approaches. Document findings and proposals in docs/research-notes.md and create actionable feature proposals as new tasks in feature-dev-tasks.json.",
+    "status": "pending",
+    "role": "ideas",
+    "kind": "recurring",
+    "cooldown_seconds": 172800,
+    "precondition_prompt": "Check feature-dev-tasks.json — if all current features are completed and no new features have been proposed recently (i.e., the file is empty or all tasks are completed), this planner should run to research and propose new directions. Skip if there are active features still in development (any task with status 'pending' or 'inprogress')."
+  }
+]
