@@ -135,7 +135,8 @@ Terminal UI for monitoring:
 ## Configuration
 
 ### Environment Variables
-- `COPILOT_API_TOKEN`: GitHub Copilot API token
+- `GITHUB_TOKEN`: GitHub token for GitHub Models API access (recommended)
+- `COPILOT_API_TOKEN`: GitHub Copilot API token (when using `--model-provider copilot`)
 
 ### Command Line Options
 - `--task-file`: Path to task JSON (default: tasks.json)
@@ -143,7 +144,7 @@ Terminal UI for monitoring:
 - `--work-dir`: Repository directory (default: .)
 - `--api-endpoint`: API endpoint
 - `--api-token`: API token (or set `COPILOT_API_TOKEN` env var)
-- `--model-provider`: `copilot`, `llama`, or `github-models`
+- `--model-provider`: `github-models`, `copilot`, or `llama`
 - `--verify-command`: Custom verification command
 - `--evaluation-mode`: `command` or `agent-file`
 - `--headless`: Run without TUI for CI environments

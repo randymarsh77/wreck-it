@@ -16,6 +16,7 @@ permissions:
   contents: write      # push state branch commits
   pull-requests: write # cloud agents create PRs against the default branch
   issues: write        # wreck-it creates issues to trigger cloud agents
+  models: read         # access GitHub Models API
 
 jobs:
   wreck-it:
@@ -28,4 +29,4 @@ jobs:
       - name: Run wreck-it headless iteration
         uses: randymarsh77/wreck-it/action@main
         env:
-          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

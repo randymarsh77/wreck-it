@@ -6,6 +6,8 @@ sidebar_position: 3
 
 wreck-it is designed to run autonomously in CI environments. In **headless mode** the TUI is disabled and the Ralph Wiggum loop drives a cloud-agent state machine — creating GitHub issues, assigning Copilot, polling for PRs, and merging them when checks pass — all on a cron schedule.
 
+The bundled Docker action uses **GitHub Models** by default, so no extra subscription or SDK setup is needed — just a `GITHUB_TOKEN` with `models:read` permission.
+
 ## How It Works
 
 In a CI environment the loop does not run a local AI model. Instead it orchestrates a cloud coding-agent through a state machine:
@@ -21,7 +23,7 @@ State is persisted to a dedicated orphan branch (`wreck-it-state` by default) vi
 
 ## Quick Start with the GitHub Action
 
-The fastest way to add wreck-it to your project is the bundled Docker-based GitHub Action.
+The fastest way to add wreck-it to your project is the bundled Docker-based GitHub Action. It uses GitHub Models by default.
 
 ### 1. Add a workflow file
 
@@ -39,6 +41,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  models: read
 
 jobs:
   wreck-it:
@@ -51,21 +54,20 @@ jobs:
       - name: Run wreck-it
         uses: randymarsh77/wreck-it/action@main
         env:
-          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### 2. Set the `COPILOT_API_TOKEN` secret
+### 2. Push and trigger
 
-Go to **Settings → Secrets and variables → Actions** in your repository and add a `COPILOT_API_TOKEN` secret with a valid GitHub Copilot API token.
+Push the workflow file. You can trigger the first run immediately via **Actions → wreck-it loop → Run workflow**. No secrets need to be configured — the default `GITHUB_TOKEN` provided by GitHub Actions works out of the box.
 
-### 3. Push and trigger
-
-Push the workflow file. You can trigger the first run immediately via **Actions → wreck-it loop → Run workflow**.
+> **Tip**: If you need to push commits or merge PRs as part of the agent loop, use a Personal Access Token (`PAT_TOKEN`) secret instead of the default `GITHUB_TOKEN`.
 
 ## Action Inputs
 
 | Input | Description | Default |
 |-------|-------------|---------|
+| `model_provider` | Model provider (`github-models`, `copilot`, or `llama`) | `github-models` |
 | `max_iterations` | Maximum loop iterations per run | `100` |
 | `verify_command` | Shell command to verify task completion | *(none)* |
 | `state_branch` | Orphan branch used to persist state between runs | `wreck-it-state` |
@@ -90,6 +92,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  models: read
 
 jobs:
   wreck-it:
@@ -102,7 +105,7 @@ jobs:
       - name: Run wreck-it
         uses: randymarsh77/wreck-it/action@main
         env:
-          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ### Custom Verify Command
@@ -121,6 +124,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  models: read
 
 jobs:
   wreck-it:
@@ -136,12 +140,25 @@ jobs:
           max_iterations: '50'
           verify_command: 'cargo test'
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### Using Copilot SDK
+
+To use the Copilot SDK instead of GitHub Models, set the `model_provider` input:
+
+```yaml
+      - name: Run wreck-it
+        uses: randymarsh77/wreck-it/action@main
+        with:
+          model_provider: 'copilot'
+        env:
           COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
 ```
 
-### Build from Source with GitHub Models
+### Build from Source
 
-If you need a specific wreck-it version or want to use GitHub Models as the LLM provider, build from source instead of using the Docker action:
+If you need a specific wreck-it version or want full control over the build, you can build from source instead of using the Docker action:
 
 ```yaml
 name: wreck-it (from source)
@@ -259,7 +276,7 @@ jobs:
       - name: Run docs ralph
         run: ./target/release/wreck-it run --headless --ralph docs
         env:
-          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 
       - name: Push state
         run: |
