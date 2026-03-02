@@ -272,29 +272,44 @@
       <p>Beautiful terminal UI showing tasks, progress, and real-time logs with pause/resume controls.</p>
     </div>
     <div class="feature">
-      <div class="icon">🔄</div>
-      <h3>Continuous Execution</h3>
-      <p>Runs until all tasks complete or max iterations reached. Filesystem-as-memory for persistence.</p>
+      <div class="icon">🧠</div>
+      <h3>LLM Task Planning</h3>
+      <p>Generate structured task plans from natural-language goals. Just describe what you want and go.</p>
     </div>
     <div class="feature">
-      <div class="icon">🧪</div>
-      <h3>Automatic Testing</h3>
-      <p>Runs tests after each task. Only commits changes that pass. Supports cargo, npm, and pytest.</p>
+      <div class="icon">🔁</div>
+      <h3>Critic-Actor Reflection</h3>
+      <p>Built-in critic evaluates agent output against the task before tests run, refining quality automatically.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">🛠️</div>
+      <h3>Adaptive Re-Planning</h3>
+      <p>Consecutive failures trigger automatic task restructuring — split, rewrite, or inject prerequisites.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">📦</div>
+      <h3>Artefact Chaining</h3>
+      <p>Pass structured outputs from one task as inputs to the next. Design docs flow into code tasks automatically.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">🔍</div>
+      <h3>Provenance Tracking</h3>
+      <p>Full audit trail of every agent execution — model, prompts, diffs — exportable as openclaw JSON.</p>
     </div>
     <div class="feature">
       <div class="icon">🤖</div>
-      <h3>Headless Mode</h3>
-      <p>Run without TUI for CI/CD automation. Scheduled agent swarms for continuous improvement.</p>
+      <h3>Headless &amp; CI Mode</h3>
+      <p>Run without TUI for CI/CD automation. Includes a Docker-based GitHub Action for scheduled agent swarms.</p>
     </div>
     <div class="feature">
       <div class="icon">☁️</div>
       <h3>Cloud Agents</h3>
-      <p>GitHub Models integration for cloud-scale agent execution alongside local Copilot SDK.</p>
+      <p>Multi-model support (Copilot, Llama, GitHub Models) with optional gastown cloud runtime offloading.</p>
     </div>
     <div class="feature">
       <div class="icon">🔒</div>
-      <h3>Safety Limits</h3>
-      <p>Configurable max iterations, test validation, and git history for reversible changes.</p>
+      <h3>Safety &amp; Scheduling</h3>
+      <p>Max iterations, intelligent multi-factor scheduling, parallel phase execution, and git-backed reversibility.</p>
     </div>
   </section>
 
@@ -303,7 +318,10 @@
 <span class="cmd">git clone https://github.com/randymarsh77/wreck-it.git</span>
 <span class="cmd">cd wreck-it && cargo build --release</span>
 
-<span class="comment"># Initialize tasks and start the loop</span>
+<span class="comment"># Generate a task plan from a goal</span>
+<span class="cmd">wreck-it plan --goal "Build a REST API with auth" --output tasks.json</span>
+
+<span class="comment"># Or initialize sample tasks and start the loop</span>
 <span class="cmd">wreck-it init</span>
 <span class="cmd">wreck-it run --task-file tasks.json --max-iterations 50</span></pre>
   </section>

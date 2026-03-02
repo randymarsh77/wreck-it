@@ -24,10 +24,22 @@ The Ralph Wiggum Loop is a continuous execution pattern designed for AI agent wo
 
 - 🎨 **TUI Interface** — Beautiful terminal UI showing tasks, progress, and logs
 - 🔄 **Continuous Execution** — Runs until all tasks are complete or max iterations reached
-- 📝 **Task Management** — JSON-based task tracking with status persistence
-- 🧪 **Automatic Testing** — Runs tests after each task execution
+- 📝 **Task Management** — JSON-based task tracking with status persistence, phases, and dependencies
+- 🧪 **Automatic Testing** — Runs tests after each task execution (cargo, npm, pytest)
 - 💾 **Git Integration** — Automatically commits successful changes
 - 🔒 **Safety Limits** — Configurable max iterations to prevent runaway costs
 - 🤖 **Headless Mode** — Run without TUI for CI/CD automation
 - ☁️ **Cloud Agents** — GitHub Models integration for cloud-scale agent execution
 - 🐕 **Dogfooding** — wreck-it develops itself via scheduled agent swarms
+- 🧠 **LLM Task Planning** — Generate structured task plans from natural-language goals
+- 🎭 **Role-Based Agents** — Assign `ideas`, `implementer`, or `evaluator` roles to tasks
+- 🔁 **Critic-Actor Reflection** — Optional critic feedback loop to refine agent output
+- 🛠️ **Adaptive Re-Planning** — Automatically restructure tasks after consecutive failures
+- 📦 **Artefact Store** — Chain task outputs as inputs to downstream tasks
+- 🔍 **Provenance Tracking** — Full audit trail of every agent execution, exportable as openclaw JSON
+- 🔂 **Recurring Tasks** — Tasks that automatically reset after a configurable cooldown
+- 🏗️ **Parallel Execution** — Phase-based concurrent task execution
+- 📊 **Intelligent Scheduling** — Multi-factor scoring for task ordering
+- 🌐 **Gastown Cloud Runtime** — Offload tasks to the gastown cloud agent service
+- 🎯 **Multi-Ralph Contexts** — Run independent loops per context
+- ⚡ **GitHub Action** — Use wreck-it in CI via the bundled Docker action
