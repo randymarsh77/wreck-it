@@ -1,6 +1,6 @@
 # Getting Started with wreck-it
 
-This guide will walk you through using wreck-it to automate multi-step development tasks.
+This guide covers local installation and TUI usage. If you want to run wreck-it in **GitHub Actions or another CI system**, see the [CI & Headless Guide](ci-headless.md).
 
 ## Installation
 
@@ -376,6 +376,7 @@ schedule.
 
 ## Next Steps
 
+- Read [CI & Headless Mode](ci-headless.md) to run wreck-it in GitHub Actions
 - Read [Architecture](architecture.md) to understand how it works
 - Check out the [GitHub repository](https://github.com/randymarsh77/wreck-it) if you want to help
 - Join discussions in GitHub Issues

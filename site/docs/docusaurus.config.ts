@@ -79,6 +79,10 @@ const config: Config = {
               to: '/getting-started',
             },
             {
+              label: 'CI & Headless Mode',
+              to: '/ci-headless',
+            },
+            {
               label: 'Architecture',
               to: '/architecture',
             },

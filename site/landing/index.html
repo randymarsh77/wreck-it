@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>wreck-it — Ralph Wiggum. Cloud Scale.</title>
-  <meta name="description" content="A TUI agent harness that uses the Copilot SDK to perform Ralph Wiggum loops. Autonomous AI agent orchestration for your codebase.">
+  <meta name="description" content="Autonomous AI agent orchestration for your codebase. Run headless in GitHub Actions or interactively via TUI — Ralph Wiggum loops at cloud scale.">
   <style>
     :root {
       --bg: #0f0f0f;
@@ -257,19 +257,30 @@
     <h1><span>wreck-it</span></h1>
     <p class="tagline">Ralph Wiggum. Cloud Scale.</p>
     <p class="description">
-      A TUI agent harness that uses the Copilot SDK to perform Ralph Wiggum loops — autonomous AI agent orchestration for your codebase.
+      Autonomous AI agent orchestration for your codebase. Run headless in GitHub Actions or interactively via TUI — powered by the Copilot SDK.
     </p>
     <div class="buttons">
-      <a href="/docs/" class="btn btn-primary">Read the Docs</a>
+      <a href="/docs/ci-headless" class="btn btn-primary">CI &amp; Headless Guide</a>
+      <a href="/docs/" class="btn btn-secondary">Read the Docs</a>
       <a href="https://github.com/randymarsh77/wreck-it" class="btn btn-secondary">View on GitHub</a>
     </div>
   </section>
 
   <section class="features">
     <div class="feature">
-      <div class="icon">🎨</div>
-      <h3>TUI Interface</h3>
-      <p>Beautiful terminal UI showing tasks, progress, and real-time logs with pause/resume controls.</p>
+      <div class="icon">🤖</div>
+      <h3>Headless &amp; CI Mode</h3>
+      <p>Run without TUI for CI/CD automation. Includes a Docker-based GitHub Action for scheduled agent swarms.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">☁️</div>
+      <h3>Cloud Agents</h3>
+      <p>Multi-model support (Copilot, Llama, GitHub Models) with optional gastown cloud runtime offloading.</p>
+    </div>
+    <div class="feature">
+      <div class="icon">⚡</div>
+      <h3>GitHub Action</h3>
+      <p>Drop-in GitHub Action for headless runs. Schedule agent swarms on cron, dispatch manually, or trigger from events.</p>
     </div>
     <div class="feature">
       <div class="icon">🧠</div>
@@ -297,14 +308,9 @@
       <p>Full audit trail of every agent execution — model, prompts, diffs — exportable as openclaw JSON.</p>
     </div>
     <div class="feature">
-      <div class="icon">🤖</div>
-      <h3>Headless &amp; CI Mode</h3>
-      <p>Run without TUI for CI/CD automation. Includes a Docker-based GitHub Action for scheduled agent swarms.</p>
-    </div>
-    <div class="feature">
-      <div class="icon">☁️</div>
-      <h3>Cloud Agents</h3>
-      <p>Multi-model support (Copilot, Llama, GitHub Models) with optional gastown cloud runtime offloading.</p>
+      <div class="icon">🎨</div>
+      <h3>TUI Interface</h3>
+      <p>Beautiful terminal UI showing tasks, progress, and real-time logs with pause/resume controls.</p>
     </div>
     <div class="feature">
       <div class="icon">🔒</div>
@@ -314,16 +320,19 @@
   </section>
 
   <section class="code-block">
-    <pre><span class="comment"># Install and run</span>
+    <pre><span class="comment"># Add wreck-it to your GitHub Actions workflow</span>
+<span class="cmd">- uses: randymarsh77/wreck-it/action@main</span>
+<span class="cmd">  env:</span>
+<span class="cmd">    COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}</span>
+
+<span class="comment"># Or run locally with the TUI</span>
 <span class="cmd">git clone https://github.com/randymarsh77/wreck-it.git</span>
 <span class="cmd">cd wreck-it && cargo build --release</span>
-
-<span class="comment"># Generate a task plan from a goal</span>
 <span class="cmd">wreck-it plan --goal "Build a REST API with auth" --output tasks.json</span>
+<span class="cmd">wreck-it run --task-file tasks.json --max-iterations 50</span>
 
-<span class="comment"># Or initialize sample tasks and start the loop</span>
-<span class="cmd">wreck-it init</span>
-<span class="cmd">wreck-it run --task-file tasks.json --max-iterations 50</span></pre>
+<span class="comment"># Run headless for CI/CD pipelines</span>
+<span class="cmd">wreck-it run --headless --task-file tasks.json --max-iterations 100</span></pre>
   </section>
 
   <footer>
