@@ -1,2 +1,17 @@
 state_branch = "wreck-it-state"
 state_root = ".wreck-it"
+
+[[ralphs]]
+name = "docs"
+task_file = "docs-tasks.json"
+state_file = ".docs-state.json"
+
+[[ralphs]]
+name = "features"
+task_file = "features-tasks.json"
+state_file = ".features-state.json"
+
+[[ralphs]]
+name = "planner"
+task_file = "planner-tasks.json"
+state_file = ".planner-state.json"

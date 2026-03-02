@@ -1,13 +1,15 @@
 # Ralph dogfooding workflow: use wreck-it to develop wreck-it.
 #
-# This workflow runs wreck-it in headless mode against the dogfood task list,
-# orchestrating a swarm of ideas/implementer/evaluator agents to
-# iteratively improve the codebase.
+# This workflow runs wreck-it in headless mode using multi-ralph contexts,
+# orchestrating an engineering team of recurring agent loops:
+#   - docs:     assess and update project documentation
+#   - features: assess feature tasks, choose new features when complete
+#   - planner:  research trends and propose novel features
 #
 # All wreck-it artefacts (.wreck-it.toml, task files, state) live on the
 # orphan `wreck-it-state` branch via a git worktree.  The workflow checks
-# out the default branch, builds wreck-it, then runs the headless loop.
-# wreck-it automatically sets up the worktree and reads/writes state there.
+# out the default branch, builds wreck-it, then runs each ralph context
+# sequentially.
 # Cloud agents are dispatched against the default branch.
 #
 # Required secrets:
@@ -67,9 +69,31 @@ jobs:
       - name: Build wreck-it
         run: cargo build --release
 
-      - name: Run wreck-it headless iteration
+      - name: Run docs ralph
         run: |
-          ARGS="--headless --work-dir . --model-provider github-models"
+          ARGS="--headless --work-dir . --model-provider github-models --ralph docs"
+          if [ -n "$MAX_ITER" ]; then
+            ARGS="$ARGS --max-iterations $MAX_ITER"
+          fi
+          ./target/release/wreck-it run $ARGS
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          MAX_ITER: ${{ inputs.max_iterations }}
+
+      - name: Run features ralph
+        run: |
+          ARGS="--headless --work-dir . --model-provider github-models --ralph features"
+          if [ -n "$MAX_ITER" ]; then
+            ARGS="$ARGS --max-iterations $MAX_ITER"
+          fi
+          ./target/release/wreck-it run $ARGS
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          MAX_ITER: ${{ inputs.max_iterations }}
+
+      - name: Run planner ralph
+        run: |
+          ARGS="--headless --work-dir . --model-provider github-models --ralph planner"
           if [ -n "$MAX_ITER" ]; then
             ARGS="$ARGS --max-iterations $MAX_ITER"
           fi
