@@ -8,8 +8,8 @@
 #
 # All wreck-it artefacts (.wreck-it.toml, task files, state) live on the
 # orphan `wreck-it-state` branch via a git worktree.  The workflow checks
-# out the default branch, builds wreck-it, seeds initial state if needed,
-# then runs each ralph context sequentially.
+# out the default branch, builds wreck-it, then runs each ralph context
+# sequentially.
 # Cloud agents are dispatched against the default branch.
 #
 # Required secrets:
@@ -68,43 +68,6 @@ jobs:
 
       - name: Build wreck-it
         run: cargo build --release
-
-      - name: Seed state branch if needed
-        run: |
-          STATE_BRANCH="wreck-it-state"
-          SEED_DIR=".wreck-it/seed"
-
-          # Ensure the state branch exists locally
-          if ! git rev-parse --verify "refs/heads/${STATE_BRANCH}" >/dev/null 2>&1; then
-            if git rev-parse --verify "refs/remotes/origin/${STATE_BRANCH}" >/dev/null 2>&1; then
-              git branch "${STATE_BRANCH}" "origin/${STATE_BRANCH}"
-            fi
-          fi
-
-          # Set up the worktree so we can inspect / seed files
-          WORKTREE=".wreck-it/state"
-          if [ ! -d "${WORKTREE}/.git" ]; then
-            mkdir -p "$(dirname "${WORKTREE}")"
-            git worktree add "${WORKTREE}" "${STATE_BRANCH}" 2>/dev/null || true
-          fi
-
-          if [ -d "${WORKTREE}/.git" ] && [ -d "${SEED_DIR}" ]; then
-            SEEDED=false
-            for src in "${SEED_DIR}"/*; do
-              fname="$(basename "$src")"
-              if [ ! -f "${WORKTREE}/${fname}" ]; then
-                echo "Seeding ${fname} to state branch"
-                cp "$src" "${WORKTREE}/${fname}"
-                SEEDED=true
-              fi
-            done
-            if [ "$SEEDED" = true ]; then
-              cd "${WORKTREE}"
-              git add -A
-              git commit -m "wreck-it: seed multi-ralph task files" || true
-              cd -
-            fi
-          fi
 
       - name: Run docs ralph
         run: |
