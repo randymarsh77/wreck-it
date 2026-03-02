@@ -40,6 +40,12 @@ site/docs/build/
 site/docs/.docusaurus/
 site/output/
 
+# Worker build artifacts
+worker/target/
+worker/build/
+worker/node_modules/
+worker/wasm/
+
 # Xcode / Swift
 WreckItBoard/build/
 WreckItBoard/DerivedData/
