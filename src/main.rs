@@ -464,7 +464,7 @@ async fn main() -> Result<()> {
 
                 // Ensure we have a repo config (create default if missing).
                 let mut repo_cfg = load_repo_config(&work_dir)?
-                    .unwrap_or_else(RepoConfig::default);
+                    .unwrap_or_default();
 
                 // Ensure the state worktree exists.
                 let state_dir = state_worktree::ensure_state_worktree(
