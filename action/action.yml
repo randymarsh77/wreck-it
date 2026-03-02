@@ -1,6 +1,10 @@
 name: 'wreck-it'
 description: 'Run wreck-it ralph loop in headless mode for CI environments'
 inputs:
+  model_provider:
+    description: 'Model provider to use (github-models, copilot, or llama)'
+    required: false
+    default: 'github-models'
   max_iterations:
     description: 'Maximum number of loop iterations'
     required: false
@@ -16,6 +20,7 @@ runs:
   using: 'docker'
   image: 'Dockerfile'
   env:
+    INPUT_MODEL_PROVIDER: ${{ inputs.model_provider }}
     INPUT_MAX_ITERATIONS: ${{ inputs.max_iterations }}
     INPUT_VERIFY_COMMAND: ${{ inputs.verify_command }}
     INPUT_STATE_BRANCH: ${{ inputs.state_branch }}

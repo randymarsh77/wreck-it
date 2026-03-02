@@ -6,9 +6,11 @@ This guide covers local installation and TUI usage. If you want to run wreck-it 
 
 ### Prerequisites
 
-Before installing wreck-it, you need:
+Before installing wreck-it, choose a model provider:
 
-1. **GitHub Copilot CLI**: Install and authenticate the GitHub Copilot CLI
+1. **GitHub Models** *(recommended)*: Use GitHub's hosted model inference. Set `GITHUB_TOKEN` in your environment — no extra subscription needed.
+
+2. **Copilot SDK**: Install and authenticate the GitHub Copilot CLI:
    ```bash
    # Follow the installation guide at:
    # https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli
@@ -19,8 +21,9 @@ Before installing wreck-it, you need:
    # Verify it's working
    copilot --version
    ```
+   A [GitHub Copilot subscription](https://github.com/features/copilot#pricing) is required.
 
-2. **GitHub Copilot Subscription**: Required to use the SDK. See [GitHub Copilot pricing](https://github.com/features/copilot#pricing).
+3. **Local Llama**: Run a local Ollama instance. No subscription needed.
 
 ### Using Nix (Recommended)
 
@@ -95,7 +98,7 @@ The TUI will launch and show:
 - Real-time logs
 - Controls (Space to pause, Q to quit)
 
-**Note**: The Copilot CLI must be authenticated (via `copilot auth login`) before running. The SDK will automatically use your Copilot CLI credentials.
+**Note**: When using GitHub Models (the default), set `GITHUB_TOKEN` in your environment. When using the Copilot SDK, authenticate via `copilot auth login` first.
 
 ## Example Workflow
 

@@ -6,6 +6,10 @@ sidebar_position: 3
 
 wreck-it is designed to run autonomously in CI environments. In **headless mode** the TUI is disabled and the Ralph Wiggum loop drives a cloud-agent state machine — creating GitHub issues, assigning Copilot, polling for PRs, and merging them when checks pass — all on a cron schedule.
 
+The bundled Docker action uses **GitHub Models** by default, so no extra subscription or SDK setup is needed — just a Personal Access Token with `repo` and `models:read` scopes.
+
+> **Why a PAT?** wreck-it assigns coding agents to issues (via GraphQL) and merges the PRs they produce. The default `GITHUB_TOKEN` does not have permission for these operations, so a Personal Access Token is always required.
+
 ## How It Works
 
 In a CI environment the loop does not run a local AI model. Instead it orchestrates a cloud coding-agent through a state machine:
@@ -21,7 +25,7 @@ State is persisted to a dedicated orphan branch (`wreck-it-state` by default) vi
 
 ## Quick Start with the GitHub Action
 
-The fastest way to add wreck-it to your project is the bundled Docker-based GitHub Action.
+The fastest way to add wreck-it to your project is the bundled Docker-based GitHub Action. It uses GitHub Models by default.
 
 ### 1. Add a workflow file
 
@@ -39,6 +43,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  models: read
 
 jobs:
   wreck-it:
@@ -46,17 +51,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0    # needed to access the state branch
 
       - name: Run wreck-it
         uses: randymarsh77/wreck-it/action@main
         env:
-          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 ```
 
-### 2. Set the `COPILOT_API_TOKEN` secret
+### 2. Create a `PAT_TOKEN` secret
 
-Go to **Settings → Secrets and variables → Actions** in your repository and add a `COPILOT_API_TOKEN` secret with a valid GitHub Copilot API token.
+Create a [Personal Access Token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with `repo` and `models:read` scopes. Then go to **Settings → Secrets and variables → Actions** in your repository and add it as a `PAT_TOKEN` secret.
+
+A PAT is required because wreck-it assigns coding agents to issues and merges their PRs — operations the default `GITHUB_TOKEN` cannot perform.
 
 ### 3. Push and trigger
 
@@ -66,6 +74,7 @@ Push the workflow file. You can trigger the first run immediately via **Actions 
 
 | Input | Description | Default |
 |-------|-------------|---------|
+| `model_provider` | Model provider (`github-models`, `copilot`, or `llama`) | `github-models` |
 | `max_iterations` | Maximum loop iterations per run | `100` |
 | `verify_command` | Shell command to verify task completion | *(none)* |
 | `state_branch` | Orphan branch used to persist state between runs | `wreck-it-state` |
@@ -90,6 +99,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  models: read
 
 jobs:
   wreck-it:
@@ -97,12 +107,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
 
       - name: Run wreck-it
         uses: randymarsh77/wreck-it/action@main
         env:
-          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 ```
 
 ### Custom Verify Command
@@ -121,6 +132,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  models: read
 
 jobs:
   wreck-it:
@@ -128,6 +140,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
 
       - name: Run wreck-it
@@ -136,12 +149,26 @@ jobs:
           max_iterations: '50'
           verify_command: 'cargo test'
         env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+```
+
+### Using Copilot SDK
+
+To use the Copilot SDK instead of GitHub Models, set the `model_provider` input:
+
+```yaml
+      - name: Run wreck-it
+        uses: randymarsh77/wreck-it/action@main
+        with:
+          model_provider: 'copilot'
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
 ```
 
-### Build from Source with GitHub Models
+### Build from Source
 
-If you need a specific wreck-it version or want to use GitHub Models as the LLM provider, build from source instead of using the Docker action:
+If you need a specific wreck-it version or want full control over the build, you can build from source instead of using the Docker action:
 
 ```yaml
 name: wreck-it (from source)
@@ -242,6 +269,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  models: read
 
 jobs:
   wreck-it:
@@ -249,6 +277,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
 
       - uses: dtolnay/rust-toolchain@stable
@@ -259,7 +288,7 @@ jobs:
       - name: Run docs ralph
         run: ./target/release/wreck-it run --headless --ralph docs
         env:
-          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 
       - name: Push state
         run: |
@@ -300,7 +329,16 @@ This means every cron invocation resumes exactly where the previous run left off
 
 ## Required Permissions
 
-When running in GitHub Actions, the workflow needs the following permissions:
+A **Personal Access Token** is always required for wreck-it CI workflows. The default `GITHUB_TOKEN` cannot assign agents to issues or merge agent-produced PRs.
+
+Create a [fine-grained or classic PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with these scopes and store it as a `PAT_TOKEN` repository secret:
+
+| Scope | Reason |
+|-------|--------|
+| `repo` | Push commits, create/merge PRs, create/assign issues |
+| `models:read` | *(only for `github-models` provider)* Access GitHub Models API |
+
+The workflow also needs these `permissions` declarations:
 
 | Permission | Reason |
 |------------|--------|
@@ -308,8 +346,6 @@ When running in GitHub Actions, the workflow needs the following permissions:
 | `pull-requests: write` | Cloud agents create PRs against the default branch |
 | `issues: write` | wreck-it creates issues to trigger cloud agents |
 | `models: read` | *(only for `github-models` provider)* Access GitHub Models API |
-
-If using a Personal Access Token (`PAT_TOKEN`) instead of the default `GITHUB_TOKEN`, the token needs `repo` and `workflow` scopes.
 
 ## Tips
 

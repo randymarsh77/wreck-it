@@ -4,6 +4,12 @@
 # wreck-it keeps all its artefacts (.wreck-it.toml, tasks, state) on an orphan
 # "wreck-it-state" branch via a git worktree.  The workflow checks out the
 # default branch; wreck-it automatically sets up the worktree.
+#
+# Required secrets:
+#   PAT_TOKEN – Personal Access Token with repo and models:read scopes.
+#               A PAT is required because wreck-it assigns coding agents to
+#               issues and merges agent-produced PRs — operations the default
+#               GITHUB_TOKEN cannot perform.
 name: wreck-it loop
 
 on:
@@ -16,6 +22,7 @@ permissions:
   contents: write      # push state branch commits
   pull-requests: write # cloud agents create PRs against the default branch
   issues: write        # wreck-it creates issues to trigger cloud agents
+  models: read         # access GitHub Models API
 
 jobs:
   wreck-it:
@@ -23,9 +30,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0  # needed to access the state branch
 
       - name: Run wreck-it headless iteration
         uses: randymarsh77/wreck-it/action@main
         env:
-          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}

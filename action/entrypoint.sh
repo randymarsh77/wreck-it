@@ -10,6 +10,7 @@ echo "[wreck-it] running headless iteration in $(pwd)"
 # uses this (the default branch) checkout.
 wreck-it run --headless \
   --work-dir "." \
+  ${INPUT_MODEL_PROVIDER:+--model-provider "$INPUT_MODEL_PROVIDER"} \
   ${INPUT_MAX_ITERATIONS:+--max-iterations "$INPUT_MAX_ITERATIONS"} \
   ${INPUT_VERIFY_COMMAND:+--verify-command "$INPUT_VERIFY_COMMAND"}
 

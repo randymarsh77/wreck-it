@@ -2,7 +2,7 @@
 
 **Ralph Wiggum. Cloud Scale.**
 
-Autonomous AI agent orchestration for your codebase. Run headless in GitHub Actions on a cron schedule, or interactively via the terminal UI — powered by the Copilot SDK.
+Autonomous AI agent orchestration for your codebase. Run headless in GitHub Actions on a cron schedule, or interactively via the terminal UI — powered by GitHub Models or the Copilot SDK.
 
 🌐 **[wreckit.app](https://wreckit.app)** · 📖 **[Documentation](https://wreckit.app/docs/)** · 🤖 **[CI & Headless Guide](https://wreckit.app/docs/ci-headless)**
 
@@ -43,13 +43,13 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 
 ### Prerequisites
 
-1. **GitHub Copilot CLI**: Install the GitHub Copilot CLI and ensure it's available in your PATH:
-   ```bash
-   # Follow the GitHub Copilot CLI installation guide
-   # https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli
-   ```
+wreck-it supports multiple model providers. Choose one:
 
-2. **GitHub Copilot Subscription**: A GitHub Copilot subscription is required to use the SDK. See [GitHub Copilot pricing](https://github.com/features/copilot#pricing) for details.
+1. **GitHub Models** *(recommended for CI)*: Use GitHub's hosted model inference. Requires a `GITHUB_TOKEN` with `models:read` permission — no extra subscription needed.
+
+2. **Copilot SDK**: Use the GitHub Copilot CLI. Requires a [GitHub Copilot subscription](https://github.com/features/copilot#pricing) and `copilot auth login`.
+
+3. **Local Llama**: Use a local Ollama instance. No subscription needed.
 
 ### Using Nix Flakes (Recommended)
 
@@ -71,16 +71,11 @@ cargo build --release
 
 ### Setup
 
-1. **Authenticate with GitHub Copilot**:
-   ```bash
-   # Login to GitHub Copilot CLI
-   copilot auth login
-   ```
+Choose a model provider:
 
-2. **Verify Copilot is working**:
-   ```bash
-   copilot --version
-   ```
+- **GitHub Models** *(recommended)*: Set `GITHUB_TOKEN` in your environment.
+- **Copilot SDK**: Run `copilot auth login` and verify with `copilot --version`.
+- **Local Llama**: Start Ollama and use `--model-provider llama --api-endpoint http://localhost:11434/v1`.
 
 ### Initialize a Task File
 
@@ -100,7 +95,7 @@ Options:
 - `-t, --task-file <PATH>`: Path to task file (default: `tasks.json`)
 - `-m, --max-iterations <NUM>`: Maximum iterations (default: `100`)
 - `-w, --work-dir <PATH>`: Working directory (default: `.`)
-- `--model-provider <copilot|llama|github-models>`: Model provider
+- `--model-provider <github-models|copilot|llama>`: Model provider
 - `--api-endpoint <URL>`: Provider endpoint (for local llama use `http://localhost:11434/v1`)
 - `--api-token <TOKEN>`: API token (can also be set via `COPILOT_API_TOKEN` env var)
 - `--verify-command <COMMAND>`: Custom shell command/script to verify completion (non-zero exit marks task failed; only use trusted commands)
@@ -113,7 +108,7 @@ Options:
 - `--ralph <NAME>`: Named ralph context from `.wreck-it/config.toml`
 - `--goal <TEXT>`: Generate a task plan from a natural-language goal before starting
 
-**Note**: The Copilot CLI must be authenticated and available in your PATH. The SDK will automatically connect to the Copilot CLI server.
+**Note**: When using `--model-provider copilot`, the Copilot CLI must be authenticated and available in your PATH. When using `--model-provider github-models`, set `GITHUB_TOKEN` in your environment.
 
 ### Plan Tasks from a Goal
 
@@ -208,6 +203,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  models: read
 
 jobs:
   wreck-it:
@@ -215,18 +211,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
 
       - name: Run wreck-it
         uses: randymarsh77/wreck-it/action@main
         env:
-          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
 ```
+
+A **Personal Access Token** (`PAT_TOKEN` secret) with `repo` and `models:read` scopes is required. wreck-it assigns coding agents to issues and merges their PRs — operations the default `GITHUB_TOKEN` cannot perform. See [Creating a PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
 
 ### Inputs
 
 | Input | Description | Default |
 |-------|-------------|---------|
+| `model_provider` | Model provider (`github-models`, `copilot`, or `llama`) | `github-models` |
 | `max_iterations` | Maximum loop iterations | `100` |
 | `verify_command` | Shell command to verify task completion | *(none)* |
 | `state_branch` | Git branch for wreck-it state | `wreck-it-state` |
