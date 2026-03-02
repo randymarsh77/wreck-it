@@ -46,6 +46,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         }
     }
 
@@ -245,6 +247,8 @@ mod tests {
             }],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         };
 
         let impl_task = Task {
@@ -264,6 +268,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         };
 
         let review = make_task(

@@ -344,6 +344,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         }
     }
 

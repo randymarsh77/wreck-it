@@ -197,6 +197,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         }
     }
 
@@ -222,6 +224,8 @@ mod tests {
             outputs: vec![],
             runtime: crate::types::TaskRuntime::default(),
             precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
         }];
 
         save_tasks(&task_file, &tasks).unwrap();
@@ -251,6 +255,8 @@ mod tests {
                 outputs: vec![],
                 runtime: crate::types::TaskRuntime::default(),
                 precondition_prompt: None,
+                parent_id: None,
+                labels: vec![],
             },
             Task {
                 id: "2".to_string(),
@@ -269,6 +275,8 @@ mod tests {
                 outputs: vec![],
                 runtime: crate::types::TaskRuntime::default(),
                 precondition_prompt: None,
+                parent_id: None,
+                labels: vec![],
             },
         ];
 
