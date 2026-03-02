@@ -5,11 +5,28 @@ slug: /
 
 # Introduction
 
-**wreck-it** is a TUI agent harness that uses the GitHub Copilot SDK to perform Ralph Wiggum loops — continuous, external bash-style loops that run AI agent tasks to completion.
+**wreck-it** is an autonomous AI agent orchestrator powered by the GitHub Copilot SDK. It runs Ralph Wiggum loops — continuous, external bash-style loops that execute AI agent tasks to completion — either **headless in CI** (GitHub Actions, cron schedules) or **interactively via a terminal UI**.
 
 ## Ralph Wiggum. Cloud Scale.
 
-wreck-it brings autonomous AI agent orchestration to your terminal. Define tasks, let the agents work, and watch your codebase evolve.
+wreck-it brings autonomous AI agent orchestration to your CI pipeline and your terminal. Define tasks, let the agents work, and watch your codebase evolve — on a schedule, in the cloud, or right from your laptop.
+
+### Headless CI & Cloud Agents
+
+The headline feature: run wreck-it in **GitHub Actions** on a cron schedule. In headless mode the loop drives a cloud-agent state machine — creating issues, assigning Copilot, polling for PRs, and merging them when checks pass. State persists between runs on a dedicated branch, so each invocation picks up where the last one left off.
+
+```yaml
+# .github/workflows/wreck-it.yml
+- uses: randymarsh77/wreck-it/action@main
+  env:
+    COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+```
+
+👉 **[CI & Headless Guide](ci-headless.md)** — full setup instructions and example workflows.
+
+### Interactive TUI
+
+For local development, wreck-it provides a rich terminal UI showing tasks, progress, and real-time logs with pause/resume controls.
 
 ## What is a Ralph Wiggum Loop?
 
@@ -22,16 +39,17 @@ The Ralph Wiggum Loop is a continuous execution pattern designed for AI agent wo
 
 ## Features
 
+- ⚡ **GitHub Action** — Use wreck-it in CI via the bundled Docker action
+- 🤖 **Headless Mode** — Run without TUI for CI/CD automation
+- ☁️ **Cloud Agents** — GitHub Models integration for cloud-scale agent execution
+- 🐕 **Dogfooding** — wreck-it develops itself via scheduled agent swarms
+- 🧠 **LLM Task Planning** — Generate structured task plans from natural-language goals
 - 🎨 **TUI Interface** — Beautiful terminal UI showing tasks, progress, and logs
 - 🔄 **Continuous Execution** — Runs until all tasks are complete or max iterations reached
 - 📝 **Task Management** — JSON-based task tracking with status persistence, phases, and dependencies
 - 🧪 **Automatic Testing** — Runs tests after each task execution (cargo, npm, pytest)
 - 💾 **Git Integration** — Automatically commits successful changes
 - 🔒 **Safety Limits** — Configurable max iterations to prevent runaway costs
-- 🤖 **Headless Mode** — Run without TUI for CI/CD automation
-- ☁️ **Cloud Agents** — GitHub Models integration for cloud-scale agent execution
-- 🐕 **Dogfooding** — wreck-it develops itself via scheduled agent swarms
-- 🧠 **LLM Task Planning** — Generate structured task plans from natural-language goals
 - 🎭 **Role-Based Agents** — Assign `ideas`, `implementer`, or `evaluator` roles to tasks
 - 🔁 **Critic-Actor Reflection** — Optional critic feedback loop to refine agent output
 - 🛠️ **Adaptive Re-Planning** — Automatically restructure tasks after consecutive failures
@@ -42,4 +60,3 @@ The Ralph Wiggum Loop is a continuous execution pattern designed for AI agent wo
 - 📊 **Intelligent Scheduling** — Multi-factor scoring for task ordering
 - 🌐 **Gastown Cloud Runtime** — Offload tasks to the gastown cloud agent service
 - 🎯 **Multi-Ralph Contexts** — Run independent loops per context
-- ⚡ **GitHub Action** — Use wreck-it in CI via the bundled Docker action

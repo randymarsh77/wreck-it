@@ -2,9 +2,9 @@
 
 **Ralph Wiggum. Cloud Scale.**
 
-A TUI agent harness that uses the Copilot SDK to perform Ralph Wiggum loops — autonomous AI agent orchestration for your codebase.
+Autonomous AI agent orchestration for your codebase. Run headless in GitHub Actions on a cron schedule, or interactively via the terminal UI — powered by the Copilot SDK.
 
-🌐 **[wreckit.app](https://wreckit.app)** · 📖 **[Documentation](https://wreckit.app/docs/)**
+🌐 **[wreckit.app](https://wreckit.app)** · 📖 **[Documentation](https://wreckit.app/docs/)** · 🤖 **[CI & Headless Guide](https://wreckit.app/docs/ci-headless)**
 
 ## What is a Ralph Wiggum Loop?
 
@@ -17,16 +17,17 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 
 ## Features
 
+- ⚡ **GitHub Action**: Use wreck-it in CI via the bundled Docker action
+- 🤖 **Headless Mode**: Run without TUI for CI/CD automation
+- ☁️ **Cloud Agents**: GitHub Models integration for cloud-scale agent execution
+- 🐕 **Dogfooding**: wreck-it develops itself via scheduled agent swarms
+- 🧠 **LLM Task Planning**: Generate structured task plans from natural-language goals (`wreck-it plan`)
 - 🎨 **TUI Interface**: Beautiful terminal UI showing tasks, progress, and real-time logs
 - 🔄 **Continuous Execution**: Runs until all tasks are complete or max iterations reached
 - 📝 **Task Management**: JSON-based task tracking with status persistence, phases, and dependencies
 - 🧪 **Automatic Testing**: Runs tests after each task execution (cargo, npm, pytest)
 - 💾 **Git Integration**: Automatically commits successful changes
 - 🔒 **Safety Limits**: Configurable max iterations to prevent runaway costs
-- 🤖 **Headless Mode**: Run without TUI for CI/CD automation
-- ☁️ **Cloud Agents**: GitHub Models integration for cloud-scale agent execution
-- 🐕 **Dogfooding**: wreck-it develops itself via scheduled agent swarms
-- 🧠 **LLM Task Planning**: Generate structured task plans from natural-language goals (`wreck-it plan`)
 - 🎭 **Role-Based Agents**: Assign `ideas`, `implementer`, or `evaluator` roles to tasks
 - 🔁 **Critic-Actor Reflection**: Optional critic feedback loop to refine agent output before tests
 - 🛠️ **Adaptive Re-Planning**: Automatically restructure tasks after consecutive failures
@@ -37,7 +38,6 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 📊 **Intelligent Scheduling**: Multi-factor scoring (priority, complexity, fan-out, failure history)
 - 🌐 **Gastown Cloud Runtime**: Offload tasks to the gastown cloud agent service
 - 🎯 **Multi-Ralph Contexts**: Run independent loops with separate task/state files per context
-- ⚡ **GitHub Action**: Use wreck-it in CI via the bundled Docker action
 
 ## Installation
 
@@ -191,18 +191,47 @@ A task with all available fields:
 
 ## GitHub Action
 
-wreck-it ships a Docker-based GitHub Action for headless CI use. See [`action/`](action/) for the Dockerfile, entrypoint, and a sample workflow.
+wreck-it ships a Docker-based GitHub Action for headless CI use. Add it to any workflow to run autonomous agent loops on a schedule. See [`action/`](action/) for the Dockerfile, entrypoint, and a sample workflow.
+
+### Quick Start
 
 ```yaml
-- uses: randymarsh77/wreck-it/action@main
-  env:
-    COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
+# .github/workflows/wreck-it.yml
+name: wreck-it loop
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  wreck-it:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run wreck-it
+        uses: randymarsh77/wreck-it/action@main
+        env:
+          COPILOT_API_TOKEN: ${{ secrets.COPILOT_API_TOKEN }}
 ```
 
-Inputs:
-- `max_iterations` — Maximum loop iterations (default: `100`)
-- `verify_command` — Shell command to verify task completion
-- `state_branch` — Git branch for wreck-it state (default: `wreck-it-state`)
+### Inputs
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `max_iterations` | Maximum loop iterations | `100` |
+| `verify_command` | Shell command to verify task completion | *(none)* |
+| `state_branch` | Git branch for wreck-it state | `wreck-it-state` |
+
+For more examples — including building from source, using GitHub Models, multi-ralph workflows, and custom verification commands — see the full [CI & Headless Guide](https://wreckit.app/docs/ci-headless).
 
 ## Development
 
@@ -236,6 +265,7 @@ This project includes GitHub Actions workflows for:
 Full documentation is available at [wreckit.app/docs/](https://wreckit.app/docs/), covering:
 - [Introduction](https://wreckit.app/docs/)
 - [Getting Started](https://wreckit.app/docs/getting-started)
+- [CI & Headless Mode](https://wreckit.app/docs/ci-headless)
 - [Architecture](https://wreckit.app/docs/architecture)
 - [Roadmap](https://wreckit.app/docs/roadmap)
 - [Research Notes](https://wreckit.app/docs/research-notes)
