@@ -68,7 +68,9 @@ pub fn reset_recurring_tasks(tasks: &mut [Task], now_secs: u64) -> usize {
         }
         let ready = match (task.cooldown_seconds, task.last_attempt_at) {
             (Some(cd), Some(last)) => now_secs.saturating_sub(last) >= cd,
-            // No cooldown → always eligible; no last_attempt → first run.
+            // Cooldown set but no timestamp → treat as not ready yet.
+            (Some(_), None) => false,
+            // No cooldown → always eligible.
             _ => true,
         };
         if ready {
@@ -298,6 +300,20 @@ mod tests {
         ];
         let count = reset_recurring_tasks(&mut tasks, 9999);
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn reset_recurring_with_cooldown_but_no_last_attempt_does_not_reset() {
+        let mut tasks = vec![{
+            let mut t = make_task("a", TaskStatus::Completed, 1, vec![]);
+            t.kind = TaskKind::Recurring;
+            t.cooldown_seconds = Some(3600);
+            // last_attempt_at is None — cooldown should still block reset.
+            t
+        }];
+        let count = reset_recurring_tasks(&mut tasks, 9999);
+        assert_eq!(count, 0);
+        assert_eq!(tasks[0].status, TaskStatus::Completed);
     }
 
     // ---- advance_iteration tests ----
