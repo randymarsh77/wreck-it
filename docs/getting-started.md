@@ -373,6 +373,45 @@ The **`engineering-team`** template creates three independent ralph contexts:
 
 `wreck-it template apply` writes task files into the state worktree and merges ralph entries into `.wreck-it/config.toml`. Files and ralph names that already exist are left untouched (the command is idempotent).
 
+### Epics and Sub-tasks
+
+Group related tasks under a parent **epic** using the `parent_id` field. Use `labels` for free-form categorization.
+
+```json
+[
+  {
+    "id": "epic-auth",
+    "description": "Implement full authentication system",
+    "status": "pending"
+  },
+  {
+    "id": "auth-design",
+    "description": "Write design spec for JWT authentication",
+    "status": "pending",
+    "parent_id": "epic-auth",
+    "labels": ["design"]
+  },
+  {
+    "id": "auth-impl",
+    "description": "Implement JWT middleware based on design spec",
+    "status": "pending",
+    "parent_id": "epic-auth",
+    "labels": ["backend"],
+    "depends_on": ["auth-design"]
+  },
+  {
+    "id": "auth-tests",
+    "description": "Write integration tests for auth endpoints",
+    "status": "pending",
+    "parent_id": "epic-auth",
+    "labels": ["testing"],
+    "depends_on": ["auth-impl"]
+  }
+]
+```
+
+A task with no `parent_id` that has other tasks pointing to it via `parent_id` is treated as an **epic**. Sub-tasks can have their own `depends_on`, `role`, and other fields independently. Labels are purely organizational metadata and are not used by the scheduler.
+
 ### Named Ralph Contexts (Multi-Ralph)
 
 For fully independent loops, define named ralphs in `.wreck-it/config.toml`:

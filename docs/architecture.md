@@ -352,6 +352,62 @@ A test-coverage guardian that only activates when coverage drops:
 
 ---
 
+### Per-Task Agent Memory
+
+Each task accumulates a persistent memory log across iterations.  After every
+execution attempt, wreck-it appends an entry (outcome + short summary) to a
+Markdown file at `.wreck-it-memory/{task_id}.md`.  Before the agent is invoked
+for the next attempt, the memory file is loaded and prepended to the prompt,
+giving the agent full knowledge of prior outcomes.
+
+```
+.wreck-it-memory/
+├── auth-impl.md     # "Attempt 1 - Failure: missing import…"
+└── auth-tests.md    # "Attempt 1 - Success: all tests pass"
+```
+
+This prevents the agent from repeating the same mistakes and enables
+incremental progress across many cron invocations.
+
+**Implementation**: `cli/src/agent_memory.rs` — `AgentMemory`,
+`load_context`, `record_attempt`.
+
+---
+
+### Epics, Sub-tasks, and the Project Management API
+
+Tasks support a lightweight **epic / sub-task** hierarchy via two optional
+fields on `Task`:
+
+| Field | Purpose |
+|-------|---------|
+| `parent_id` | ID of the parent (epic) task.  When set, this task is a sub-task. |
+| `labels` | Free-form strings for categorization (board columns, tags, etc.). |
+
+A task with no `parent_id` that has other tasks pointing to it via `parent_id`
+is treated as an **epic**.  The scheduler is unaffected — all tasks are eligible
+regardless of hierarchy.  The hierarchy is primarily a data-organization
+feature consumed by external tools and the FFI layer.
+
+The `ProjectManager` (`cli/src/project_api.rs`) exposes a high-level CRUD API
+on top of the task file:
+
+```
+list_tasks / get_task
+list_epics / list_sub_tasks / epic_progress
+create_task / create_sub_task / update_task / delete_task / move_task
+```
+
+A C-compatible **FFI layer** (`cli/src/ffi.rs`) wraps `ProjectManager` as
+`extern "C"` functions for consumption from Swift or any other C-ABI consumer.
+All data is exchanged as JSON-encoded C strings.  Callers must free returned
+strings with `wreck_it_free_string`.
+
+**Implementation**: `cli/src/project_api.rs` — `ProjectManager`, `TaskUpdate`.
+`cli/src/ffi.rs` — `wreck_it_list_tasks`, `wreck_it_create_task`, etc.
+
+---
+
 ### Parallel Persistent Ralph Loops (Multi-Ralph)
 
 A repository can define multiple independent ralph contexts in
@@ -378,6 +434,9 @@ Select which ralph to run via the `--ralph` CLI flag:
 ```bash
 wreck-it run --headless --ralph docs
 wreck-it run --headless --ralph coverage
+
+# Run every ralph defined in config.toml sequentially (headless only)
+wreck-it run --headless --ralph all
 ```
 
 Each ralph can be driven by a separate GitHub Actions workflow so they run

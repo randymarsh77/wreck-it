@@ -46,6 +46,18 @@ A TUI agent harness implementing the Ralph Wiggum loop pattern for automated mul
    - `template list/apply` commands for built-in project templates
    - Environment variable support
 
+6. **Project Management API** (`cli/src/project_api.rs`)
+   - High-level CRUD API for epics and sub-tasks
+   - `ProjectManager`: `list_epics`, `list_sub_tasks`, `epic_progress`, `create_task`, `create_sub_task`, `update_task`, `delete_task`, `move_task`
+
+7. **FFI Layer** (`cli/src/ffi.rs`)
+   - C-ABI wrappers around `ProjectManager` for Swift / native-app consumers
+   - Data exchanged as JSON-encoded C strings; caller frees with `wreck_it_free_string`
+
+8. **Per-Task Agent Memory** (`cli/src/agent_memory.rs`)
+   - Stores per-task attempt history in `.wreck-it-memory/{task_id}.md`
+   - `AgentMemory`: `load_context`, `record_attempt`, `attempt_count`
+
 ### Infrastructure
 
 1. **Rust Project Setup**
@@ -108,7 +120,7 @@ A TUI agent harness implementing the Ralph Wiggum loop pattern for automated mul
 
 ## Testing
 
-- Unit tests for task management, templates, provenance, artefact store, and scheduling
+- Unit tests for task management, templates, provenance, artefact store, scheduling, agent memory, project API, and FFI layer
 - Integration / acceptance tests (`cli/src/integration_eval.rs`)
 - All tests passing
 - Clippy warnings resolved
@@ -139,16 +151,19 @@ wreck-it/
 │   ├── Cargo.toml
 │   └── src/
 │       ├── agent.rs           # Model-provider interface (GitHub Models / Copilot / Llama)
+│       ├── agent_memory.rs    # Per-task agent memory (.wreck-it-memory/)
 │       ├── artefact_store.rs  # Typed artefact persistence
 │       ├── cli.rs             # Command-line interface
 │       ├── cloud_agent.rs     # Cloud coding-agent client
 │       ├── config_manager.rs  # .wreck-it/config.toml management
+│       ├── ffi.rs             # C-ABI FFI layer (Swift / native consumers)
 │       ├── gastown_client.rs  # Gastown cloud runtime integration
 │       ├── headless.rs        # Headless state machine
 │       ├── integration_eval.rs# End-to-end acceptance tests
 │       ├── main.rs            # Entry point
 │       ├── openclaw.rs        # Openclaw export
 │       ├── planner.rs         # LLM-powered task planner
+│       ├── project_api.rs     # Epics & sub-tasks project management API
 │       ├── provenance.rs      # Execution audit trail
 │       ├── ralph_loop.rs      # Core loop implementation
 │       ├── replanner.rs       # Adaptive re-planner
