@@ -44,45 +44,88 @@ pub(crate) fn resolve_copilot_cli_path() -> Option<String> {
 /// Run a Copilot SDK session's `send_and_wait` on a **dedicated blocking thread**
 /// with its own single-threaded tokio runtime.
 ///
-/// The SDK internally uses `tokio::sync::Mutex::blocking_lock()` inside the
-/// event-handler callback registered by `send_and_wait`.  That call panics when
-/// executed on a tokio worker thread (as it would be if we `.await`-ed directly
-/// from the multi-threaded runtime).  By hopping onto a `spawn_blocking` thread
-/// we give the SDK a context where `blocking_lock()` is legal.
+/// The SDK's `send_and_wait` uses `tokio::sync::Mutex::blocking_lock()` inside
+/// a synchronous event-handler callback.  `blocking_lock()` panics when called
+/// from **any** tokio runtime context — even `new_current_thread`.  We avoid
+/// that by reimplementing the send-and-wait logic ourselves:
+///   1. Register our own event handler via `session.on()`, storing results in
+///      a **`std::sync::Mutex`** (not tokio's) so no `blocking_lock()` needed.
+///   2. Call `session.send()` to dispatch the prompt.
+///   3. Wait for the idle / error signal on an `mpsc` channel with a timeout.
 ///
-/// Returns the assistant message content (or a default) and consumes/destroys
-/// the session.
+/// Returns the last assistant message event (or `None`) and destroys the
+/// session.
 pub(crate) async fn copilot_send_on_blocking_thread(
     session: Arc<CopilotSession>,
     prompt: String,
     timeout_ms: u64,
 ) -> Result<Option<SessionEvent>> {
-    let result = tokio::task::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build blocking-thread runtime");
+    // Use std::sync primitives inside the Fn handler to avoid blocking_lock
+    let last_msg: Arc<std::sync::Mutex<Option<SessionEvent>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (idle_tx, mut idle_rx) = tokio::sync::mpsc::channel::<Result<(), String>>(1);
 
-        rt.block_on(async {
-            let response = session
-                .send_and_wait(
-                    MessageOptions {
-                        prompt,
-                        attachments: None,
-                        mode: None,
-                    },
-                    Some(timeout_ms),
-                )
-                .await;
+    let msg_clone = Arc::clone(&last_msg);
+    let tx_clone = idle_tx.clone();
 
-            let _ = session.destroy().await;
-            response
+    let sub = session
+        .on(move |event: SessionEvent| {
+            if event.is_assistant_message() {
+                if let Ok(mut guard) = msg_clone.lock() {
+                    *guard = Some(event);
+                }
+            } else if event.is_session_idle() {
+                let _ = tx_clone.try_send(Ok(()));
+            } else if event.is_session_error() {
+                let err = event
+                    .error_message()
+                    .unwrap_or("Unknown error")
+                    .to_string();
+                let _ = tx_clone.try_send(Err(err));
+            }
         })
-    })
-    .await
-    .context("Copilot SDK blocking task panicked")?;
+        .await;
 
-    Ok(result?)
+    session
+        .send(MessageOptions {
+            prompt,
+            attachments: None,
+            mode: None,
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("Copilot send failed: {e}"))?;
+
+    // Wait for idle / error / timeout
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms),
+        idle_rx.recv(),
+    )
+    .await;
+
+    // Don't call sub.unsubscribe() — its Drop impl uses blocking_lock()
+    // which panics on a tokio thread.  We're about to destroy the session
+    // anyway, so just leak the subscription.
+    std::mem::forget(sub);
+
+    match outcome {
+        Ok(Some(Ok(()))) => {}
+        Ok(Some(Err(e))) => {
+            let _ = session.destroy().await;
+            bail!("Copilot session error: {e}");
+        }
+        Ok(None) => {
+            let _ = session.destroy().await;
+            bail!("Copilot session channel closed unexpectedly");
+        }
+        Err(_) => {
+            let _ = session.destroy().await;
+            bail!("Copilot session timed out after {timeout_ms}ms");
+        }
+    }
+
+    let result = last_msg.lock().ok().and_then(|mut g| g.take());
+    let _ = session.destroy().await;
+    Ok(result)
 }
 
 /// Convenience wrapper: create a fresh CopilotClient, open a session,
@@ -97,61 +140,44 @@ pub(crate) async fn copilot_oneshot(
     default_response: &str,
 ) -> Result<String> {
     let default = default_response.to_string();
-    let result = tokio::task::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build blocking-thread runtime");
 
-        rt.block_on(async {
-            let options = CopilotClientOptions {
-                cli_path: Some(cli_path),
-                log_level: "info".to_string(),
-                ..Default::default()
-            };
+    let options = CopilotClientOptions {
+        cli_path: Some(cli_path),
+        log_level: "info".to_string(),
+        ..Default::default()
+    };
 
-            let client = CopilotClient::new(options);
-            client
-                .start()
-                .await
-                .context("Failed to start Copilot client")?;
+    let client = CopilotClient::new(options);
+    client
+        .start()
+        .await
+        .context("Failed to start Copilot client")?;
 
-            let session = client
-                .create_session(config)
-                .await
-                .context("Failed to create Copilot session")?;
+    let session = client
+        .create_session(config)
+        .await
+        .context("Failed to create Copilot session")?;
 
-            let response = session
-                .send_and_wait(
-                    MessageOptions {
-                        prompt,
-                        attachments: None,
-                        mode: None,
-                    },
-                    Some(timeout_ms),
-                )
-                .await;
+    let session = Arc::new(session);
+    let response = copilot_send_on_blocking_thread(
+        Arc::clone(&session),
+        prompt,
+        timeout_ms,
+    )
+    .await?;
 
-            let _ = session.destroy().await;
-            let _ = client.stop().await;
+    let _ = client.stop().await;
 
-            let text = response
-                .context("Failed to get response from Copilot")?
-                .map(|event| {
-                    event
-                        .assistant_message_content()
-                        .unwrap_or(&default)
-                        .to_string()
-                })
-                .unwrap_or_else(|| default.clone());
-
-            Ok::<String, anyhow::Error>(text)
+    let text = response
+        .map(|event| {
+            event
+                .assistant_message_content()
+                .unwrap_or(&default)
+                .to_string()
         })
-    })
-    .await
-    .context("Copilot SDK blocking task panicked")??;
+        .unwrap_or_else(|| default.clone());
 
-    Ok(result)
+    Ok(text)
 }
 
 /// Agent client for interacting with GitHub Copilot SDK

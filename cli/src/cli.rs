@@ -73,6 +73,8 @@ pub enum Commands {
         /// Named ralph context to use (from repo config `[[ralphs]]`).
         /// When set, task file and state file paths are taken from the
         /// matching ralph entry in `.wreck-it/config.toml`.
+        /// Use `--ralph all` to run every ralph in the config sequentially
+        /// (headless mode only).
         #[arg(long)]
         ralph: Option<String>,
 
@@ -84,15 +86,21 @@ pub enum Commands {
     },
 
     /// Generate a structured task plan from a natural-language goal using the
-    /// configured LLM and write it to a JSON task file.
+    /// configured LLM and write it to the state worktree as a new ralph context.
     Plan {
         /// Natural-language goal to plan tasks for (required)
         #[arg(short, long)]
         goal: String,
 
-        /// Path to write the generated task file
-        #[arg(short, long, default_value = "tasks.json")]
-        output: PathBuf,
+        /// Name for the ralph context.  Defaults to a slug derived from the goal.
+        /// If a ralph with this name already exists the task file is overwritten.
+        #[arg(short, long)]
+        ralph: Option<String>,
+
+        /// Path to write the generated task file (relative to state root,
+        /// default derived from ralph name)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
 
         /// GitHub Copilot API endpoint
         #[arg(long)]

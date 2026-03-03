@@ -21,13 +21,13 @@ name: Ralph
 on:
   schedule:
     # Run every 10 minutes during active development
-    - cron: '*/10 * * * *'
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       max_iterations:
-        description: 'Override max iterations for this run'
+        description: "Override max iterations for this run"
         required: false
-        default: '5'
+        default: "5"
 
 concurrency:
   group: ralph-dogfood
@@ -69,31 +69,9 @@ jobs:
       - name: Build wreck-it
         run: cargo build --release
 
-      - name: Run docs ralph
+      - name: Run all ralphs
         run: |
-          ARGS="--headless --work-dir . --model-provider github-models --ralph docs"
-          if [ -n "$MAX_ITER" ]; then
-            ARGS="$ARGS --max-iterations $MAX_ITER"
-          fi
-          ./target/release/wreck-it run $ARGS
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          MAX_ITER: ${{ inputs.max_iterations }}
-
-      - name: Run features ralph
-        run: |
-          ARGS="--headless --work-dir . --model-provider github-models --ralph features"
-          if [ -n "$MAX_ITER" ]; then
-            ARGS="$ARGS --max-iterations $MAX_ITER"
-          fi
-          ./target/release/wreck-it run $ARGS
-        env:
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
-          MAX_ITER: ${{ inputs.max_iterations }}
-
-      - name: Run planner ralph
-        run: |
-          ARGS="--headless --work-dir . --model-provider github-models --ralph planner"
+          ARGS="--headless --work-dir . --model-provider github-models --ralph all"
           if [ -n "$MAX_ITER" ]; then
             ARGS="$ARGS --max-iterations $MAX_ITER"
           fi

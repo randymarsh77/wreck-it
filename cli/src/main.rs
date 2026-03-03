@@ -82,10 +82,20 @@ async fn main() -> Result<()> {
                 }
             };
 
-            // If a named ralph was requested, resolve its task and state paths.
-            let ralph_overrides = match &ralph {
-                Some(name) => match repo_config::find_ralph(&repo_cfg, name) {
-                    Some(rc) => Some(rc.clone()),
+            // Resolve the list of ralphs to run.
+            let run_all = ralph.as_deref() == Some("all");
+            let ralph_list: Vec<repo_config::RalphConfig> = if run_all {
+                if !headless {
+                    anyhow::bail!("--ralph all is only supported in headless mode");
+                }
+                if repo_cfg.ralphs.is_empty() {
+                    println!("No [[ralphs]] entries in config – nothing to do");
+                    return Ok(());
+                }
+                repo_cfg.ralphs.clone()
+            } else if let Some(ref name) = ralph {
+                match repo_config::find_ralph(&repo_cfg, name) {
+                    Some(rc) => vec![rc.clone()],
                     None => {
                         let available: Vec<&str> =
                             repo_cfg.ralphs.iter().map(|r| r.name.as_str()).collect();
@@ -95,8 +105,10 @@ async fn main() -> Result<()> {
                         );
                         return Ok(());
                     }
-                },
-                None => None,
+                }
+            } else {
+                // No ralph specified – single anonymous run.
+                vec![]
             };
 
             // Set up the state worktree.
@@ -109,91 +121,119 @@ async fn main() -> Result<()> {
                 return Ok(());
             }
 
-            let mut config = load_user_config().unwrap_or_default();
+            // Build the base config from user config + CLI overrides.
+            let build_config = |ralph_override: Option<&repo_config::RalphConfig>| {
+                let mut config = load_user_config().unwrap_or_default();
 
-            // Apply ralph overrides before explicit CLI flags so that
-            // `--task-file` can still override the ralph default.
-            if let Some(ref rc) = ralph_overrides {
-                config.task_file = rc.task_file.clone().into();
-            }
-
-            if let Some(task_file) = task_file {
-                config.task_file = task_file;
-            }
-            if let Some(max_iterations) = max_iterations {
-                config.max_iterations = max_iterations;
-            }
-            if let Some(work_dir) = work_dir {
-                config.work_dir = work_dir;
-            }
-            if let Some(api_endpoint) = api_endpoint {
-                config.api_endpoint = api_endpoint;
-            }
-            if let Some(model_provider) = model_provider {
-                config.model_provider = model_provider;
-            }
-            if let Some(verify_command) = verify_command {
-                config.verification_command = Some(verify_command);
-            }
-            if let Some(evaluation_mode) = evaluation_mode {
-                config.evaluation_mode = evaluation_mode;
-            }
-            if let Some(completeness_prompt) = completeness_prompt {
-                config.completeness_prompt = Some(completeness_prompt);
-            }
-            if let Some(completion_marker_file) = completion_marker_file {
-                config.completion_marker_file = completion_marker_file;
-            }
-            if let Some(reflection_rounds) = reflection_rounds {
-                config.reflection_rounds = reflection_rounds;
-            }
-            if let Some(replan_threshold) = replan_threshold {
-                config.replan_threshold = replan_threshold;
-            }
-            if config.model_provider == ModelProvider::Llama
-                && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
-            {
-                config.api_endpoint = DEFAULT_LLAMA_ENDPOINT.to_string();
-            }
-            if config.model_provider == ModelProvider::GithubModels
-                && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
-            {
-                config.api_endpoint = DEFAULT_GITHUB_MODELS_ENDPOINT.to_string();
-            }
-            config.api_token = api_token
-                .or(config.api_token)
-                .or_else(|| env::var("COPILOT_API_TOKEN").ok())
-                .or_else(|| env::var("GITHUB_TOKEN").ok());
-
-            save_user_config(&config)?;
-
-            // Optional pre-loop planning phase: generate tasks from a goal.
-            if let Some(ref goal_str) = goal {
-                println!("Generating task plan for goal: {}", goal_str);
-                let task_path = state_dir.join(&config.task_file);
-                if task_path.exists() {
-                    println!(
-                        "Warning: existing task file '{}' will be overwritten with the generated plan",
-                        task_path.display()
-                    );
+                if let Some(rc) = ralph_override {
+                    config.task_file = rc.task_file.clone().into();
                 }
-                let task_planner = planner::TaskPlanner::new(
-                    config.model_provider.clone(),
-                    config.api_endpoint.clone(),
-                    config.api_token.clone(),
-                );
-                let planned_tasks = task_planner.generate_task_plan(goal_str).await?;
-                println!("Generated {} task(s)", planned_tasks.len());
-                task_manager::save_tasks(&task_path, &planned_tasks)?;
-                println!("Task plan written to {}", task_path.display());
-            }
 
-            if headless {
-                headless::run_headless(config, ralph_overrides.as_ref()).await?;
+                if let Some(ref task_file) = task_file {
+                    config.task_file = task_file.clone();
+                }
+                if let Some(max_iterations) = max_iterations {
+                    config.max_iterations = max_iterations;
+                }
+                if let Some(ref work_dir) = work_dir {
+                    config.work_dir = work_dir.clone();
+                }
+                if let Some(ref api_endpoint) = api_endpoint {
+                    config.api_endpoint = api_endpoint.clone();
+                }
+                if let Some(ref model_provider) = model_provider {
+                    config.model_provider = model_provider.clone();
+                }
+                if let Some(ref verify_command) = verify_command {
+                    config.verification_command = Some(verify_command.clone());
+                }
+                if let Some(ref evaluation_mode) = evaluation_mode {
+                    config.evaluation_mode = evaluation_mode.clone();
+                }
+                if let Some(ref completeness_prompt) = completeness_prompt {
+                    config.completeness_prompt = Some(completeness_prompt.clone());
+                }
+                if let Some(ref completion_marker_file) = completion_marker_file {
+                    config.completion_marker_file = completion_marker_file.clone();
+                }
+                if let Some(reflection_rounds) = reflection_rounds {
+                    config.reflection_rounds = reflection_rounds;
+                }
+                if let Some(replan_threshold) = replan_threshold {
+                    config.replan_threshold = replan_threshold;
+                }
+                if config.model_provider == ModelProvider::Llama
+                    && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
+                {
+                    config.api_endpoint = DEFAULT_LLAMA_ENDPOINT.to_string();
+                }
+                if config.model_provider == ModelProvider::GithubModels
+                    && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
+                {
+                    config.api_endpoint = DEFAULT_GITHUB_MODELS_ENDPOINT.to_string();
+                }
+                config.api_token = api_token
+                    .clone()
+                    .or(config.api_token)
+                    .or_else(|| env::var("COPILOT_API_TOKEN").ok())
+                    .or_else(|| env::var("GITHUB_TOKEN").ok());
+
+                config
+            };
+
+            if ralph_list.is_empty() {
+                // Single anonymous run (no --ralph).
+                let config = build_config(None);
+                save_user_config(&config)?;
+
+                // Optional pre-loop planning phase.
+                if let Some(ref goal_str) = goal {
+                    println!("Generating task plan for goal: {}", goal_str);
+                    let task_path = state_dir.join(&config.task_file);
+                    if task_path.exists() {
+                        println!(
+                            "Warning: existing task file '{}' will be overwritten with the generated plan",
+                            task_path.display()
+                        );
+                    }
+                    let task_planner = planner::TaskPlanner::new(
+                        config.model_provider.clone(),
+                        config.api_endpoint.clone(),
+                        config.api_token.clone(),
+                    );
+                    let planned_tasks = task_planner.generate_task_plan(goal_str).await?;
+                    println!("Generated {} task(s)", planned_tasks.len());
+                    task_manager::save_tasks(&task_path, &planned_tasks)?;
+                    println!("Task plan written to {}", task_path.display());
+                }
+
+                if headless {
+                    headless::run_headless(config, None).await?;
+                } else {
+                    let ralph_loop = RalphLoop::new(config);
+                    let mut app = TuiApp::new(ralph_loop);
+                    app.run().await?;
+                }
             } else {
-                let ralph_loop = RalphLoop::new(config);
-                let mut app = TuiApp::new(ralph_loop);
-                app.run().await?;
+                // Run one or more named ralphs sequentially.
+                for rc in &ralph_list {
+                    println!("\n═══ Running ralph '{}' ═══", rc.name);
+                    let config = build_config(Some(rc));
+                    save_user_config(&config)?;
+
+                    if headless {
+                        if let Err(e) = headless::run_headless(config, Some(rc)).await {
+                            println!(
+                                "[wreck-it] ralph '{}' failed: {}. Continuing…",
+                                rc.name, e
+                            );
+                        }
+                    } else {
+                        let ralph_loop = RalphLoop::new(config);
+                        let mut app = TuiApp::new(ralph_loop);
+                        app.run().await?;
+                    }
+                }
             }
 
             // Commit any pending state changes and push.
@@ -206,11 +246,34 @@ async fn main() -> Result<()> {
 
         Commands::Plan {
             goal,
+            ralph,
             output,
             api_endpoint,
             api_token,
             model_provider,
         } => {
+            let work_dir = std::env::current_dir()?;
+
+            // Load (or fail) the repo config — plan needs a repo.
+            let mut repo_cfg = load_repo_config(&work_dir)?
+                .context("No wreck-it config found. Run `wreck-it init` first.")?;
+
+            // Ensure the state worktree exists.
+            let state_dir =
+                state_worktree::ensure_state_worktree(&work_dir, &repo_cfg.state_branch)?;
+
+            // Derive a ralph name from the explicit flag or slugify the goal.
+            let ralph_name = ralph.unwrap_or_else(|| slugify_for_ralph(&goal));
+
+            // Derive the task filename (explicit --output wins, else
+            // `<ralph>-tasks.json`).
+            let task_filename = output
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| format!("{}-tasks.json", ralph_name));
+
+            let task_path = state_dir.join(&task_filename);
+
+            // Build planner config.
             let mut config = load_user_config().unwrap_or_default();
 
             if let Some(api_endpoint) = api_endpoint {
@@ -243,8 +306,35 @@ async fn main() -> Result<()> {
             let tasks = task_planner.generate_task_plan(&goal).await?;
             println!("Generated {} task(s)", tasks.len());
 
-            task_manager::save_tasks(&output, &tasks)?;
-            println!("Task plan written to {}", output.display());
+            task_manager::save_tasks(&task_path, &tasks)?;
+            println!("Task plan written to {}", task_path.display());
+
+            // Upsert the ralph entry in the repo config.
+            let state_filename = format!(".{}-state.json", ralph_name);
+            if let Some(existing) = repo_cfg.ralphs.iter_mut().find(|r| r.name == ralph_name) {
+                existing.task_file = task_filename.clone();
+                existing.state_file = state_filename.clone();
+                println!("Updated ralph '{}' in config", ralph_name);
+            } else {
+                repo_cfg.ralphs.push(repo_config::RalphConfig {
+                    name: ralph_name.clone(),
+                    task_file: task_filename.clone(),
+                    state_file: state_filename.clone(),
+                });
+                println!("Added ralph '{}' to config", ralph_name);
+            }
+            save_repo_config(&work_dir, &repo_cfg)?;
+
+            // Commit changes to the state branch.
+            if let Ok(true) = state_worktree::commit_state_worktree(
+                &work_dir,
+                &format!("wreck-it: plan '{}' → ralph '{}'", goal, ralph_name),
+            ) {
+                println!(
+                    "Committed plan to state branch '{}'",
+                    repo_cfg.state_branch,
+                );
+            }
         }
 
         Commands::Init { output } => {
@@ -542,4 +632,34 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Convert an arbitrary goal string into a short, filesystem-safe ralph name.
+///
+/// Takes the first few words, lowercases, replaces non-alphanumeric chars with
+/// hyphens, collapses runs of hyphens, and truncates to a reasonable length.
+fn slugify_for_ralph(goal: &str) -> String {
+    let slug: String = goal
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+
+    // Collapse consecutive hyphens, trim leading/trailing hyphens.
+    let collapsed: String = slug
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .take(6) // first ~6 words
+        .collect::<Vec<_>>()
+        .join("-");
+
+    // Cap length.
+    let max_len = 40;
+    if collapsed.len() > max_len {
+        collapsed[..max_len].trim_end_matches('-').to_string()
+    } else if collapsed.is_empty() {
+        "plan".to_string()
+    } else {
+        collapsed
+    }
 }
