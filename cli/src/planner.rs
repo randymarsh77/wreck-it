@@ -124,10 +124,11 @@ impl TaskPlanner {
     async fn call_via_copilot_sdk(&self, prompt: &str) -> Result<String> {
         use copilot_sdk_supercharged::*;
 
-        let cli_path = crate::agent::resolve_copilot_cli_path()
-            .context("Could not find the 'copilot' binary on PATH. \
+        let cli_path = crate::agent::resolve_copilot_cli_path().context(
+            "Could not find the 'copilot' binary on PATH. \
                       Install GitHub Copilot CLI (https://gh.io/copilot-install) \
-                      or ensure it is available in your shell environment.")?;
+                      or ensure it is available in your shell environment.",
+        )?;
 
         let config = SessionConfig {
             request_permission: Some(false),
@@ -135,14 +136,7 @@ impl TaskPlanner {
             ..Default::default()
         };
 
-        crate::agent::copilot_oneshot(
-            cli_path,
-            config,
-            prompt.to_string(),
-            120_000,
-            "[]",
-        )
-        .await
+        crate::agent::copilot_oneshot(cli_path, config, prompt.to_string(), 120_000, "[]").await
     }
 }
 

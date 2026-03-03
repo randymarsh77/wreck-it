@@ -148,7 +148,7 @@ async fn main() -> Result<()> {
                     config.verification_command = Some(verify_command.clone());
                 }
                 if let Some(ref evaluation_mode) = evaluation_mode {
-                    config.evaluation_mode = evaluation_mode.clone();
+                    config.evaluation_mode = *evaluation_mode;
                 }
                 if let Some(ref completeness_prompt) = completeness_prompt {
                     config.completeness_prompt = Some(completeness_prompt.clone());
@@ -223,10 +223,7 @@ async fn main() -> Result<()> {
 
                     if headless {
                         if let Err(e) = headless::run_headless(config, Some(rc)).await {
-                            println!(
-                                "[wreck-it] ralph '{}' failed: {}. Continuing…",
-                                rc.name, e
-                            );
+                            println!("[wreck-it] ralph '{}' failed: {}. Continuing…", rc.name, e);
                         }
                     } else {
                         let ralph_loop = RalphLoop::new(config);
@@ -330,10 +327,7 @@ async fn main() -> Result<()> {
                 &work_dir,
                 &format!("wreck-it: plan '{}' → ralph '{}'", goal, ralph_name),
             ) {
-                println!(
-                    "Committed plan to state branch '{}'",
-                    repo_cfg.state_branch,
-                );
+                println!("Committed plan to state branch '{}'", repo_cfg.state_branch,);
             }
         }
 

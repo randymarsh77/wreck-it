@@ -24,10 +24,7 @@ pub(crate) fn resolve_copilot_cli_path() -> Option<String> {
 
     // Strategy 2: shell `which` subprocess — handles Nix wrapper scripts
     // and other cases the crate may miss.
-    if let Ok(output) = Command::new("which")
-        .arg("copilot")
-        .output()
-    {
+    if let Ok(output) = Command::new("which").arg("copilot").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -77,10 +74,7 @@ pub(crate) async fn copilot_send_on_blocking_thread(
             } else if event.is_session_idle() {
                 let _ = tx_clone.try_send(Ok(()));
             } else if event.is_session_error() {
-                let err = event
-                    .error_message()
-                    .unwrap_or("Unknown error")
-                    .to_string();
+                let err = event.error_message().unwrap_or("Unknown error").to_string();
                 let _ = tx_clone.try_send(Err(err));
             }
         })
@@ -96,11 +90,8 @@ pub(crate) async fn copilot_send_on_blocking_thread(
         .map_err(|e| anyhow::anyhow!("Copilot send failed: {e}"))?;
 
     // Wait for idle / error / timeout
-    let outcome = tokio::time::timeout(
-        std::time::Duration::from_millis(timeout_ms),
-        idle_rx.recv(),
-    )
-    .await;
+    let outcome =
+        tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), idle_rx.recv()).await;
 
     // Don't call sub.unsubscribe() — its Drop impl uses blocking_lock()
     // which panics on a tokio thread.  We're about to destroy the session
@@ -159,12 +150,8 @@ pub(crate) async fn copilot_oneshot(
         .context("Failed to create Copilot session")?;
 
     let session = Arc::new(session);
-    let response = copilot_send_on_blocking_thread(
-        Arc::clone(&session),
-        prompt,
-        timeout_ms,
-    )
-    .await?;
+    let response =
+        copilot_send_on_blocking_thread(Arc::clone(&session), prompt, timeout_ms).await?;
 
     let _ = client.stop().await;
 
@@ -403,10 +390,7 @@ impl AgentClient {
 
         // Send the message and wait for response (on a blocking thread to
         // avoid tokio blocking_lock panics inside the SDK).
-        let response = copilot_send_on_blocking_thread(
-            session, prompt, 120_000,
-        )
-        .await;
+        let response = copilot_send_on_blocking_thread(session, prompt, 120_000).await;
 
         // Record this attempt in memory before propagating any error.
         let (outcome, summary) = match &response {
@@ -757,11 +741,9 @@ impl AgentClient {
             marker = self.completion_marker_file,
         );
 
-        let response = copilot_send_on_blocking_thread(
-            session, prompt, 120_000,
-        )
-        .await
-        .context("Failed to get evaluation response from agent")?;
+        let response = copilot_send_on_blocking_thread(session, prompt, 120_000)
+            .await
+            .context("Failed to get evaluation response from agent")?;
 
         if let Some(event) = &response {
             if let Some(msg) = event.assistant_message_content() {
@@ -858,11 +840,9 @@ impl AgentClient {
             marker = DEFAULT_PRECONDITION_MARKER,
         );
 
-        let response = copilot_send_on_blocking_thread(
-            session, agent_prompt, 120_000,
-        )
-        .await
-        .context("Failed to get precondition evaluation response from agent")?;
+        let response = copilot_send_on_blocking_thread(session, agent_prompt, 120_000)
+            .await
+            .context("Failed to get precondition evaluation response from agent")?;
 
         if let Some(event) = &response {
             if let Some(msg) = event.assistant_message_content() {
@@ -1034,11 +1014,9 @@ impl AgentClient {
             .await
             .context("Failed to create critic session")?;
 
-        let response = copilot_send_on_blocking_thread(
-            session, prompt.to_string(), 60_000,
-        )
-        .await
-        .context("Failed to get critic response from Copilot")?;
+        let response = copilot_send_on_blocking_thread(session, prompt.to_string(), 60_000)
+            .await
+            .context("Failed to get critic response from Copilot")?;
 
         Ok(response
             .as_ref()
