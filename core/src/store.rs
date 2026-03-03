@@ -60,16 +60,10 @@ pub trait TaskStore {
 pub trait ProvenanceStore {
     /// Load all provenance records for the given task ID, sorted by timestamp
     /// ascending.
-    fn load_provenance_records(
-        &self,
-        task_id: &str,
-    ) -> Result<Vec<ProvenanceRecord>, StoreError>;
+    fn load_provenance_records(&self, task_id: &str) -> Result<Vec<ProvenanceRecord>, StoreError>;
 
     /// Persist a single provenance record.
-    fn persist_provenance_record(
-        &self,
-        record: &ProvenanceRecord,
-    ) -> Result<(), StoreError>;
+    fn persist_provenance_record(&self, record: &ProvenanceRecord) -> Result<(), StoreError>;
 }
 
 #[cfg(test)]
@@ -183,10 +177,7 @@ mod tests {
             Ok(filtered)
         }
 
-        fn persist_provenance_record(
-            &self,
-            record: &ProvenanceRecord,
-        ) -> Result<(), StoreError> {
+        fn persist_provenance_record(&self, record: &ProvenanceRecord) -> Result<(), StoreError> {
             self.records.borrow_mut().push(record.clone());
             Ok(())
         }

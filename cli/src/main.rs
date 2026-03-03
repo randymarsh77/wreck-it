@@ -451,11 +451,15 @@ async fn main() -> Result<()> {
                 } else {
                     println!("Available templates:\n");
                     for tmpl in &templates {
-                        println!("  {}",  tmpl.manifest.name);
+                        println!("  {}", tmpl.manifest.name);
                         println!("    {}", tmpl.manifest.description);
                         if !tmpl.manifest.ralphs.is_empty() {
-                            let names: Vec<&str> =
-                                tmpl.manifest.ralphs.iter().map(|r| r.name.as_str()).collect();
+                            let names: Vec<&str> = tmpl
+                                .manifest
+                                .ralphs
+                                .iter()
+                                .map(|r| r.name.as_str())
+                                .collect();
                             println!("    ralphs: {}", names.join(", "));
                         }
                         println!();
@@ -469,14 +473,11 @@ async fn main() -> Result<()> {
                 let work_dir = std::env::current_dir()?;
 
                 // Ensure we have a repo config (create default if missing).
-                let mut repo_cfg = load_repo_config(&work_dir)?
-                    .unwrap_or_default();
+                let mut repo_cfg = load_repo_config(&work_dir)?.unwrap_or_default();
 
                 // Ensure the state worktree exists.
-                let state_dir = state_worktree::ensure_state_worktree(
-                    &work_dir,
-                    &repo_cfg.state_branch,
-                )?;
+                let state_dir =
+                    state_worktree::ensure_state_worktree(&work_dir, &repo_cfg.state_branch)?;
 
                 // Apply the template.
                 let result = templates::apply_template(&tmpl, &state_dir, &mut repo_cfg)?;
@@ -503,10 +504,7 @@ async fn main() -> Result<()> {
                         println!("  {}", r);
                     }
                 }
-                println!(
-                    "\nTemplate '{}' applied successfully.",
-                    tmpl.manifest.name,
-                );
+                println!("\nTemplate '{}' applied successfully.", tmpl.manifest.name,);
 
                 // Commit state worktree changes.
                 if let Ok(true) = state_worktree::commit_state_worktree(

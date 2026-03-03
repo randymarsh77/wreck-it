@@ -81,7 +81,9 @@ pub unsafe extern "C" fn wreck_it_get_task(
     task_file: *const c_char,
     id: *const c_char,
 ) -> *mut c_char {
-    let (path, id) = match (unsafe { cstr_to_str(task_file) }, unsafe { cstr_to_str(id) }) {
+    let (path, id) = match (unsafe { cstr_to_str(task_file) }, unsafe {
+        cstr_to_str(id)
+    }) {
         (Some(p), Some(i)) => (p, i),
         _ => return result_to_cstring(Err(anyhow::anyhow!("null pointer argument"))),
     };
@@ -114,10 +116,9 @@ pub unsafe extern "C" fn wreck_it_list_sub_tasks(
     task_file: *const c_char,
     parent_id: *const c_char,
 ) -> *mut c_char {
-    let (path, pid) = match (
-        unsafe { cstr_to_str(task_file) },
-        unsafe { cstr_to_str(parent_id) },
-    ) {
+    let (path, pid) = match (unsafe { cstr_to_str(task_file) }, unsafe {
+        cstr_to_str(parent_id)
+    }) {
         (Some(p), Some(i)) => (p, i),
         _ => return result_to_cstring(Err(anyhow::anyhow!("null pointer argument"))),
     };
@@ -278,7 +279,9 @@ pub unsafe extern "C" fn wreck_it_delete_task(
     task_file: *const c_char,
     id: *const c_char,
 ) -> *mut c_char {
-    let (path, id) = match (unsafe { cstr_to_str(task_file) }, unsafe { cstr_to_str(id) }) {
+    let (path, id) = match (unsafe { cstr_to_str(task_file) }, unsafe {
+        cstr_to_str(id)
+    }) {
         (Some(p), Some(i)) => (p, i),
         _ => return result_to_cstring(Err(anyhow::anyhow!("null pointer argument"))),
     };
@@ -306,17 +309,16 @@ pub unsafe extern "C" fn wreck_it_move_task(
         (Some(a), Some(b), Some(c)) => (a, b, c),
         _ => return result_to_cstring(Err(anyhow::anyhow!("null pointer argument"))),
     };
-    let new_status: TaskStatus = match serde_json::from_value(serde_json::Value::String(
-        st.to_string(),
-    )) {
-        Ok(s) => s,
-        Err(_) => {
-            return result_to_cstring(Err(anyhow::anyhow!(
-                "invalid status '{}': expected pending, inprogress, completed, or failed",
-                st
-            )))
-        }
-    };
+    let new_status: TaskStatus =
+        match serde_json::from_value(serde_json::Value::String(st.to_string())) {
+            Ok(s) => s,
+            Err(_) => {
+                return result_to_cstring(Err(anyhow::anyhow!(
+                    "invalid status '{}': expected pending, inprogress, completed, or failed",
+                    st
+                )))
+            }
+        };
     let pm = ProjectManager::new(path);
     result_to_cstring(
         pm.move_task(id, new_status)
@@ -335,14 +337,17 @@ pub unsafe extern "C" fn wreck_it_epic_progress(
     task_file: *const c_char,
     epic_id: *const c_char,
 ) -> *mut c_char {
-    let (path, id) = match (unsafe { cstr_to_str(task_file) }, unsafe { cstr_to_str(epic_id) }) {
+    let (path, id) = match (unsafe { cstr_to_str(task_file) }, unsafe {
+        cstr_to_str(epic_id)
+    }) {
         (Some(p), Some(i)) => (p, i),
         _ => return result_to_cstring(Err(anyhow::anyhow!("null pointer argument"))),
     };
     let pm = ProjectManager::new(path);
-    result_to_cstring(pm.epic_progress(id).map(|p| {
-        serde_json::json!({ "progress": p }).to_string()
-    }))
+    result_to_cstring(
+        pm.epic_progress(id)
+            .map(|p| serde_json::json!({ "progress": p }).to_string()),
+    )
 }
 
 #[cfg(test)]
@@ -364,10 +369,7 @@ mod tests {
     }
 
     fn read_result(ptr: *mut c_char) -> String {
-        let s = unsafe { CStr::from_ptr(ptr) }
-            .to_str()
-            .unwrap()
-            .to_string();
+        let s = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
         unsafe { wreck_it_free_string(ptr) };
         s
     }

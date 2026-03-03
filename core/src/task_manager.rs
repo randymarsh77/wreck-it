@@ -97,10 +97,7 @@ fn dfs_has_cycle<'a>(
 ///
 /// On success, pushes the task and returns `Ok(())`.
 /// On failure, returns `Err` with a human-readable message.
-pub fn validate_and_append_task(
-    tasks: &mut Vec<Task>,
-    new_task: Task,
-) -> Result<(), String> {
+pub fn validate_and_append_task(tasks: &mut Vec<Task>, new_task: Task) -> Result<(), String> {
     if tasks.len() >= MAX_TASKS {
         return Err(format!(
             "Cannot add task '{}': task limit of {} reached",
@@ -172,14 +169,11 @@ mod tests {
 
     #[test]
     fn filter_by_role_returns_matching() {
-        let tasks = vec![
-            make_task("a", TaskStatus::Pending, vec![]),
-            {
-                let mut t = make_task("b", TaskStatus::Pending, vec![]);
-                t.role = AgentRole::Ideas;
-                t
-            },
-        ];
+        let tasks = vec![make_task("a", TaskStatus::Pending, vec![]), {
+            let mut t = make_task("b", TaskStatus::Pending, vec![]);
+            t.role = AgentRole::Ideas;
+            t
+        }];
         let implementers = filter_tasks_by_role(&tasks, AgentRole::Implementer);
         assert_eq!(implementers.len(), 1);
         assert_eq!(implementers[0].id, "a");

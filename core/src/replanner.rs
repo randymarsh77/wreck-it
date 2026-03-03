@@ -70,10 +70,7 @@ pub fn build_replan_prompt(tasks: &[Task], failed: &Task, error: &str, git_statu
 /// - No duplicate task IDs.
 /// - No circular dependencies in the new task graph.
 /// - Tasks that were `Completed` in the original list remain `Completed`.
-pub fn parse_and_validate_replan(
-    original_tasks: &[Task],
-    raw: &str,
-) -> Result<Vec<Task>, String> {
+pub fn parse_and_validate_replan(original_tasks: &[Task], raw: &str) -> Result<Vec<Task>, String> {
     let json_str = extract_json_array(raw)?;
 
     let mut tasks: Vec<Task> = serde_json::from_str(&json_str)

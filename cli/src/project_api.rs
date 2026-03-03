@@ -57,10 +57,8 @@ impl ProjectManager {
     /// task references it via `parent_id`.
     pub fn list_epics(&self) -> Result<Vec<Task>> {
         let tasks = self.list_tasks()?;
-        let parent_ids: std::collections::HashSet<String> = tasks
-            .iter()
-            .filter_map(|t| t.parent_id.clone())
-            .collect();
+        let parent_ids: std::collections::HashSet<String> =
+            tasks.iter().filter_map(|t| t.parent_id.clone()).collect();
         Ok(tasks
             .into_iter()
             .filter(|t| t.parent_id.is_none() && parent_ids.contains(&t.id))
@@ -93,12 +91,7 @@ impl ProjectManager {
     // ── Write operations ────────────────────────────────────────────
 
     /// Create a new top-level task (potential epic).
-    pub fn create_task(
-        &self,
-        id: &str,
-        description: &str,
-        labels: Vec<String>,
-    ) -> Result<Task> {
+    pub fn create_task(&self, id: &str, description: &str, labels: Vec<String>) -> Result<Task> {
         let task = Task {
             id: id.to_string(),
             description: description.to_string(),

@@ -94,18 +94,11 @@ impl FileProvenanceStore {
 }
 
 impl ProvenanceStore for FileProvenanceStore {
-    fn load_provenance_records(
-        &self,
-        task_id: &str,
-    ) -> Result<Vec<ProvenanceRecord>, StoreError> {
-        load_provenance_records(task_id, &self.work_dir)
-            .map_err(|e| StoreError::new(e.to_string()))
+    fn load_provenance_records(&self, task_id: &str) -> Result<Vec<ProvenanceRecord>, StoreError> {
+        load_provenance_records(task_id, &self.work_dir).map_err(|e| StoreError::new(e.to_string()))
     }
 
-    fn persist_provenance_record(
-        &self,
-        record: &ProvenanceRecord,
-    ) -> Result<(), StoreError> {
+    fn persist_provenance_record(&self, record: &ProvenanceRecord) -> Result<(), StoreError> {
         persist_provenance_record(record, &self.work_dir)
             .map_err(|e| StoreError::new(e.to_string()))
     }

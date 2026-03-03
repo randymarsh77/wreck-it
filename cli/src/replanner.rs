@@ -1,7 +1,5 @@
 use crate::task_manager::save_tasks;
-use crate::types::{
-    ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
-};
+use crate::types::{ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL};
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;

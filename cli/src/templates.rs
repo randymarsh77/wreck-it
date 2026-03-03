@@ -60,7 +60,9 @@ fn engineering_team() -> Template {
 
 /// Find a built-in template by name.
 pub fn find_template(name: &str) -> Option<Template> {
-    builtin_templates().into_iter().find(|t| t.manifest.name == name)
+    builtin_templates()
+        .into_iter()
+        .find(|t| t.manifest.name == name)
 }
 
 /// Apply a template to the project: write task files into `state_dir` and
@@ -135,7 +137,12 @@ mod tests {
         assert!(!tmpl.manifest.description.is_empty());
         assert_eq!(tmpl.manifest.ralphs.len(), 3);
 
-        let names: Vec<&str> = tmpl.manifest.ralphs.iter().map(|r| r.name.as_str()).collect();
+        let names: Vec<&str> = tmpl
+            .manifest
+            .ralphs
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
         assert!(names.contains(&"docs"));
         assert!(names.contains(&"features"));
         assert!(names.contains(&"planner"));
@@ -154,8 +161,8 @@ mod tests {
     fn test_engineering_team_task_files_are_valid_json() {
         let tmpl = find_template("engineering-team").unwrap();
         for (name, content) in &tmpl.files {
-            let parsed: serde_json::Value =
-                serde_json::from_str(content).unwrap_or_else(|e| panic!("{} is invalid JSON: {}", name, e));
+            let parsed: serde_json::Value = serde_json::from_str(content)
+                .unwrap_or_else(|e| panic!("{} is invalid JSON: {}", name, e));
             assert!(parsed.is_array(), "{} should be a JSON array", name);
         }
     }
@@ -219,10 +226,7 @@ mod tests {
         let result = apply_template(&tmpl, dir.path(), &mut config).unwrap();
 
         // "docs" ralph should not be duplicated.
-        assert_eq!(
-            config.ralphs.iter().filter(|r| r.name == "docs").count(),
-            1
-        );
+        assert_eq!(config.ralphs.iter().filter(|r| r.name == "docs").count(), 1);
         // The existing custom path should be preserved.
         assert_eq!(config.ralphs[0].task_file, "custom-docs.json");
 
