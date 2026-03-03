@@ -88,7 +88,7 @@ Terminal UI for monitoring:
        │
        ▼
 ┌──────────────────┐
-│  AgentClient     │◄────── GitHub Copilot SDK
+│  AgentClient     │◄────── GitHub Models / Copilot SDK
 │  - execute_task  │
 │  - run_tests     │
 │  - commit        │
