@@ -244,4 +244,47 @@ mod tests {
     fn now_timestamp_is_positive() {
         assert!(now_timestamp() > 0);
     }
+
+    // ---- FileProvenanceStore tests ----
+
+    #[test]
+    fn file_provenance_store_persist_and_load() {
+        let dir = tempdir().unwrap();
+        let store = FileProvenanceStore::new(dir.path());
+
+        let record = make_record();
+        store.persist_provenance_record(&record).unwrap();
+
+        let records = store.load_provenance_records("impl-10").unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].task_id, "impl-10");
+        assert_eq!(records[0].outcome, "success");
+    }
+
+    #[test]
+    fn file_provenance_store_returns_empty_for_missing_task() {
+        let dir = tempdir().unwrap();
+        let store = FileProvenanceStore::new(dir.path());
+
+        let records = store.load_provenance_records("nonexistent").unwrap();
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn file_provenance_store_multiple_records() {
+        let dir = tempdir().unwrap();
+        let store = FileProvenanceStore::new(dir.path());
+
+        let mut record = make_record();
+        store.persist_provenance_record(&record).unwrap();
+        record.timestamp = 1_700_000_001;
+        record.outcome = "failure".to_string();
+        store.persist_provenance_record(&record).unwrap();
+
+        let records = store.load_provenance_records("impl-10").unwrap();
+        assert_eq!(records.len(), 2);
+        // Should be sorted by timestamp ascending.
+        assert_eq!(records[0].timestamp, 1_700_000_000);
+        assert_eq!(records[1].timestamp, 1_700_000_001);
+    }
 }

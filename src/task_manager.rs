@@ -537,4 +537,42 @@ mod tests {
         let count = reset_recurring_tasks(&mut tasks, 9999);
         assert_eq!(count, 0);
     }
+
+    // ---- FileTaskStore tests ----
+
+    #[test]
+    fn file_task_store_load_save_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tasks.json");
+        let store = FileTaskStore::new(&path);
+
+        // Initially returns empty when file doesn't exist.
+        let tasks = store.load_tasks().unwrap();
+        assert!(tasks.is_empty());
+
+        // Save and reload.
+        let tasks = vec![make_task("a", TaskStatus::Pending, vec![])];
+        store.save_tasks(&tasks).unwrap();
+        let loaded = store.load_tasks().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "a");
+    }
+
+    #[test]
+    fn file_task_store_overwrites_on_save() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tasks.json");
+        let store = FileTaskStore::new(&path);
+
+        store
+            .save_tasks(&[make_task("a", TaskStatus::Pending, vec![])])
+            .unwrap();
+        store
+            .save_tasks(&[make_task("b", TaskStatus::Completed, vec![])])
+            .unwrap();
+
+        let loaded = store.load_tasks().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "b");
+    }
 }
