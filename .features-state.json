@@ -9,7 +9,8 @@
   "memory": [
     "iteration 1: triggered cloud agent for task feature-assessor (issue #98)",
     "iteration 1: agent created PR #99 for task Some(\"feature-assessor\")",
-    "iteration 1: marked PR #99 as ready for review"
+    "iteration 1: marked PR #99 as ready for review",
+    "iteration 1: PR #99 not yet mergeable"
   ],
   "tracked_prs": [
     {
