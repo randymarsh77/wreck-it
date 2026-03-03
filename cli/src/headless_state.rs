@@ -58,6 +58,7 @@ mod tests {
             tracked_prs: vec![TrackedPr {
                 pr_number: 42,
                 task_id: "task-1".to_string(),
+                issue_number: Some(99),
             }],
         };
 
@@ -112,9 +113,45 @@ mod tests {
         let pr = TrackedPr {
             pr_number: 99,
             task_id: "impl-3".to_string(),
+            issue_number: Some(42),
         };
         let json = serde_json::to_string(&pr).unwrap();
         let loaded: TrackedPr = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded, pr);
+    }
+
+    #[test]
+    fn test_tracked_pr_issue_number_backward_compat() {
+        // Existing state files without issue_number should load fine.
+        let json = r#"{"pr_number":10,"task_id":"impl-1"}"#;
+        let loaded: TrackedPr = serde_json::from_str(json).unwrap();
+        assert_eq!(loaded.pr_number, 10);
+        assert_eq!(loaded.task_id, "impl-1");
+        assert_eq!(loaded.issue_number, None);
+    }
+
+    #[test]
+    fn test_tracked_pr_issue_number_none_omitted_from_json() {
+        // When issue_number is None, it should not appear in serialized JSON.
+        let pr = TrackedPr {
+            pr_number: 5,
+            task_id: "eval-1".to_string(),
+            issue_number: None,
+        };
+        let json = serde_json::to_string(&pr).unwrap();
+        assert!(!json.contains("issue_number"));
+    }
+
+    #[test]
+    fn test_tracked_pr_with_issue_number_roundtrip() {
+        let pr = TrackedPr {
+            pr_number: 50,
+            task_id: "ideas-2".to_string(),
+            issue_number: Some(100),
+        };
+        let json = serde_json::to_string(&pr).unwrap();
+        assert!(json.contains("\"issue_number\":100"));
+        let loaded: TrackedPr = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.issue_number, Some(100));
     }
 }
