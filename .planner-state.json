@@ -10,6 +10,7 @@
     "iteration 1: triggered cloud agent for task feature-planner (issue #100)",
     "iteration 1: agent created PR #101 for task Some(\"feature-planner\")",
     "iteration 1: marked PR #101 as ready for review",
+    "iteration 1: PR #101 not yet mergeable",
     "iteration 1: PR #101 not yet mergeable"
   ],
   "tracked_prs": [
