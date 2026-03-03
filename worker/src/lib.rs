@@ -5,13 +5,31 @@
 //! loop.  The Rust code compiles to WASM via `wasm32-unknown-unknown` and
 //! runs on the Cloudflare Workers runtime.
 //!
+//! # Authentication
+//!
+//! The worker supports two authentication modes:
+//!
+//! **App credentials (recommended)** — set `GITHUB_APP_ID` and
+//! `GITHUB_APP_PRIVATE_KEY`.  The worker generates a JWT and exchanges it
+//! for an installation access token using the `installation.id` from each
+//! webhook payload.  This token has the full permissions granted to the
+//! GitHub App, enabling the worker to create issues, assign agents, merge
+//! PRs, and manage the complete task lifecycle.
+//!
+//! **Static token (legacy)** — set `GITHUB_APP_TOKEN` to a pre-generated
+//! installation token or PAT.  The worker can read/write repository
+//! contents on the state branch but **cannot** trigger agents or merge PRs
+//! unless the token has sufficient scopes.
+//!
 //! # Required secrets (set via `wrangler secret put`):
 //!
 //! - `GITHUB_WEBHOOK_SECRET` — webhook secret for HMAC-SHA256 verification.
-//! - `GITHUB_APP_TOKEN` — a GitHub token (installation token or PAT) with
-//!   read/write access to repository contents on the state branch.
+//! - `GITHUB_APP_ID` — numeric App ID (recommended).
+//! - `GITHUB_APP_PRIVATE_KEY` — PEM-encoded RSA private key (recommended).
+//! - `GITHUB_APP_TOKEN` — fallback static token (legacy).
 
 mod github;
+mod github_app;
 mod processor;
 mod types;
 mod webhook;
@@ -31,11 +49,6 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .secret("GITHUB_WEBHOOK_SECRET")
         .map(|s| s.to_string())
         .map_err(|_| Error::RustError("Missing GITHUB_WEBHOOK_SECRET secret".into()))?;
-
-    let github_token = env
-        .secret("GITHUB_APP_TOKEN")
-        .map(|s| s.to_string())
-        .map_err(|_| Error::RustError("Missing GITHUB_APP_TOKEN secret".into()))?;
 
     // Read the raw body for signature verification.
     let body_bytes = req.bytes().await?;
@@ -112,6 +125,14 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let repo_name = &repo.name;
     let default_branch = repo.default_branch.as_deref().unwrap_or("main");
 
+    // Resolve the GitHub API token.
+    //
+    // Prefer App credentials (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY) which
+    // allow the worker to vend a scoped installation token with full
+    // permissions.  Fall back to the static GITHUB_APP_TOKEN for backward
+    // compatibility.
+    let github_token = resolve_github_token(&env, &payload).await?;
+
     // Create GitHub client and run the iteration.
     let client = github::GitHubClient::new(owner, repo_name, &github_token);
 
@@ -125,6 +146,22 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return Response::ok("no wreck-it configuration found; skipping");
     }
 
+    // For merged PR events, handle task completion and PR management.
+    if event == WebhookEvent::PullRequest {
+        if let Some(pr) = &payload.pull_request {
+            match processor::process_merged_pr(&client, default_branch, pr.number).await {
+                Ok(result) => {
+                    let status = if result.changed { "processed" } else { "no-op" };
+                    return Response::ok(format!("pr-merged {status}: {}", result.summary));
+                }
+                Err(e) => {
+                    console_error!("PR merge handling failed: {e}");
+                    // Fall through to the normal iteration processing.
+                }
+            }
+        }
+    }
+
     match processor::process_iteration(&client, default_branch).await {
         Ok(result) => {
             let status = if result.changed { "processed" } else { "no-op" };
@@ -134,5 +171,72 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             console_error!("Iteration failed: {e}");
             Response::error(format!("Processing failed: {e}"), 500)
         }
+    }
+}
+
+/// Resolve the GitHub API token from environment secrets.
+///
+/// Prefers GitHub App credentials (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY)
+/// which produce a scoped installation token.  Falls back to the static
+/// GITHUB_APP_TOKEN secret.
+async fn resolve_github_token(
+    env: &Env,
+    payload: &types::WebhookPayload,
+) -> Result<String> {
+    // Try App credentials first.
+    let app_id = env.secret("GITHUB_APP_ID").map(|s| s.to_string()).ok();
+    let private_key = env
+        .secret("GITHUB_APP_PRIVATE_KEY")
+        .map(|s| s.to_string())
+        .ok();
+
+    if let (Some(app_id), Some(private_key)) = (app_id, private_key) {
+        let installation_id = payload
+            .installation
+            .as_ref()
+            .map(|i| i.id)
+            .ok_or_else(|| {
+                Error::RustError(
+                    "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are set but webhook \
+                     payload has no installation.id"
+                        .into(),
+                )
+            })?;
+
+        let now_secs = js_sys_now_secs();
+        let jwt = github_app::generate_jwt(&app_id, &private_key, now_secs)
+            .map_err(|e| Error::RustError(format!("JWT generation failed: {e}")))?;
+
+        let token = github_app::vend_installation_token(installation_id, &jwt)
+            .await
+            .map_err(|e| Error::RustError(format!("Token vending failed: {e}")))?;
+
+        return Ok(token);
+    }
+
+    // Fall back to static token.
+    env.secret("GITHUB_APP_TOKEN")
+        .map(|s| s.to_string())
+        .map_err(|_| {
+            Error::RustError(
+                "Missing GitHub credentials: set either GITHUB_APP_ID + \
+                 GITHUB_APP_PRIVATE_KEY (recommended) or GITHUB_APP_TOKEN"
+                    .into(),
+            )
+        })
+}
+
+/// Current Unix timestamp in seconds.
+fn js_sys_now_secs() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        (js_sys::Date::now() / 1000.0) as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
     }
 }

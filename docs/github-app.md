@@ -6,6 +6,8 @@ sidebar_position: 4
 
 wreck-it can be driven by a **GitHub App webhook** in addition to (or instead of) the cron-based headless runner. The webhook approach uses a [Cloudflare Worker](https://developers.cloudflare.com/workers/) that reacts to GitHub events in real time, advancing the task state machine without waiting for the next scheduled run.
 
+When configured with full GitHub App credentials (private key + app ID), the worker can also **trigger cloud agents** (create issues + assign Copilot) and **merge pull requests** — making it a fully autonomous alternative to the cron-based headless runner.
+
 This document covers the full integration surface: which events trigger iterations, how state updates propagate, how labels are used, and how the webhook and cron modes interact.
 
 ## Overview
@@ -20,14 +22,17 @@ GitHub Event (issues / push / pull_request)
  │                  │
  │  1. Verify sig   │
  │  2. Parse event  │
- │  3. Read config  │◄──── GitHub API (Contents)
- │  4. Read state   │◄──── .wreck-it/config.toml + state branch
- │  5. Process iter │
- │  6. Commit state │────► GitHub API (Contents) ─── only when a task is started
+ │  3. Vend token   │◄──── GitHub App (JWT → installation token)
+ │  4. Read config  │◄──── GitHub API (Contents)
+ │  5. Read state   │◄──── .wreck-it/config.toml + state branch
+ │  6. Process iter │
+ │  7. Trigger agent│────► GitHub API (Issues + GraphQL)
+ │  8. Commit state │────► GitHub API (Contents) ─── only when a task is started
+ │  9. Merge PRs    │────► GitHub API (REST + GraphQL)
  └─────────────────┘
 ```
 
-The worker reads the repository's `.wreck-it/config.toml` (from the default branch) to discover the state branch and ralph contexts. It then reads the task and state files from the state branch, selects the next eligible task, and writes updated files back — all via the GitHub Contents API.
+The worker authenticates using the GitHub App's private key and app ID to generate a JWT, which is exchanged for a scoped installation access token using the `installation.id` from the webhook payload. This token has the full permissions granted to the app, enabling the worker to manage the complete task lifecycle.
 
 ## Events That Trigger Iterations
 
@@ -47,7 +52,7 @@ The worker only processes issue events when the issue has the `wreck-it` label. 
 - **`opened` + has label**: Fires when wreck-it (or a user) creates an issue with the `wreck-it` label already applied.
 - **`labeled` + has label**: Fires when the `wreck-it` label is added to an existing issue.
 
-This means creating an issue with the `wreck-it` label — which is exactly what the headless runner does (see [Label Behavior](#label-behavior) below) — automatically triggers a webhook iteration.
+This means creating an issue with the `wreck-it` label — which is exactly what the worker does when triggering an agent (see [Agent Triggering](#agent-triggering) below) — automatically triggers a webhook iteration.
 
 ### Push events
 
@@ -55,13 +60,41 @@ Any push to the repository triggers an iteration. This is the primary mechanism 
 
 ### Pull request events
 
-Only merged PRs trigger an iteration. This signals that a cloud agent has completed its work and the task can be marked done.
+Merged PRs trigger a dedicated handler that marks the corresponding task as complete, updates the state, and prepares the system to pick up the next task.
+
+## Agent Triggering
+
+When the worker selects a new task (via the shared iteration logic in `wreck-it-core`), it also triggers a cloud coding agent:
+
+1. **Creates a GitHub issue** with the task description and the `wreck-it` + `copilot` labels.
+2. **Discovers a coding agent** via the `suggestedActors` GraphQL query (searches for `copilot-swe-agent`, `copilot`, `claude`, `codex`).
+3. **Assigns the agent** to the issue via the `addAssigneesToAssignable` GraphQL mutation.
+
+This mirrors the same flow used by the headless CLI runner, so both modes produce identical issue + assignment patterns.
+
+If agent triggering fails (e.g. no agent found, or insufficient permissions), the state still advances and the task is marked as in-progress. The next iteration or a cron run can retry the trigger.
+
+## PR Merging
+
+When the worker receives a `pull_request.closed` event with `merged: true`:
+
+1. **Marks the task as complete** — finds the task associated with the merged PR and sets its status to `Completed`.
+2. **Updates state** — transitions to `Completed` phase and removes the PR from the tracked list.
+3. **Commits state** — writes updated task and state files to the state branch.
+
+The worker also supports the full PR lifecycle management through its GitHub client:
+
+- **Draft detection** — identifies draft PRs and can mark them ready for review.
+- **Merge status checks** — determines whether a PR is mergeable, a draft, or has conflicts.
+- **Direct merge** — merges PRs using squash merge when no required checks exist.
+- **Auto-merge** — enables auto-merge via GraphQL for PRs with required status checks.
+- **Branch protection** — detects required status checks on the base branch.
 
 ## Label Behavior
 
 ### Labels added on issue creation
 
-When the headless runner triggers a cloud coding agent, it creates a GitHub issue via the REST API with two labels:
+When the worker (or headless runner) triggers a cloud coding agent, it creates a GitHub issue via the REST API with two labels:
 
 ```json
 {
@@ -109,11 +142,15 @@ A typical chain looks like this:
 ```
 1. Issue created with "wreck-it" label
    └─► issues webhook fires
-       └─► Worker selects task A, commits state
+       └─► Worker selects task A, creates agent issue, commits state
            └─► push webhook fires
-               └─► Worker selects task B, commits state
+               └─► Worker selects task B, creates agent issue, commits state
                    └─► push webhook fires
                        └─► Worker finds no pending tasks → no commit → chain ends
+
+2. Agent completes task A, PR is merged
+   └─► pull_request webhook fires
+       └─► Worker marks task A complete, commits updated state
 ```
 
 ### Headless CLI (cron mode) behavior
@@ -136,24 +173,52 @@ wreck-it supports two complementary ways to advance the state machine:
 | **Trigger** | GitHub events (real-time) | Scheduled cron (e.g. every 10 min) |
 | **Runtime** | Cloudflare Worker (WASM) | GitHub Actions runner (native binary) |
 | **State access** | GitHub Contents API | Git worktree on local filesystem |
-| **Can trigger agents** | No (advances state only) | Yes (creates issues, assigns Copilot) |
-| **Can merge PRs** | No | Yes (via GitHub API) |
+| **Authentication** | GitHub App JWT → installation token | `GITHUB_TOKEN` (PAT) |
+| **Can trigger agents** | Yes (creates issues, assigns Copilot) | Yes (creates issues, assigns Copilot) |
+| **Can merge PRs** | Yes (via GitHub REST + GraphQL API) | Yes (via GitHub REST + GraphQL API) |
 
-In practice, the **headless runner** (cron mode) is the primary driver: it creates issues, assigns agents, polls for PRs, and merges them. The **webhook worker** provides faster state advancement by reacting to events immediately rather than waiting for the next cron tick.
+Both modes are now functionally equivalent. The **webhook worker** provides faster state advancement by reacting to events immediately, while the **headless runner** can serve as a fallback or complement for scenarios where webhook delivery is delayed.
 
 Both modes are safe to run simultaneously. They operate on the same state branch but through different mechanisms (API vs. git). The concurrency group in the GitHub Actions workflow (`cancel-in-progress: false`) prevents overlapping cron runs.
+
+## Authentication
+
+### GitHub App credentials (recommended)
+
+The worker generates a short-lived JWT from the app's private key and numeric ID, then exchanges it for an installation access token using the `installation.id` from the webhook payload. This token is scoped to the specific repository and has the permissions granted to the GitHub App.
+
+This is the recommended approach because:
+
+- **No static tokens to rotate** — JWTs are generated on the fly and expire in 10 minutes.
+- **Full permissions** — the installation token inherits all permissions from the app configuration.
+- **Scoped access** — tokens are limited to the specific installation (repository).
+
+### Static token (legacy)
+
+For backward compatibility, the worker also accepts a pre-generated `GITHUB_APP_TOKEN`. This can be a GitHub App installation token or a Personal Access Token (PAT). Note that static installation tokens expire after 1 hour and must be refreshed externally.
+
+When using a static token, the worker's capabilities depend on the token's scopes. A token with only `contents:write` can advance state but cannot trigger agents or merge PRs.
 
 ## Setup
 
 ### Prerequisites
 
-- A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with webhook permissions
+- A [GitHub App](https://docs.github.com/en/apps/creating-github-apps) with the required permissions (see below)
 - A [Cloudflare Workers](https://developers.cloudflare.com/workers/) account
 - Rust with the `wasm32-unknown-unknown` target
 
 ### 1. Create a GitHub App
 
-Create a GitHub App with the following webhook event subscriptions:
+Create a GitHub App with the following **permissions**:
+
+| Permission | Access | Purpose |
+|-----------|--------|---------|
+| **Contents** | Read & write | Read config/state files, commit state updates |
+| **Issues** | Read & write | Create issues for agent triggers, read issue status |
+| **Pull requests** | Read & write | Check PR status, merge PRs, enable auto-merge |
+| **Actions** | Read & write | Approve pending workflow runs |
+
+Subscribe to the following **webhook events**:
 
 - **Issues** — to trigger on issue creation / labeling
 - **Push** — to react to state branch changes
@@ -161,16 +226,19 @@ Create a GitHub App with the following webhook event subscriptions:
 
 Set the webhook URL to your deployed worker URL.
 
+Generate a **private key** from the app settings page and note the **App ID**.
+
 ### 2. Configure and deploy the worker
 
 ```sh
 # Install the WASM target
 rustup target add wasm32-unknown-unknown
 
-# Set secrets
+# Set secrets (recommended: App credentials)
 cd worker
 wrangler secret put GITHUB_WEBHOOK_SECRET   # Webhook secret from GitHub App settings
-wrangler secret put GITHUB_APP_TOKEN        # Installation token or PAT with repo contents access
+wrangler secret put GITHUB_APP_ID           # Numeric App ID from the GitHub App settings
+wrangler secret put GITHUB_APP_PRIVATE_KEY  # PEM-encoded private key (paste the full key)
 
 # Deploy
 wrangler deploy
@@ -178,19 +246,24 @@ wrangler deploy
 
 ### 3. Required secrets
 
-| Secret | Purpose |
-|--------|---------|
-| `GITHUB_WEBHOOK_SECRET` | HMAC-SHA256 secret for verifying webhook payload signatures |
-| `GITHUB_APP_TOKEN` | GitHub token with read/write access to repository contents on the state branch |
+| Secret | Required | Purpose |
+|--------|----------|---------|
+| `GITHUB_WEBHOOK_SECRET` | Yes | HMAC-SHA256 secret for verifying webhook payload signatures |
+| `GITHUB_APP_ID` | Recommended | Numeric GitHub App ID (enables JWT-based authentication) |
+| `GITHUB_APP_PRIVATE_KEY` | Recommended | PEM-encoded RSA private key from the GitHub App (enables JWT-based authentication) |
+| `GITHUB_APP_TOKEN` | Fallback | Static GitHub token (legacy mode — limited capabilities unless token has broad scopes) |
+
+> **Note:** When `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are both set, the worker ignores `GITHUB_APP_TOKEN` and uses JWT-based authentication for full capabilities.
 
 ## Source Code Reference
 
 | File | Purpose |
 |------|---------|
-| `worker/src/lib.rs` | Worker entry point — receives webhooks, verifies signatures, routes events |
+| `worker/src/lib.rs` | Worker entry point — receives webhooks, verifies signatures, vends tokens, routes events |
+| `worker/src/github_app.rs` | GitHub App authentication — JWT generation and installation token vending |
 | `worker/src/webhook.rs` | HMAC-SHA256 signature verification, event type parsing |
-| `worker/src/github.rs` | GitHub REST API client (file read/write via Contents API) |
-| `worker/src/processor.rs` | Iteration logic — reads config/state, advances task machine, commits results |
+| `worker/src/github.rs` | GitHub REST + GraphQL API client (file read/write, issue creation, agent assignment, PR merging) |
+| `worker/src/processor.rs` | Iteration logic — reads config/state, advances task machine, triggers agents, commits results |
 | `worker/src/types.rs` | Domain types (re-exports from `wreck-it-core`) and webhook payload types |
 | `cli/src/cloud_agent.rs` | Cloud agent client — creates issues with labels, assigns Copilot |
 | `cli/src/headless.rs` | Headless state machine — drives the full agent lifecycle in cron mode |
