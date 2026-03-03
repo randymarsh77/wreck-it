@@ -1,0 +1,11 @@
+[
+  {
+    "id": "feature-assessor",
+    "description": "Assess the state of feature implementation tasks in feature-dev-tasks.json. Check if all current feature tasks are completed. If all features are complete, research the codebase, open issues, and project roadmap to identify 3-5 new features to implement. Create new task entries in feature-dev-tasks.json with proper phases, dependencies, and descriptions. New features should include implementation tasks, test tasks, and evaluation tasks following the ideas/implementer/evaluator pattern.",
+    "status": "pending",
+    "role": "ideas",
+    "kind": "recurring",
+    "cooldown_seconds": 43200,
+    "precondition_prompt": "Read feature-dev-tasks.json and check if all tasks have status 'completed'. If every task is completed (or the file is empty/contains no tasks), this task should run to generate new feature work. If any tasks are still 'pending' or 'inprogress', skip this task."
+  }
+]
