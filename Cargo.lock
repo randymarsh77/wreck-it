@@ -2378,6 +2378,17 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
+ "wreck-it-core",
+]
+
+[[package]]
+name = "wreck-it-core"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "serde",
+ "serde_json",
+ "toml",
 ]
 
 [[package]]

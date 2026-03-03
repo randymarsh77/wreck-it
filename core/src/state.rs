@@ -1,0 +1,89 @@
+//! Persistent headless state types.
+//!
+//! These types are committed to the state branch between invocations and
+//! are shared by the CLI headless runner and the Cloudflare Worker.
+
+use serde::{Deserialize, Serialize};
+
+/// Phases of a headless cloud agent iteration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPhase {
+    /// No agent work in progress; a new task should be dispatched.
+    NeedsTrigger,
+    /// The cloud agent has been triggered and is still working.
+    AgentWorking,
+    /// The agent finished; its output (e.g. a PR) should be verified.
+    NeedsVerification,
+    /// Verification passed; ready for the next task or done.
+    Completed,
+}
+
+/// A pull request being actively tracked by the headless runner.
+///
+/// Multiple PRs may be in flight at once (e.g. from different agent sessions).
+/// The runner persists this list so it can manage all of them across cron
+/// invocations — converting drafts, approving workflow runs, and merging.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TrackedPr {
+    /// Pull request number on GitHub.
+    pub pr_number: u64,
+    /// The wreck-it task ID associated with this PR.
+    pub task_id: String,
+}
+
+/// Persistent state that is committed to the repo between cron invocations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeadlessState {
+    /// Current phase of the cloud agent cycle.
+    pub phase: AgentPhase,
+
+    /// The iteration counter across cron invocations.
+    pub iteration: usize,
+
+    /// ID of the task currently being worked on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_task_id: Option<String>,
+
+    /// GitHub issue number created to trigger the cloud agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issue_number: Option<u64>,
+
+    /// PR number created by the cloud agent (if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_number: Option<u64>,
+
+    /// URL of the PR created by the cloud agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_url: Option<String>,
+
+    /// The last prompt sent to the agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_prompt: Option<String>,
+
+    /// Freeform memory that persists across invocations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub memory: Vec<String>,
+
+    /// All pull requests being actively managed by the headless runner.
+    /// Populated when a cloud agent creates a PR and persisted between
+    /// invocations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tracked_prs: Vec<TrackedPr>,
+}
+
+impl Default for HeadlessState {
+    fn default() -> Self {
+        Self {
+            phase: AgentPhase::NeedsTrigger,
+            iteration: 0,
+            current_task_id: None,
+            issue_number: None,
+            pr_number: None,
+            pr_url: None,
+            last_prompt: None,
+            memory: Vec::new(),
+            tracked_prs: Vec::new(),
+        }
+    }
+}
