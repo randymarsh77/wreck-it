@@ -81,10 +81,12 @@ pub fn persist_provenance_record(record: &ProvenanceRecord, work_dir: &Path) -> 
 ///
 /// Stores provenance records as individual JSON files under
 /// `<work_dir>/.wreck-it-provenance/`.
+#[allow(dead_code)]
 pub struct FileProvenanceStore {
     work_dir: PathBuf,
 }
 
+#[allow(dead_code)]
 impl FileProvenanceStore {
     pub fn new(work_dir: impl Into<PathBuf>) -> Self {
         Self {

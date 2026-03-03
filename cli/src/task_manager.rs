@@ -7,8 +7,9 @@ use wreck_it_core::store::{StoreError, TaskStore};
 // Re-export from wreck-it-core so callers of `crate::task_manager::*`
 // continue to work unchanged.
 pub use wreck_it_core::iteration::reset_recurring_tasks;
+#[allow(unused_imports)]
 pub use wreck_it_core::task_manager::{
-    get_next_task, has_circular_dependency, MAX_TASKS,
+    filter_tasks_by_role, generate_task_id, get_next_task, has_circular_dependency, MAX_TASKS,
 };
 
 /// Load tasks from a JSON file
@@ -73,10 +74,12 @@ pub fn append_task(path: &Path, new_task: Task) -> Result<()> {
 /// File-system-backed implementation of [`TaskStore`].
 ///
 /// Reads and writes tasks as a JSON array in a single file.
+#[allow(dead_code)]
 pub struct FileTaskStore {
     path: PathBuf,
 }
 
+#[allow(dead_code)]
 impl FileTaskStore {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
