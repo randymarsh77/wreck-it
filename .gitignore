@@ -57,7 +57,7 @@ core/Cargo.lock
 WreckItBoard/build/
 WreckItBoard/DerivedData/
 WreckItBoard/**/*.xcuserdata/
-WreckItBoard/**/*.xcworkspace/xcuserdata/
+WreckItBoard/**/xcuserdata/
 *.xcuserstate
 *.xcscmblueprint
 *.xccheckout
