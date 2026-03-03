@@ -2,7 +2,7 @@
   {
     "id": "1",
     "description": "Audit the current `plan --goal` CLI argument definition in cli/src/cli.rs to understand what changes are needed to accept a file path in addition to a raw goal string",
-    "status": "pending"
+    "status": "inprogress"
   },
   {
     "id": "2",
