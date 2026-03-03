@@ -1,8 +1,7 @@
 # wreck-it headless configuration
 # This file lives on the state branch (wreck-it-state).
+# Task/state file paths are set per-ralph in .wreck-it/config.toml.
 
-task_file = "tasks.json"
-state_file = ".wreck-it-state.json"
 max_iterations = 100
 
 verify_command = "cargo test && cargo clippy -- -D warnings"
