@@ -46,6 +46,10 @@ worker/build/
 worker/node_modules/
 worker/wasm/
 
+# Core crate build artifacts
+core/target/
+core/Cargo.lock
+
 # Xcode / Swift
 WreckItBoard/build/
 WreckItBoard/DerivedData/
