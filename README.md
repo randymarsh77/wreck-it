@@ -268,6 +268,7 @@ Full documentation is available at [wreckit.app/docs/](https://wreckit.app/docs/
 - [Introduction](https://wreckit.app/docs/)
 - [Getting Started](https://wreckit.app/docs/getting-started)
 - [CI & Headless Mode](https://wreckit.app/docs/ci-headless)
+- [GitHub App Integration](https://wreckit.app/docs/github-app) — Webhook events, label behavior, state commit safeguards
 - [Architecture](https://wreckit.app/docs/architecture)
 - [Roadmap](https://wreckit.app/docs/roadmap)
 - [Research Notes](https://wreckit.app/docs/research-notes)
