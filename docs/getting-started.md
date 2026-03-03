@@ -351,6 +351,28 @@ minimum wait between runs:
 Tasks without a `kind` field default to `"milestone"` (one-shot) for
 backward compatibility.
 
+### Built-in Templates
+
+wreck-it ships with built-in templates that configure a ready-made multi-ralph setup for common workflows.
+
+```bash
+# List available templates
+wreck-it template list
+
+# Apply a template to the current project
+wreck-it template apply engineering-team
+```
+
+The **`engineering-team`** template creates three independent ralph contexts:
+
+| Ralph | Task file | Purpose |
+|-------|-----------|---------|
+| `docs` | `docs-tasks.json` | Periodically reviews and updates project documentation |
+| `features` | `features-tasks.json` | Monitors feature work and proposes new features when the backlog is clear |
+| `planner` | `planner-tasks.json` | Researches trends and proposes novel features |
+
+`wreck-it template apply` writes task files into the state worktree and merges ralph entries into `.wreck-it/config.toml`. Files and ralph names that already exist are left untouched (the command is idempotent).
+
 ### Named Ralph Contexts (Multi-Ralph)
 
 For fully independent loops, define named ralphs in `.wreck-it/config.toml`:

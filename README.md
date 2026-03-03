@@ -119,6 +119,19 @@ wreck-it plan --goal "Build a REST API with authentication" --output tasks.json
 
 Generates a structured `tasks.json` from a natural-language description using the configured LLM.
 
+### Apply a Built-in Template
+
+```bash
+# List available templates
+wreck-it template list
+
+# Apply the "engineering-team" template (multi-ralph setup with recurring docs,
+# feature management, and research planning tasks)
+wreck-it template apply engineering-team
+```
+
+The `engineering-team` template configures three ralph contexts (`docs`, `features`, `planner`) with recurring tasks and writes the corresponding task files into the state worktree. Ralph entries that already exist in `.wreck-it/config.toml` are left untouched (idempotent).
+
 ### Inspect Provenance
 
 ```bash
