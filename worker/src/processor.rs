@@ -212,7 +212,6 @@ async fn process_ralph(
                     // Update state to reflect the agent trigger.
                     state.phase = AgentPhase::AgentWorking;
                     state.issue_number = Some(issue_number);
-                    state.tracked_prs = state.tracked_prs.clone(); // preserve existing
                 }
                 Err(e) => {
                     worker::console_warn!(

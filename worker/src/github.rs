@@ -375,7 +375,7 @@ impl GitHubClient {
     // -----------------------------------------------------------------------
 
     /// Known coding agent logins, tried in priority order.
-    const KNOWN_AGENT_LOGINS: &'static [&'static str] =
+    const KNOWN_AGENT_LOGINS: &[&str] =
         &["copilot-swe-agent", "copilot", "claude", "codex"];
 
     /// Discover a coding agent via the `suggestedActors` GraphQL query.
@@ -659,6 +659,8 @@ impl GitHubClient {
             .map_err(|e| format!("GitHub API request failed: {e}"))?;
 
         if !matches!(response.status_code(), 200) {
+            // Treat API errors as not-mergeable to avoid blocking the loop.
+            // Matches the CLI's conservative approach.
             return Ok(PrMergeStatus::NotMergeable);
         }
 

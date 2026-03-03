@@ -147,6 +147,8 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     }
 
     // For merged PR events, handle task completion and PR management.
+    // Note: the `should_process` check above already filters PullRequest events
+    // to only those with action == "closed" && merged == true.
     if event == WebhookEvent::PullRequest {
         if let Some(pr) = &payload.pull_request {
             match processor::process_merged_pr(&client, default_branch, pr.number).await {

@@ -29,7 +29,7 @@ pub fn generate_jwt(app_id: &str, private_key_pem: &str, now_secs: u64) -> Resul
 
     // JWT payload: iat (issued at, backdated 60s), exp (10 min from now), iss (app id)
     let iat = now_secs.saturating_sub(60);
-    let exp = now_secs + 600; // 10 minutes
+    let exp = now_secs + 10 * 60;
     let payload = format!(r#"{{"iat":{iat},"exp":{exp},"iss":"{app_id}"}}"#);
 
     let encoded_header = base64url_encode(header.as_bytes());
