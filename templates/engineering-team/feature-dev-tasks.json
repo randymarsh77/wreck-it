@@ -1,1 +1,118 @@
-[]
+[
+  {
+    "id": "impl-mcp-tools",
+    "description": "Implement MCP (Model Context Protocol) tool integration for wreck-it agents. Add support for tasks to declare a `mcp_servers` field (list of MCP server URLs/configs). Before executing a task, the agent framework connects to the declared MCP servers, discovers available tools, and injects them into the agent's tool-use context. Implement `McpServerConfig` type in `core/src/types.rs`, a `McpClient` in `cli/src/mcp_client.rs` that handles the MCP handshake and tool-call protocol, and wire it into the agent execution path in `cli/src/agent.rs`. Support at minimum the stdio and HTTP/SSE MCP transport layers. Tools discovered from MCP servers (web search, code execution, database queries, API calls) should be made available to the agent during task execution, with tool call results appended to the agent context. Store tool call records in provenance tracking.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "priority": 5,
+    "complexity": 7
+  },
+  {
+    "id": "test-mcp-tools",
+    "description": "Write comprehensive tests for the MCP tool integration implemented in impl-mcp-tools. Add unit tests in `cli/src/mcp_client.rs` covering: MCP handshake protocol, tool discovery from mock MCP server, tool call invocation and result parsing, error handling for unreachable/malformed MCP servers, and stdio vs HTTP transport selection. Add integration tests that mock an MCP server using a local stdio process and verify that the agent correctly receives and can invoke the tools. Verify that MCP tool calls appear in provenance records. Ensure all existing tests continue to pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["impl-mcp-tools"],
+    "priority": 5,
+    "complexity": 5
+  },
+  {
+    "id": "eval-mcp-tools",
+    "description": "Evaluate the MCP tool integration end-to-end. Review the implementation in `cli/src/mcp_client.rs` and `cli/src/agent.rs` for correctness, security (ensure MCP server URLs are validated and tool call results are sanitised before injection into prompts), and adherence to the MCP spec. Verify the `mcp_servers` task field is documented in README.md under the Task File Format table. Check that provenance records include MCP tool calls. Run `cargo test` and `cargo clippy` and confirm all checks pass. Write a brief assessment of whether the implementation is production-ready and what edge cases remain.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 3,
+    "depends_on": ["test-mcp-tools"],
+    "priority": 5,
+    "complexity": 3
+  },
+  {
+    "id": "impl-model-routing",
+    "description": "Implement intelligent multi-model task routing in wreck-it. Add a `model` field to the `Task` struct in `core/src/types.rs` (optional string, e.g. `\"gpt-4o\"`, `\"gpt-4o-mini\"`, `\"o1-preview\"`). Extend the agent execution path in `cli/src/agent.rs` so that when a task declares a `model`, that model is used for the invocation instead of the globally-configured default. Additionally implement automatic routing heuristics in a new `cli/src/model_router.rs`: tasks with `complexity >= 7` or `role == \"ideas\"` should default to a high-capability model; tasks with `complexity <= 3` and `role == \"implementer\"` should default to a fast/cheap model. The routing heuristic should be configurable via `.wreck-it/config.toml` under a `[model_routing]` section. Log the selected model in provenance records.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "priority": 4,
+    "complexity": 5
+  },
+  {
+    "id": "test-model-routing",
+    "description": "Write tests for the multi-model task routing feature implemented in impl-model-routing. Add unit tests in `cli/src/model_router.rs` covering: explicit `model` field on task overrides the default, heuristic routing for high-complexity tasks, heuristic routing for low-complexity tasks, `role`-based routing (ideas → high-capability, evaluator → balanced), and routing config loading from `.wreck-it/config.toml`. Mock the model provider so that tests do not make real API calls. Verify the selected model name appears in provenance records. Ensure all existing tests continue to pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["impl-model-routing"],
+    "priority": 4,
+    "complexity": 4
+  },
+  {
+    "id": "eval-model-routing",
+    "description": "Evaluate the multi-model task routing implementation. Review `cli/src/model_router.rs` and the `Task.model` field for correctness and backward compatibility (tasks without an explicit `model` field must continue to use the global default). Verify the `[model_routing]` config section is documented in README.md. Check that the `model` task field is listed in the Task File Format table in README.md. Run `cargo test` and `cargo clippy` and confirm all checks pass. Assess whether the heuristic thresholds (complexity >= 7, complexity <= 3) are sensible defaults and suggest any tuning.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 3,
+    "depends_on": ["test-model-routing"],
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "impl-webhook-events",
+    "description": "Implement webhook event streaming for wreck-it task lifecycle events. Add a `webhooks` configuration section to `.wreck-it/config.toml` accepting a list of endpoint URLs and a mandatory shared secret for HMAC-SHA256 request signing (required; endpoints without a secret must be explicitly opted out with `insecure = true` and produce a startup warning). Implement a `WebhookDispatcher` in `cli/src/webhook_dispatcher.rs` that fires non-blocking HTTP POST requests to all configured endpoints when task lifecycle events occur: `task.started`, `task.completed`, `task.failed`, `loop.started`, `loop.completed`. The payload should be a JSON object with `event`, `task_id`, `timestamp`, `status`, and (on failure) `error_summary`. Wire the dispatcher into `cli/src/ralph_loop.rs` at the appropriate lifecycle points. Use the existing `reqwest` dependency (or add it if absent) for HTTP. Failures to deliver webhooks must not block or crash the main loop — log a warning and continue.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "priority": 3,
+    "complexity": 5
+  },
+  {
+    "id": "test-webhook-events",
+    "description": "Write tests for the webhook event streaming feature implemented in impl-webhook-events. Add unit tests in `cli/src/webhook_dispatcher.rs` covering: correct JSON payload construction for each event type, HMAC-SHA256 signature generation and header injection, graceful handling of unreachable webhook endpoints (no panic, warning logged), and handling of non-2xx HTTP responses. Use a mock HTTP server (e.g. via `httpmock` or `wiremock` crate) to capture and assert on outgoing webhook requests. Verify that webhook delivery failures do not propagate errors to the caller. Ensure all existing tests continue to pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["impl-webhook-events"],
+    "priority": 3,
+    "complexity": 4
+  },
+  {
+    "id": "eval-webhook-events",
+    "description": "Evaluate the webhook event streaming implementation. Review `cli/src/webhook_dispatcher.rs` for correctness, security (HMAC signature generation and header injection, mandatory secret enforcement, URL validation to prevent SSRF against internal networks, warning emitted when `insecure = true` is set), and non-blocking behaviour. Verify the `webhooks` config section is documented in README.md with an example snippet including the required `secret` field and a note on the security implications of `insecure = true`. Check that each event type (`task.started`, `task.completed`, `task.failed`, `loop.started`, `loop.completed`) is documented with its payload schema. Run `cargo test` and `cargo clippy` and confirm all checks pass. Flag any remaining SSRF or injection risks in the implementation.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 3,
+    "depends_on": ["test-webhook-events"],
+    "priority": 3,
+    "complexity": 3
+  },
+  {
+    "id": "impl-plan-refinement",
+    "description": "Implement interactive plan refinement for the `wreck-it plan` command. When the `--interactive` flag is passed to `wreck-it plan`, after the initial LLM-generated task list is produced, enter a conversational refinement loop in the TUI (or headless stdin/stdout in `--headless` mode) where the user can type natural-language instructions to modify the plan (e.g. 'add a task for database migrations', 'split task 3 into two smaller tasks', 'remove the documentation tasks'). Each refinement instruction is sent to the LLM along with the current task list, and the LLM returns an updated task list. The loop continues until the user types 'done' or 'accept'. Implement this in `cli/src/planner.rs` as a new `refine_plan` method. In TUI mode, add a new 'Plan Refinement' screen. In headless mode, use stdin/stdout. Write the final accepted plan to the output file.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "priority": 3,
+    "complexity": 6
+  },
+  {
+    "id": "test-plan-refinement",
+    "description": "Write tests for the interactive plan refinement feature implemented in impl-plan-refinement. Add unit tests in `cli/src/planner.rs` covering: the `refine_plan` method correctly sends current task list + user instruction to the LLM, the LLM response is correctly parsed back into a `Vec<Task>`, refinement loop terminates on 'done'/'accept' input, invalid LLM responses (malformed JSON) are handled gracefully with an error message, and the final plan is written to the output file. Mock the LLM client so tests do not make real API calls. Ensure all existing `wreck-it plan` tests continue to pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["impl-plan-refinement"],
+    "priority": 3,
+    "complexity": 4
+  },
+  {
+    "id": "eval-plan-refinement",
+    "description": "Evaluate the interactive plan refinement implementation. Review `cli/src/planner.rs` for correctness, usability, and edge case handling (empty user input, LLM timeout during refinement, excessive refinement rounds). Verify that a configurable maximum refinement rounds limit exists (defaulting to a sensible value) and is enforced to prevent infinite loops. Verify the `--interactive` flag is documented in README.md under the `wreck-it plan` usage section, including the max-rounds option. Check that the headless stdin/stdout mode works correctly by running `echo 'add a testing task\\ndone' | wreck-it plan --goal 'build a CLI tool' --interactive --headless --output /tmp/test-plan.json` and inspecting the output. Run `cargo test` and `cargo clippy` and confirm all checks pass.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 3,
+    "depends_on": ["test-plan-refinement"],
+    "priority": 3,
+    "complexity": 3
+  }
+]
