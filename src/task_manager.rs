@@ -1,8 +1,12 @@
-use crate::types::{AgentRole, Task, TaskKind, TaskStatus};
+use crate::types::{AgentRole, Task, TaskStatus};
 use anyhow::{bail, Context, Result};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+
+// Re-export from wreck-it-core so callers of `crate::task_manager::reset_recurring_tasks`
+// continue to work unchanged.
+pub use wreck_it_core::iteration::reset_recurring_tasks;
 
 /// Maximum number of tasks allowed in a task file (safeguard for dynamic generation).
 #[cfg_attr(not(test), allow(dead_code))]
@@ -143,34 +147,6 @@ pub fn append_task(path: &Path, new_task: Task) -> Result<()> {
 
     tasks.push(new_task);
     save_tasks(path, &tasks)
-}
-
-/// Reset completed recurring tasks whose cooldown has elapsed back to
-/// `Pending` so that the scheduler picks them up again.
-///
-/// - Tasks with `kind == Milestone` (the default) are never touched.
-/// - Tasks with `kind == Recurring` and `status == Completed` are reset
-///   to `Pending` when either no `cooldown_seconds` is set, or enough
-///   time has passed since `last_attempt_at`.
-///
-/// Returns the number of tasks that were reset.
-pub fn reset_recurring_tasks(tasks: &mut [Task], now_secs: u64) -> usize {
-    let mut count = 0;
-    for task in tasks.iter_mut() {
-        if task.kind != TaskKind::Recurring || task.status != TaskStatus::Completed {
-            continue;
-        }
-        let ready = match (task.cooldown_seconds, task.last_attempt_at) {
-            (Some(cd), Some(last)) => now_secs.saturating_sub(last) >= cd,
-            // No cooldown → always eligible; no last_attempt → first run.
-            _ => true,
-        };
-        if ready {
-            task.status = TaskStatus::Pending;
-            count += 1;
-        }
-    }
-    count
 }
 
 #[cfg(test)]

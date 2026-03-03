@@ -7,6 +7,9 @@ license = "MIT"
 description = "A TUI agent harness that uses copilot SDK to perform Ralph Wiggum loops"
 
 [dependencies]
+# Shared core types and iteration logic
+wreck-it-core = { path = "core", features = ["clap"] }
+
 # TUI dependencies
 ratatui = "0.26"
 crossterm = "0.27"

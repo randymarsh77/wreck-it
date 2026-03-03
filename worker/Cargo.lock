@@ -906,6 +906,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wreck-it-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "wreck-it-worker"
 version = "0.1.0"
 dependencies = [
@@ -917,6 +926,7 @@ dependencies = [
  "sha2",
  "toml",
  "worker",
+ "wreck-it-core",
 ]
 
 [[package]]

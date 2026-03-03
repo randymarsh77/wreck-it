@@ -2,7 +2,8 @@
 //! task state machine, and commits updated state back via the GitHub API.
 
 use crate::github::GitHubClient;
-use crate::types::{AgentPhase, HeadlessState, RepoConfig, Task, TaskKind, TaskStatus};
+use crate::types::{AgentPhase, HeadlessState, RepoConfig, Task, TaskStatus};
+use wreck_it_core::iteration::{reset_recurring_tasks, select_next_task};
 
 /// Result of processing a single iteration.
 #[derive(Debug)]
@@ -137,7 +138,7 @@ async fn process_ralph(
             None => (HeadlessState::default(), String::new()),
         };
 
-    // Reset completed recurring tasks.
+    // Reset completed recurring tasks (shared logic from wreck-it-core).
     let now_secs = js_sys_now_secs();
     reset_recurring_tasks(&mut tasks, now_secs);
 
@@ -150,7 +151,7 @@ async fn process_ralph(
         });
     }
 
-    // Select the next pending task.
+    // Select the next pending task (shared logic from wreck-it-core).
     let next_idx = select_next_task(&tasks, &state);
     let next_task = match next_idx {
         Some(idx) => &mut tasks[idx],
@@ -210,61 +211,6 @@ async fn process_ralph(
     })
 }
 
-/// Select the next task to execute.  Uses the same heuristics as the main
-/// CLI: phase ordering, dependency checking, priority, then complexity.
-fn select_next_task(tasks: &[Task], _state: &HeadlessState) -> Option<usize> {
-    let completed_ids: std::collections::HashSet<&str> = tasks
-        .iter()
-        .filter(|t| t.status == TaskStatus::Completed)
-        .map(|t| t.id.as_str())
-        .collect();
-
-    // Find the lowest phase that has pending tasks.
-    let min_phase = tasks
-        .iter()
-        .filter(|t| t.status == TaskStatus::Pending)
-        .map(|t| t.phase)
-        .min()?;
-
-    // Collect candidates in that phase whose dependencies are satisfied.
-    let mut candidates: Vec<(usize, &Task)> = tasks
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| {
-            t.status == TaskStatus::Pending
-                && t.phase == min_phase
-                && t.depends_on
-                    .iter()
-                    .all(|dep| completed_ids.contains(dep.as_str()))
-        })
-        .collect();
-
-    // Sort: higher priority first, then lower complexity first.
-    candidates.sort_by(|a, b| {
-        b.1.priority
-            .cmp(&a.1.priority)
-            .then(a.1.complexity.cmp(&b.1.complexity))
-    });
-
-    candidates.first().map(|(idx, _)| *idx)
-}
-
-/// Reset completed recurring tasks whose cooldown has elapsed.
-fn reset_recurring_tasks(tasks: &mut [Task], now_secs: u64) {
-    for task in tasks.iter_mut() {
-        if task.kind != TaskKind::Recurring || task.status != TaskStatus::Completed {
-            continue;
-        }
-        let ready = match (task.cooldown_seconds, task.last_attempt_at) {
-            (Some(cd), Some(last)) => now_secs.saturating_sub(last) >= cd,
-            _ => true,
-        };
-        if ready {
-            task.status = TaskStatus::Pending;
-        }
-    }
-}
-
 /// Current Unix timestamp in seconds (via the JS `Date.now()` binding).
 fn js_sys_now_secs() -> u64 {
     // In the Cloudflare Worker environment, `Date.now()` is available.
@@ -285,7 +231,7 @@ fn js_sys_now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{AgentRole, TaskRuntime};
+    use crate::types::{AgentRole, TaskKind, TaskRuntime};
 
     fn make_task(id: &str, status: TaskStatus, phase: u32, deps: Vec<&str>) -> Task {
         Task {
@@ -373,7 +319,8 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        reset_recurring_tasks(&mut tasks, 200);
+        let count = reset_recurring_tasks(&mut tasks, 200);
+        assert_eq!(count, 1);
         assert_eq!(tasks[0].status, TaskStatus::Pending);
     }
 
@@ -386,17 +333,20 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        reset_recurring_tasks(&mut tasks, 200);
+        let count = reset_recurring_tasks(&mut tasks, 200);
+        assert_eq!(count, 0);
         assert_eq!(tasks[0].status, TaskStatus::Completed);
 
-        reset_recurring_tasks(&mut tasks, 3800);
+        let count = reset_recurring_tasks(&mut tasks, 3800);
+        assert_eq!(count, 1);
         assert_eq!(tasks[0].status, TaskStatus::Pending);
     }
 
     #[test]
     fn reset_recurring_skips_milestone() {
         let mut tasks = vec![make_task("a", TaskStatus::Completed, 1, vec![])];
-        reset_recurring_tasks(&mut tasks, 9999);
+        let count = reset_recurring_tasks(&mut tasks, 9999);
+        assert_eq!(count, 0);
         assert_eq!(tasks[0].status, TaskStatus::Completed);
     }
 }
