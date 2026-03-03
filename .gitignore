@@ -46,6 +46,9 @@ worker/build/
 worker/node_modules/
 worker/wasm/
 
+# CLI crate build artifacts
+cli/target/
+
 # Core crate build artifacts
 core/target/
 core/Cargo.lock

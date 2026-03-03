@@ -106,7 +106,7 @@ gastown_token    = "tok_…"                          # auth token
 
 When either `gastown_endpoint` or `gastown_token` is absent, gastown integration is disabled and tasks run locally as before.
 
-**Implementation**: `src/gastown_client.rs` — `GastownClient`, `WorkflowDag`, `DagNode`, `GastownStatusEvent`.
+**Implementation**: `cli/src/gastown_client.rs` — `GastownClient`, `WorkflowDag`, `DagNode`, `GastownStatusEvent`.
 
 ---
 

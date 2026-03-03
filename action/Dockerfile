@@ -2,7 +2,8 @@ FROM rust:1.78-slim AS builder
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock* ./
-COPY src/ src/
+COPY cli/ cli/
+COPY core/ core/
 
 RUN cargo build --release
 

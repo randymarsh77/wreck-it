@@ -33,26 +33,26 @@ pub fn builtin_templates() -> Vec<Template> {
 /// The **engineering-team** template: a multi-ralph team with recurring
 /// documentation review, feature management, and research planning tasks.
 fn engineering_team() -> Template {
-    let manifest_str = include_str!("../templates/engineering-team/template.toml");
+    let manifest_str = include_str!("../../templates/engineering-team/template.toml");
     let manifest: TemplateManifest =
         toml::from_str(manifest_str).expect("invalid engineering-team template.toml");
 
     let mut files = HashMap::new();
     files.insert(
         "docs-tasks.json".to_string(),
-        include_str!("../templates/engineering-team/docs-tasks.json"),
+        include_str!("../../templates/engineering-team/docs-tasks.json"),
     );
     files.insert(
         "features-tasks.json".to_string(),
-        include_str!("../templates/engineering-team/features-tasks.json"),
+        include_str!("../../templates/engineering-team/features-tasks.json"),
     );
     files.insert(
         "feature-dev-tasks.json".to_string(),
-        include_str!("../templates/engineering-team/feature-dev-tasks.json"),
+        include_str!("../../templates/engineering-team/feature-dev-tasks.json"),
     );
     files.insert(
         "planner-tasks.json".to_string(),
-        include_str!("../templates/engineering-team/planner-tasks.json"),
+        include_str!("../../templates/engineering-team/planner-tasks.json"),
     );
 
     Template { manifest, files }
