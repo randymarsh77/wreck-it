@@ -359,3 +359,4 @@ The workflow also needs these `permissions` declarations:
 
 - [Getting Started](getting-started.md) — Local installation and TUI usage
 - [Architecture](architecture.md) — How the Ralph Wiggum loop, scheduling, and cloud agents work under the hood
+- [GitHub App Integration](github-app.md) — Webhook-driven operation via a GitHub App for real-time event processing

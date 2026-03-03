@@ -241,6 +241,10 @@ Completed → mark task done, advance to next
 State is persisted between cron invocations so the machine resumes
 correctly after each scheduled run.
 
+For webhook-driven operation via a GitHub App (real-time event processing
+as an alternative or complement to cron), see the
+[GitHub App Integration](github-app.md) guide.
+
 ### Parallel Task Execution
 
 When `TaskScheduler::schedule` returns more than one ready task, the loop
