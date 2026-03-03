@@ -2,8 +2,8 @@
 //! task state machine, and commits updated state back via the GitHub API.
 
 use crate::github::GitHubClient;
-use crate::types::{AgentPhase, HeadlessState, RepoConfig, Task, TaskStatus};
-use wreck_it_core::iteration::{reset_recurring_tasks, select_next_task};
+use crate::types::{HeadlessState, RepoConfig, Task};
+use wreck_it_core::iteration::{advance_iteration, IterationOutcome};
 
 /// Result of processing a single iteration.
 #[derive(Debug)]
@@ -138,77 +138,63 @@ async fn process_ralph(
             None => (HeadlessState::default(), String::new()),
         };
 
-    // Reset completed recurring tasks (shared logic from wreck-it-core).
+    // Use the shared iteration logic from wreck-it-core.
     let now_secs = js_sys_now_secs();
-    reset_recurring_tasks(&mut tasks, now_secs);
+    let outcome = advance_iteration(&mut tasks, &mut state, now_secs);
 
-    // Check if all tasks are complete.
-    let all_done = !tasks.is_empty() && tasks.iter().all(|t| t.status == TaskStatus::Completed);
-    if all_done {
-        return Ok(IterationResult {
+    match outcome {
+        IterationOutcome::AllComplete => Ok(IterationResult {
             summary: "all tasks complete".into(),
             changed: false,
-        });
-    }
+        }),
+        IterationOutcome::NoPendingTasks => Ok(IterationResult {
+            summary: "no eligible pending tasks".into(),
+            changed: false,
+        }),
+        IterationOutcome::TaskStarted {
+            task_id,
+            task_description,
+        } => {
+            // Write updated task file.
+            let tasks_json = serde_json::to_string_pretty(&tasks)
+                .map_err(|e| format!("Failed to serialize tasks: {e}"))?;
+            client
+                .put_file(
+                    &ctx.task_file,
+                    state_branch,
+                    &tasks_json,
+                    &format!(
+                        "wreck-it: start task '{}' (iteration {})",
+                        task_id, state.iteration
+                    ),
+                    Some(&tasks_sha),
+                )
+                .await?;
 
-    // Select the next pending task (shared logic from wreck-it-core).
-    let next_idx = select_next_task(&tasks, &state);
-    let next_task = match next_idx {
-        Some(idx) => &mut tasks[idx],
-        None => {
-            return Ok(IterationResult {
-                summary: "no eligible pending tasks".into(),
-                changed: false,
-            });
+            // Write updated state file.
+            let state_json = serde_json::to_string_pretty(&state)
+                .map_err(|e| format!("Failed to serialize state: {e}"))?;
+            let state_sha_opt = if state_sha.is_empty() {
+                None
+            } else {
+                Some(state_sha.as_str())
+            };
+            client
+                .put_file(
+                    &ctx.state_file,
+                    state_branch,
+                    &state_json,
+                    &format!("wreck-it: update state (iteration {})", state.iteration),
+                    state_sha_opt,
+                )
+                .await?;
+
+            Ok(IterationResult {
+                summary: format!("started task '{}': {}", task_id, task_description),
+                changed: true,
+            })
         }
-    };
-
-    // Advance state.
-    let task_id = next_task.id.clone();
-    let task_desc = next_task.description.clone();
-    next_task.status = TaskStatus::InProgress;
-    state.phase = AgentPhase::NeedsTrigger;
-    state.current_task_id = Some(task_id.clone());
-    state.iteration += 1;
-
-    // Write updated task file.
-    let tasks_json = serde_json::to_string_pretty(&tasks)
-        .map_err(|e| format!("Failed to serialize tasks: {e}"))?;
-    client
-        .put_file(
-            &ctx.task_file,
-            state_branch,
-            &tasks_json,
-            &format!(
-                "wreck-it: start task '{}' (iteration {})",
-                task_id, state.iteration
-            ),
-            Some(&tasks_sha),
-        )
-        .await?;
-
-    // Write updated state file.
-    let state_json = serde_json::to_string_pretty(&state)
-        .map_err(|e| format!("Failed to serialize state: {e}"))?;
-    let state_sha_opt = if state_sha.is_empty() {
-        None
-    } else {
-        Some(state_sha.as_str())
-    };
-    client
-        .put_file(
-            &ctx.state_file,
-            state_branch,
-            &state_json,
-            &format!("wreck-it: update state (iteration {})", state.iteration),
-            state_sha_opt,
-        )
-        .await?;
-
-    Ok(IterationResult {
-        summary: format!("started task '{}': {}", task_id, task_desc),
-        changed: true,
-    })
+    }
 }
 
 /// Current Unix timestamp in seconds (via the JS `Date.now()` binding).
@@ -231,7 +217,8 @@ fn js_sys_now_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{AgentRole, TaskKind, TaskRuntime};
+    use crate::types::{AgentPhase, AgentRole, TaskKind, TaskRuntime, TaskStatus};
+    use wreck_it_core::iteration::{reset_recurring_tasks, select_next_task};
 
     fn make_task(id: &str, status: TaskStatus, phase: u32, deps: Vec<&str>) -> Task {
         Task {
@@ -348,5 +335,55 @@ mod tests {
         let count = reset_recurring_tasks(&mut tasks, 9999);
         assert_eq!(count, 0);
         assert_eq!(tasks[0].status, TaskStatus::Completed);
+    }
+
+    // ---- advance_iteration tests (shared core logic) ----
+
+    #[test]
+    fn advance_iteration_selects_task_and_updates_state() {
+        let mut tasks = vec![
+            make_task("a", TaskStatus::Pending, 1, vec![]),
+            make_task("b", TaskStatus::Pending, 2, vec!["a"]),
+        ];
+        let mut state = HeadlessState::default();
+
+        let outcome = advance_iteration(&mut tasks, &mut state, 0);
+        assert_eq!(
+            outcome,
+            IterationOutcome::TaskStarted {
+                task_id: "a".into(),
+                task_description: "task a".into(),
+            }
+        );
+        assert_eq!(tasks[0].status, TaskStatus::InProgress);
+        assert_eq!(state.current_task_id, Some("a".into()));
+        assert_eq!(state.iteration, 1);
+        assert_eq!(state.phase, AgentPhase::NeedsTrigger);
+    }
+
+    #[test]
+    fn advance_iteration_returns_all_complete() {
+        let mut tasks = vec![
+            make_task("a", TaskStatus::Completed, 1, vec![]),
+            make_task("b", TaskStatus::Completed, 1, vec![]),
+        ];
+        let mut state = HeadlessState::default();
+        assert_eq!(
+            advance_iteration(&mut tasks, &mut state, 0),
+            IterationOutcome::AllComplete
+        );
+    }
+
+    #[test]
+    fn advance_iteration_returns_no_pending() {
+        let mut tasks = vec![
+            make_task("a", TaskStatus::InProgress, 1, vec![]),
+            make_task("b", TaskStatus::Pending, 1, vec!["a"]),
+        ];
+        let mut state = HeadlessState::default();
+        assert_eq!(
+            advance_iteration(&mut tasks, &mut state, 0),
+            IterationOutcome::NoPendingTasks
+        );
     }
 }
