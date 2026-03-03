@@ -154,5 +154,122 @@
     "depends_on": ["test-github-issues-integration"],
     "priority": 5,
     "complexity": 2
+  },
+  {
+    "id": "ideas-api-cost-tracking",
+    "description": "Research and design an API token cost-tracking and budget-control system for wreck-it. Review the agent execution flow in cli/src/agent.rs and cli/src/ralph_loop.rs to identify where token usage can be captured from LLM API responses (usage field in OpenAI-compatible responses). Design: (1) a CostTracker struct that accumulates prompt_tokens, completion_tokens, and estimated_cost_usd per task and for the whole run, (2) a new Config field `max_cost_usd: Option<f64>` that aborts the loop when the cumulative estimated cost exceeds the threshold, (3) a cost summary line printed at the end of each iteration in both headless and TUI modes, (4) per-model pricing constants for common GitHub Models / OpenAI models. Document the design as inline comments in a new cli/src/cost_tracker.rs stub file.",
+    "status": "pending",
+    "role": "ideas",
+    "phase": 1,
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "impl-api-cost-tracking",
+    "description": "Implement the API token cost-tracking system designed in ideas-api-cost-tracking. Create cli/src/cost_tracker.rs with a CostTracker struct holding per-task and cumulative token counts and a method to compute estimated_cost_usd given a model name. Extend the agent response handling in cli/src/agent.rs to capture the usage object from OpenAI-compatible API responses and update the tracker. Add `max_cost_usd: Option<f64>` to Config in cli/src/types.rs (default None, skip_serializing_if None). In cli/src/ralph_loop.rs, check the cumulative cost after each task and abort the loop with a clear message if max_cost_usd is exceeded. Add a `--max-cost <USD>` CLI flag in cli/src/cli.rs. Print a cost summary (total tokens + estimated USD) at the end of each iteration and at run completion.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["ideas-api-cost-tracking"],
+    "priority": 4,
+    "complexity": 4
+  },
+  {
+    "id": "test-api-cost-tracking",
+    "description": "Add unit and integration tests for the API cost-tracking feature. In cli/src/cost_tracker.rs or a test module, verify: (1) CostTracker accumulates token counts correctly across multiple tasks, (2) estimated_cost_usd is computed correctly for at least two known models with fixed per-token rates, (3) when max_cost_usd is set and the cumulative cost exceeds it, the loop-abort condition is triggered correctly, (4) when max_cost_usd is None, no budget check occurs. Run `cargo test` to confirm all tests pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["impl-api-cost-tracking"],
+    "priority": 4,
+    "complexity": 3
+  },
+  {
+    "id": "eval-api-cost-tracking",
+    "description": "Evaluate the API cost-tracking implementation. Review cli/src/cost_tracker.rs, Config changes, CLI flag, and ralph_loop.rs call sites. Verify: (1) `cargo clippy -- -D warnings` passes cleanly, (2) the cost summary output is human-readable and informative (tokens used, estimated USD), (3) the budget-abort message is clear and includes the current cost vs. limit, (4) the `max_cost_usd` Config field and `--max-cost` CLI flag are documented in README.md, (5) when the usage field is absent from an API response the tracker degrades gracefully (logs a warning, does not panic). Fix any issues found and mark the task complete.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": ["test-api-cost-tracking"],
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-task-cli-management",
+    "description": "Research and design a `wreck-it tasks` sub-command family for managing task files interactively from the CLI without editing JSON by hand. Review the existing CLI structure in cli/src/cli.rs (clap commands) and the Task type in cli/src/types.rs. Design sub-commands: (1) `wreck-it tasks list [--task-file] [--status pending|inprogress|completed|failed]` — tabular output of all tasks with their status and role, (2) `wreck-it tasks add --id <id> --description <desc> [--role ideas|implementer|evaluator] [--phase N] [--priority N] [--depends-on id1,id2]` — appends a new task to the file, (3) `wreck-it tasks set-status --id <id> --status <status>` — updates the status of a task in place, (4) `wreck-it tasks validate [--task-file]` — checks for missing required fields, duplicate IDs, and unresolved depends_on references. Document design as inline comments in cli/src/cli.rs.",
+    "status": "pending",
+    "role": "ideas",
+    "phase": 1,
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "impl-task-cli-management",
+    "description": "Implement the `wreck-it tasks` sub-command family designed in ideas-task-cli-management. Add a `Tasks` variant to the Commands enum in cli/src/cli.rs with `list`, `add`, `set-status`, and `validate` sub-commands and their respective argument structs. Create cli/src/task_cli.rs implementing each sub-command: list prints a formatted table (id, role, phase, status, depends_on count), add reads the task file, appends the new task, and writes it back, set-status mutates the matching task's status field in place, validate checks for duplicate IDs and unresolved depends_on chains and reports errors. Wire the `Tasks` command in cli/src/main.rs. No new crate dependencies beyond what is already available (use the existing serde_json and tabular-style formatting with plain std string formatting).",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["ideas-task-cli-management"],
+    "priority": 3,
+    "complexity": 4
+  },
+  {
+    "id": "test-task-cli-management",
+    "description": "Add tests for the `wreck-it tasks` sub-commands. In cli/src/task_cli.rs or a test module, write unit tests that: (1) verify `list` correctly filters by status and formats task rows, (2) verify `add` appends a valid new task to a JSON file and that the resulting file parses correctly, (3) verify `set-status` updates the correct task and leaves all other tasks unchanged, (4) verify `validate` detects and reports duplicate IDs and a depends_on reference to a nonexistent task, (5) verify `validate` returns a clean result for a well-formed task file. Run `cargo test` to confirm all tests pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["impl-task-cli-management"],
+    "priority": 3,
+    "complexity": 3
+  },
+  {
+    "id": "eval-task-cli-management",
+    "description": "Evaluate the `wreck-it tasks` CLI implementation. Review cli/src/task_cli.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) each sub-command is documented in README.md under Usage, (3) error messages for invalid input (unknown task id, invalid status value) are user-friendly, (4) the `add` command validates that the provided id does not already exist and reports an error if it does, (5) the `validate` sub-command is suitable for use in CI scripts (exits non-zero on errors). Fix any issues found and mark the task complete.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": ["test-task-cli-management"],
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-multi-repo-orchestration",
+    "description": "Research and design multi-repository orchestration for wreck-it. The feature should allow a single `wreck-it run` invocation to coordinate tasks that span multiple local git repositories (e.g., a monorepo split into separate repos, or a frontend + backend pair). Review the Config and RalphConfig types in cli/src/types.rs and cli/src/repo_config.rs, the agent execution in cli/src/agent.rs, and the git integration in cli/src/state_worktree.rs. Design: (1) a new optional `work_dirs: HashMap<String, String>` Config field mapping task roles or ids to repo paths, (2) how the agent context (file listing, git diff) is assembled when a task's work_dir differs from the root, (3) how test-runner detection (cargo/npm/pytest) works per-repo, (4) how commits are made to the correct repo. Document the design in a new docs/multi-repo.md stub.",
+    "status": "pending",
+    "role": "ideas",
+    "phase": 1,
+    "priority": 2,
+    "complexity": 3
+  },
+  {
+    "id": "impl-multi-repo-orchestration",
+    "description": "Implement the multi-repository orchestration feature designed in ideas-multi-repo-orchestration. Add `work_dirs: HashMap<String, String>` to Config in cli/src/types.rs (maps task-id prefix or role to a local path; absent means use the default work_dir). In cli/src/ralph_loop.rs, resolve the effective work_dir for each task before dispatching it to the agent. In cli/src/agent.rs, accept a per-call work_dir override so that file context, test running, and git commits all use the resolved path. Add a `--work-dir-map <ROLE_OR_ID>=<PATH>` CLI flag (multi-value) in cli/src/cli.rs that populates the config map. Create the docs/multi-repo.md documentation file explaining the feature and providing an example config.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["ideas-multi-repo-orchestration"],
+    "priority": 2,
+    "complexity": 5
+  },
+  {
+    "id": "test-multi-repo-orchestration",
+    "description": "Add tests for the multi-repository orchestration feature. In cli/src/ or a test module, write tests using temporary directories to verify: (1) when `work_dirs` maps a task id to a secondary path, the agent receives the correct work_dir for that task while other tasks use the default, (2) git commits are made to the correct repository (not the default one) when a task is mapped to a different path, (3) when `work_dirs` is empty or absent, behavior is identical to the current single-repo behavior. Run `cargo test` to confirm all tests pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["impl-multi-repo-orchestration"],
+    "priority": 2,
+    "complexity": 4
+  },
+  {
+    "id": "eval-multi-repo-orchestration",
+    "description": "Evaluate the multi-repository orchestration implementation. Review the Config changes, ralph_loop.rs modifications, agent.rs work_dir override, and docs/multi-repo.md. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the feature is fully backward-compatible when `work_dirs` is absent, (3) docs/multi-repo.md contains a clear example showing a two-repo setup, (4) the `--work-dir-map` CLI flag is documented in README.md under Usage, (5) path validation (work_dir must be an existing directory and a git repo) produces a clear error message. Fix any issues found and mark the task complete.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": ["test-multi-repo-orchestration"],
+    "priority": 2,
+    "complexity": 2
   }
 ]
