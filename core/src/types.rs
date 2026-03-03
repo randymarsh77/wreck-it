@@ -220,3 +220,28 @@ fn is_zero_u32(v: &u32) -> bool {
 fn is_default_runtime(r: &TaskRuntime) -> bool {
     *r == TaskRuntime::Local
 }
+
+// ---------------------------------------------------------------------------
+// Provenance
+// ---------------------------------------------------------------------------
+
+/// A single provenance record capturing the context of one agent invocation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProvenanceRecord {
+    /// Identifier of the task that was executed.
+    pub task_id: String,
+    /// Role of the agent that executed the task.
+    pub agent_role: AgentRole,
+    /// Human-readable name of the model/provider used.
+    pub model: String,
+    /// Hex hash of the prompt (task description) sent to the agent.
+    pub prompt_hash: String,
+    /// Tool calls made during the invocation (e.g. reflection, evaluation).
+    pub tool_calls: Vec<String>,
+    /// Hex hash of the git diff produced after the invocation.
+    pub git_diff_hash: String,
+    /// Unix timestamp (seconds) when the invocation started.
+    pub timestamp: u64,
+    /// Outcome of the invocation: `"success"` or `"failure"`.
+    pub outcome: String,
+}

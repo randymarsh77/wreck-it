@@ -1,32 +1,14 @@
-use crate::types::AgentRole;
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use wreck_it_core::store::{ProvenanceStore, StoreError};
 
-/// A single provenance record capturing the context of one agent invocation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProvenanceRecord {
-    /// Identifier of the task that was executed.
-    pub task_id: String,
-    /// Role of the agent that executed the task.
-    pub agent_role: AgentRole,
-    /// Human-readable name of the model/provider used.
-    pub model: String,
-    /// Hex hash of the prompt (task description) sent to the agent.
-    pub prompt_hash: String,
-    /// Tool calls made during the invocation (e.g. reflection, evaluation).
-    pub tool_calls: Vec<String>,
-    /// Hex hash of the git diff produced after the invocation.
-    pub git_diff_hash: String,
-    /// Unix timestamp (seconds) when the invocation started.
-    pub timestamp: u64,
-    /// Outcome of the invocation: `"success"` or `"failure"`.
-    pub outcome: String,
-}
+// Re-export from wreck-it-core so callers of `crate::provenance::ProvenanceRecord`
+// continue to work unchanged.
+pub use wreck_it_core::types::ProvenanceRecord;
 
 /// Hash a string using the standard library's `DefaultHasher` and return a
 /// 16-character lowercase hex string.  Not cryptographically strong, but
@@ -101,9 +83,48 @@ pub fn persist_provenance_record(record: &ProvenanceRecord, work_dir: &Path) -> 
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// FileProvenanceStore — file-system-backed ProvenanceStore implementation
+// ---------------------------------------------------------------------------
+
+/// File-system-backed implementation of [`ProvenanceStore`].
+///
+/// Stores provenance records as individual JSON files under
+/// `<work_dir>/.wreck-it-provenance/`.
+pub struct FileProvenanceStore {
+    work_dir: PathBuf,
+}
+
+impl FileProvenanceStore {
+    pub fn new(work_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            work_dir: work_dir.into(),
+        }
+    }
+}
+
+impl ProvenanceStore for FileProvenanceStore {
+    fn load_provenance_records(
+        &self,
+        task_id: &str,
+    ) -> Result<Vec<ProvenanceRecord>, StoreError> {
+        load_provenance_records(task_id, &self.work_dir)
+            .map_err(|e| StoreError::new(e.to_string()))
+    }
+
+    fn persist_provenance_record(
+        &self,
+        record: &ProvenanceRecord,
+    ) -> Result<(), StoreError> {
+        persist_provenance_record(record, &self.work_dir)
+            .map_err(|e| StoreError::new(e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::AgentRole;
     use tempfile::tempdir;
 
     // ---- hash_string tests ----

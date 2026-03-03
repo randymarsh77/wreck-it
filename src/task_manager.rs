@@ -2,7 +2,8 @@ use crate::types::{AgentRole, Task, TaskStatus};
 use anyhow::{bail, Context, Result};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use wreck_it_core::store::{StoreError, TaskStore};
 
 // Re-export from wreck-it-core so callers of `crate::task_manager::reset_recurring_tasks`
 // continue to work unchanged.
@@ -147,6 +148,33 @@ pub fn append_task(path: &Path, new_task: Task) -> Result<()> {
 
     tasks.push(new_task);
     save_tasks(path, &tasks)
+}
+
+// ---------------------------------------------------------------------------
+// FileTaskStore — file-system-backed TaskStore implementation
+// ---------------------------------------------------------------------------
+
+/// File-system-backed implementation of [`TaskStore`].
+///
+/// Reads and writes tasks as a JSON array in a single file.
+pub struct FileTaskStore {
+    path: PathBuf,
+}
+
+impl FileTaskStore {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+}
+
+impl TaskStore for FileTaskStore {
+    fn load_tasks(&self) -> Result<Vec<Task>, StoreError> {
+        load_tasks(&self.path).map_err(|e| StoreError::new(e.to_string()))
+    }
+
+    fn save_tasks(&self, tasks: &[Task]) -> Result<(), StoreError> {
+        save_tasks(&self.path, tasks).map_err(|e| StoreError::new(e.to_string()))
+    }
 }
 
 #[cfg(test)]

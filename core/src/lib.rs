@@ -14,4 +14,5 @@
 pub mod config;
 pub mod iteration;
 pub mod state;
+pub mod store;
 pub mod types;
