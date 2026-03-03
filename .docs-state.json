@@ -13,7 +13,8 @@
     "advance: merged PR #97",
     "iteration 2: triggered cloud agent for task docs-review (issue #102)",
     "iteration 2: agent created PR #103 for task Some(\"docs-review\")",
-    "iteration 2: marked PR #103 as ready for review"
+    "iteration 2: marked PR #103 as ready for review",
+    "iteration 2: PR #103 not yet mergeable"
   ],
   "tracked_prs": [
     {
