@@ -131,6 +131,7 @@ mod tests {
             tracked_prs: vec![TrackedPr {
                 pr_number: 20,
                 task_id: "t1".into(),
+                issue_number: Some(10),
             }],
         };
         let json = serde_json::to_string_pretty(&state).unwrap();

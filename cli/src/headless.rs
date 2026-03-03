@@ -222,6 +222,7 @@ async fn advance_tracked_prs(
             state.tracked_prs.push(TrackedPr {
                 pr_number: pr_num,
                 task_id,
+                issue_number: state.issue_number,
             });
         }
     }
@@ -255,6 +256,30 @@ async fn advance_tracked_prs(
 
         match client.check_pr_merge_status(pr_number).await {
             Ok(PrMergeStatus::Draft) => {
+                // If we know the triggering issue, check whether the coding
+                // agent is still assigned — a draft PR while the agent is
+                // assigned means it is still pushing changes and should not
+                // be marked ready yet.
+                if let Some(issue_num) = tracked.issue_number {
+                    match client.is_agent_assigned_to_issue(issue_num).await {
+                        Ok(true) => {
+                            println!(
+                                "[wreck-it] advance: PR #{} is a draft and agent is still \
+                                 assigned to issue #{}; skipping",
+                                pr_number, issue_num,
+                            );
+                            continue;
+                        }
+                        Ok(false) => { /* agent finished; mark ready below */ }
+                        Err(e) => {
+                            println!(
+                                "[wreck-it] advance: failed to check agent assignment for \
+                                 issue #{}: {}; proceeding to mark ready",
+                                issue_num, e,
+                            );
+                        }
+                    }
+                }
                 println!(
                     "[wreck-it] advance: PR #{} is a draft, marking ready for review",
                     pr_number
@@ -591,6 +616,30 @@ async fn run_agent_working(
             // Stay in AgentWorking phase.
             Ok(StepOutcome::Yield)
         }
+        CloudAgentStatus::PrCreatedAgentWorking { pr_number, pr_url } => {
+            println!(
+                "[wreck-it] agent created PR #{} but is still working: {}",
+                pr_number, pr_url
+            );
+            // Record the PR so it is tracked, but stay in AgentWorking
+            // because the agent is still pushing changes.
+            state.pr_number = Some(pr_number);
+            state.pr_url = Some(pr_url.clone());
+            state.memory.push(format!(
+                "iteration {}: agent opened PR #{} for task {:?} (still working)",
+                state.iteration, pr_number, state.current_task_id,
+            ));
+            if let Some(task_id) = state.current_task_id.clone() {
+                if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_number) {
+                    state.tracked_prs.push(TrackedPr {
+                        pr_number,
+                        task_id,
+                        issue_number: Some(issue_number),
+                    });
+                }
+            }
+            Ok(StepOutcome::Yield)
+        }
         CloudAgentStatus::PrCreated { pr_number, pr_url } => {
             println!("[wreck-it] agent created PR #{}: {}", pr_number, pr_url);
             state.pr_number = Some(pr_number);
@@ -603,7 +652,11 @@ async fn run_agent_working(
             // Track this PR so it is managed across invocations.
             if let Some(task_id) = state.current_task_id.clone() {
                 if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_number) {
-                    state.tracked_prs.push(TrackedPr { pr_number, task_id });
+                    state.tracked_prs.push(TrackedPr {
+                        pr_number,
+                        task_id,
+                        issue_number: Some(issue_number),
+                    });
                 }
             }
             Ok(StepOutcome::Continue)

@@ -12,6 +12,11 @@ pub enum CloudAgentStatus {
     Working,
     /// The agent has created a PR.
     PrCreated { pr_number: u64, pr_url: String },
+    /// The agent has created a PR but is still actively working on it.
+    ///
+    /// This is detected when the coding agent is still assigned to the
+    /// triggering issue, indicating it has not finished pushing changes.
+    PrCreatedAgentWorking { pr_number: u64, pr_url: String },
     /// The agent session completed or the issue was closed without a PR.
     CompletedNoPr,
 }
@@ -548,6 +553,15 @@ impl CloudAgentClient {
     pub async fn check_agent_status(&self, issue_number: u64) -> Result<CloudAgentStatus> {
         // Look for open PRs that reference this issue.
         if let Some(status) = self.find_linked_pr(issue_number).await? {
+            // A linked PR was found.  Check whether the coding agent is still
+            // assigned to the triggering issue — if so, it is still actively
+            // pushing changes and the PR is not ready for verification yet.
+            if let CloudAgentStatus::PrCreated { pr_number, pr_url } = status {
+                if self.is_agent_assigned_to_issue(issue_number).await? {
+                    return Ok(CloudAgentStatus::PrCreatedAgentWorking { pr_number, pr_url });
+                }
+                return Ok(CloudAgentStatus::PrCreated { pr_number, pr_url });
+            }
             return Ok(status);
         }
 
@@ -594,6 +608,36 @@ impl CloudAgentClient {
         }
 
         Ok(CloudAgentStatus::Working)
+    }
+
+    /// Check whether a known coding agent is still assigned to the given issue.
+    ///
+    /// Returns `true` when one of the [`KNOWN_AGENT_LOGINS`] appears in the
+    /// issue's assignee list, indicating the agent is still actively working.
+    /// Network or permission errors are treated as `false` (not assigned) so
+    /// that the caller can proceed conservatively.
+    pub async fn is_agent_assigned_to_issue(&self, issue_number: u64) -> Result<bool> {
+        let issue_url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, issue_number,
+        );
+
+        let resp = self
+            .http
+            .get(&issue_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch issue for agent assignment check")?;
+
+        if resp.status().is_success() {
+            let issue: serde_json::Value = resp.json().await?;
+            Ok(is_copilot_in_assignees(&issue))
+        } else {
+            Ok(false)
+        }
     }
 
     /// Search for open PRs that reference the given issue number.
@@ -1258,6 +1302,26 @@ mod tests {
             pr,
             CloudAgentStatus::PrCreated { pr_number: 42, .. }
         ));
+
+        let pr_working = CloudAgentStatus::PrCreatedAgentWorking {
+            pr_number: 7,
+            pr_url: "https://github.com/o/r/pull/7".to_string(),
+        };
+        assert!(matches!(
+            pr_working,
+            CloudAgentStatus::PrCreatedAgentWorking { pr_number: 7, .. }
+        ));
+        // PrCreatedAgentWorking is distinct from PrCreated.
+        assert_ne!(
+            CloudAgentStatus::PrCreated {
+                pr_number: 7,
+                pr_url: "https://github.com/o/r/pull/7".to_string(),
+            },
+            CloudAgentStatus::PrCreatedAgentWorking {
+                pr_number: 7,
+                pr_url: "https://github.com/o/r/pull/7".to_string(),
+            },
+        );
 
         let no_pr = CloudAgentStatus::CompletedNoPr;
         assert_eq!(no_pr, CloudAgentStatus::CompletedNoPr);

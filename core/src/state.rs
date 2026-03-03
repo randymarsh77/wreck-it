@@ -30,6 +30,13 @@ pub struct TrackedPr {
     pub pr_number: u64,
     /// The wreck-it task ID associated with this PR.
     pub task_id: String,
+    /// GitHub issue number that triggered the agent for this PR.
+    ///
+    /// When present, the runner can check whether the coding agent is still
+    /// assigned to the issue (i.e. still actively working) before attempting
+    /// to merge or mark the PR as ready for review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue_number: Option<u64>,
 }
 
 /// Persistent state that is committed to the repo between cron invocations.
