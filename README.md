@@ -39,6 +39,8 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 🌐 **Gastown Cloud Runtime**: Offload tasks to the gastown cloud agent service
 - 🎯 **Multi-Ralph Contexts**: Run independent loops with separate task/state files per context
 - 🧐 **Agent-Evaluated Preconditions**: Let an agent decide whether a task should run, enabling nuanced re-run criteria for recurring tasks in powerful ralph loops
+- 🏷️ **Epics & Sub-tasks**: Organize tasks into epics with hierarchical sub-tasks and progress tracking
+- 💡 **Per-Task Agent Memory**: Agents learn from prior attempts via persistent per-task memory files
 
 ## Installation
 
@@ -106,7 +108,7 @@ Options:
 - `--headless`: Run without TUI for CI environments
 - `--reflection-rounds <NUM>`: Max critic-actor reflection rounds (default: `2`, `0` to disable)
 - `--replan-threshold <NUM>`: Consecutive failures before adaptive re-planning (default: `2`, `0` to disable)
-- `--ralph <NAME>`: Named ralph context from `.wreck-it/config.toml`
+- `--ralph <NAME>`: Named ralph context from `.wreck-it/config.toml`; use `--ralph all` (headless only) to run every ralph sequentially
 - `--goal <TEXT>`: Generate a task plan from a natural-language goal before starting
 
 **Note**: When using `--model-provider copilot`, the Copilot CLI must be authenticated and available in your PATH. When using `--model-provider github-models`, set `GITHUB_TOKEN` in your environment.
@@ -178,7 +180,9 @@ A task with all available fields:
   "outputs": [
     { "kind": "file", "name": "api", "path": "cli/src/api.rs" }
   ],
-  "runtime": "local"
+  "runtime": "local",
+  "parent_id": "epic-auth",
+  "labels": ["backend", "api"]
 }
 ```
 
@@ -198,6 +202,8 @@ A task with all available fields:
 | `outputs` | Artefacts to persist on completion (`kind`, `name`, `path`) | `[]` |
 | `runtime` | `local` or `gastown` (cloud execution) | `local` |
 | `precondition_prompt` | Agent-evaluated precondition; task is skipped when the agent determines the condition is not met | *(none)* |
+| `parent_id` | ID of the parent task (epic); marks this task as a sub-task | *(none)* |
+| `labels` | Free-form labels for categorization (e.g. board columns, tags) | `[]` |
 
 ## GitHub Action
 
