@@ -237,4 +237,34 @@ mod tests {
             .unwrap();
         assert_eq!(count_pending_tasks(&store).unwrap(), 1);
     }
+
+    #[test]
+    fn generic_function_all_completed() {
+        let store = InMemoryTaskStore::new();
+        store
+            .save_tasks(&[
+                make_task("a", TaskStatus::Completed),
+                make_task("b", TaskStatus::Completed),
+            ])
+            .unwrap();
+        assert_eq!(count_pending_tasks(&store).unwrap(), 0);
+    }
+
+    #[test]
+    fn generic_function_all_pending() {
+        let store = InMemoryTaskStore::new();
+        store
+            .save_tasks(&[
+                make_task("a", TaskStatus::Pending),
+                make_task("b", TaskStatus::Pending),
+            ])
+            .unwrap();
+        assert_eq!(count_pending_tasks(&store).unwrap(), 2);
+    }
+
+    #[test]
+    fn generic_function_empty_store() {
+        let store = InMemoryTaskStore::new();
+        assert_eq!(count_pending_tasks(&store).unwrap(), 0);
+    }
 }
