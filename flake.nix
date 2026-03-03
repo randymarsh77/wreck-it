@@ -47,5 +47,19 @@
           default = wreck-it;
           wreck-it = wreck-it;
         };
+
+        apps.build-app = {
+          type = "app";
+          program = toString (pkgs.writeShellScript "build-app" ''
+            set -euo pipefail
+            echo "▸ Building Rust static library…"
+            cargo build --release -p wreck-it
+            echo "▸ Building WreckItBoard.app…"
+            xcodebuild -project WreckItBoard/WreckItBoard.xcodeproj \
+              -scheme WreckItBoard \
+              -configuration Release \
+              build
+          '');
+        };
       });
 }
