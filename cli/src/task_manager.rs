@@ -8,7 +8,7 @@ use wreck_it_core::store::{StoreError, TaskStore};
 // continue to work unchanged.
 pub use wreck_it_core::iteration::reset_recurring_tasks;
 pub use wreck_it_core::task_manager::{
-    filter_tasks_by_role, generate_task_id, get_next_task, has_circular_dependency, MAX_TASKS,
+    get_next_task, has_circular_dependency, MAX_TASKS,
 };
 
 /// Load tasks from a JSON file

@@ -10,6 +10,150 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
+/// Resolve the `copilot` binary path.
+///
+/// Tries the `which` crate first, then falls back to running the shell
+/// `which` command as a subprocess (more reliable with Nix-managed PATHs).
+pub(crate) fn resolve_copilot_cli_path() -> Option<String> {
+    // Strategy 1: `which` crate
+    if let Ok(p) = which::which("copilot") {
+        let path = p.to_string_lossy().to_string();
+        tracing::info!("Resolved copilot CLI path (which crate): {}", path);
+        return Some(path);
+    }
+
+    // Strategy 2: shell `which` subprocess — handles Nix wrapper scripts
+    // and other cases the crate may miss.
+    if let Ok(output) = Command::new("which")
+        .arg("copilot")
+        .output()
+    {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                tracing::info!("Resolved copilot CLI path (shell which): {}", path);
+                return Some(path);
+            }
+        }
+    }
+
+    tracing::warn!("Could not find 'copilot' binary on PATH");
+    None
+}
+
+/// Run a Copilot SDK session's `send_and_wait` on a **dedicated blocking thread**
+/// with its own single-threaded tokio runtime.
+///
+/// The SDK internally uses `tokio::sync::Mutex::blocking_lock()` inside the
+/// event-handler callback registered by `send_and_wait`.  That call panics when
+/// executed on a tokio worker thread (as it would be if we `.await`-ed directly
+/// from the multi-threaded runtime).  By hopping onto a `spawn_blocking` thread
+/// we give the SDK a context where `blocking_lock()` is legal.
+///
+/// Returns the assistant message content (or a default) and consumes/destroys
+/// the session.
+pub(crate) async fn copilot_send_on_blocking_thread(
+    session: Arc<CopilotSession>,
+    prompt: String,
+    timeout_ms: u64,
+) -> Result<Option<SessionEvent>> {
+    let result = tokio::task::spawn_blocking(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build blocking-thread runtime");
+
+        rt.block_on(async {
+            let response = session
+                .send_and_wait(
+                    MessageOptions {
+                        prompt,
+                        attachments: None,
+                        mode: None,
+                    },
+                    Some(timeout_ms),
+                )
+                .await;
+
+            let _ = session.destroy().await;
+            response
+        })
+    })
+    .await
+    .context("Copilot SDK blocking task panicked")?;
+
+    Ok(result?)
+}
+
+/// Convenience wrapper: create a fresh CopilotClient, open a session,
+/// send a single prompt, and tear everything down — all on a blocking thread.
+///
+/// Used by the planner / replanner which don't keep a persistent client.
+pub(crate) async fn copilot_oneshot(
+    cli_path: String,
+    config: SessionConfig,
+    prompt: String,
+    timeout_ms: u64,
+    default_response: &str,
+) -> Result<String> {
+    let default = default_response.to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build blocking-thread runtime");
+
+        rt.block_on(async {
+            let options = CopilotClientOptions {
+                cli_path: Some(cli_path),
+                log_level: "info".to_string(),
+                ..Default::default()
+            };
+
+            let client = CopilotClient::new(options);
+            client
+                .start()
+                .await
+                .context("Failed to start Copilot client")?;
+
+            let session = client
+                .create_session(config)
+                .await
+                .context("Failed to create Copilot session")?;
+
+            let response = session
+                .send_and_wait(
+                    MessageOptions {
+                        prompt,
+                        attachments: None,
+                        mode: None,
+                    },
+                    Some(timeout_ms),
+                )
+                .await;
+
+            let _ = session.destroy().await;
+            let _ = client.stop().await;
+
+            let text = response
+                .context("Failed to get response from Copilot")?
+                .map(|event| {
+                    event
+                        .assistant_message_content()
+                        .unwrap_or(&default)
+                        .to_string()
+                })
+                .unwrap_or_else(|| default.clone());
+
+            Ok::<String, anyhow::Error>(text)
+        })
+    })
+    .await
+    .context("Copilot SDK blocking task panicked")??;
+
+    Ok(result)
+}
+
 /// Agent client for interacting with GitHub Copilot SDK
 pub struct AgentClient {
     copilot_client: Option<Arc<CopilotClient>>,
@@ -62,7 +206,7 @@ impl AgentClient {
     ) -> Self {
         Self {
             copilot_client: None,
-            cli_path: None,
+            cli_path: resolve_copilot_cli_path(),
             work_dir,
             model_provider,
             api_endpoint,
@@ -85,7 +229,23 @@ impl AgentClient {
             return Ok(Arc::clone(client));
         }
 
-        tracing::info!("Initializing Copilot SDK client...");
+        // Retry PATH resolution in case the environment changed since construction.
+        if self.cli_path.is_none() {
+            self.cli_path = resolve_copilot_cli_path();
+        }
+
+        if self.cli_path.is_none() {
+            bail!(
+                "Could not find the 'copilot' binary on PATH. \
+                 Install GitHub Copilot CLI (https://gh.io/copilot-install) \
+                 or ensure it is available in your shell environment."
+            );
+        }
+
+        tracing::info!(
+            "Initializing Copilot SDK client (cli_path={})...",
+            self.cli_path.as_deref().unwrap_or("<none>")
+        );
 
         let options = CopilotClientOptions {
             cli_path: self.cli_path.clone(),
@@ -215,20 +375,12 @@ impl AgentClient {
             self.work_dir, task.description, context, memory_section, artefact_section
         );
 
-        // Send the message and wait for response
-        let response = session
-            .send_and_wait(
-                MessageOptions {
-                    prompt,
-                    attachments: None,
-                    mode: None,
-                },
-                Some(120_000), // 2 minute timeout
-            )
-            .await;
-
-        // Clean up the session regardless of outcome
-        session.destroy().await.ok();
+        // Send the message and wait for response (on a blocking thread to
+        // avoid tokio blocking_lock panics inside the SDK).
+        let response = copilot_send_on_blocking_thread(
+            session, prompt, 120_000,
+        )
+        .await;
 
         // Record this attempt in memory before propagating any error.
         let (outcome, summary) = match &response {
@@ -579,25 +731,17 @@ impl AgentClient {
             marker = self.completion_marker_file,
         );
 
-        let response = session
-            .send_and_wait(
-                MessageOptions {
-                    prompt,
-                    attachments: None,
-                    mode: None,
-                },
-                Some(120_000),
-            )
-            .await
-            .context("Failed to get evaluation response from agent")?;
+        let response = copilot_send_on_blocking_thread(
+            session, prompt, 120_000,
+        )
+        .await
+        .context("Failed to get evaluation response from agent")?;
 
         if let Some(event) = &response {
             if let Some(msg) = event.assistant_message_content() {
                 tracing::info!("Evaluation agent response: {}", msg);
             }
         }
-
-        session.destroy().await.ok();
 
         // Check whether the marker file was created.
         let complete = marker_path.exists();
@@ -688,25 +832,17 @@ impl AgentClient {
             marker = DEFAULT_PRECONDITION_MARKER,
         );
 
-        let response = session
-            .send_and_wait(
-                MessageOptions {
-                    prompt: agent_prompt,
-                    attachments: None,
-                    mode: None,
-                },
-                Some(120_000),
-            )
-            .await
-            .context("Failed to get precondition evaluation response from agent")?;
+        let response = copilot_send_on_blocking_thread(
+            session, agent_prompt, 120_000,
+        )
+        .await
+        .context("Failed to get precondition evaluation response from agent")?;
 
         if let Some(event) = &response {
             if let Some(msg) = event.assistant_message_content() {
                 tracing::info!("Precondition evaluation agent response: {}", msg);
             }
         }
-
-        session.destroy().await.ok();
 
         // Check whether the marker file was created.
         let met = marker_path.exists();
@@ -872,19 +1008,11 @@ impl AgentClient {
             .await
             .context("Failed to create critic session")?;
 
-        let response = session
-            .send_and_wait(
-                MessageOptions {
-                    prompt: prompt.to_string(),
-                    attachments: None,
-                    mode: None,
-                },
-                Some(60_000),
-            )
-            .await
-            .context("Failed to get critic response from Copilot")?;
-
-        session.destroy().await.ok();
+        let response = copilot_send_on_blocking_thread(
+            session, prompt.to_string(), 60_000,
+        )
+        .await
+        .context("Failed to get critic response from Copilot")?;
 
         Ok(response
             .as_ref()
