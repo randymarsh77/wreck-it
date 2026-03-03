@@ -412,6 +412,18 @@ Group related tasks under a parent **epic** using the `parent_id` field. Use `la
 
 A task with no `parent_id` that has other tasks pointing to it via `parent_id` is treated as an **epic**. Sub-tasks can have their own `depends_on`, `role`, and other fields independently. Labels are purely organizational metadata and are not used by the scheduler.
 
+### Per-Task Agent Memory
+
+wreck-it automatically maintains a persistent memory log for each task. After every execution attempt, the outcome and a short summary are appended to `.wreck-it-memory/{task_id}.md`. Before the next attempt, this history is prepended to the agent's prompt so it can learn from prior outcomes and avoid repeating the same mistakes.
+
+```
+.wreck-it-memory/
+├── auth-impl.md     # "Attempt 1 - Failure: missing import…"
+└── auth-tests.md    # "Attempt 1 - Success: all tests pass"
+```
+
+This is especially useful for tasks that span multiple cron invocations or require several iterations to complete — the agent accumulates knowledge across runs without any manual intervention.
+
 ### Named Ralph Contexts (Multi-Ralph)
 
 For fully independent loops, define named ralphs in `.wreck-it/config.toml`:

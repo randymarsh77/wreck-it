@@ -67,3 +67,5 @@ The Ralph Wiggum Loop is a continuous execution pattern designed for AI agent wo
 - 🌐 **Gastown Cloud Runtime** — Offload tasks to the gastown cloud agent service
 - 🎯 **Multi-Ralph Contexts** — Run independent loops per context
 - 🧐 **Agent-Evaluated Preconditions** — Let an agent decide whether a task should run, for nuanced recurring task control in powerful ralph loops
+- 🏷️ **Epics & Sub-tasks** — Organize tasks into epics with hierarchical sub-tasks and progress tracking
+- 💡 **Per-Task Agent Memory** — Agents learn from prior attempts via persistent per-task memory files
