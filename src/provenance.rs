@@ -1,23 +1,13 @@
 use anyhow::{Context, Result};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use wreck_it_core::store::{ProvenanceStore, StoreError};
 
-// Re-export from wreck-it-core so callers of `crate::provenance::ProvenanceRecord`
+// Re-export from wreck-it-core so callers of `crate::provenance::*`
 // continue to work unchanged.
+pub use wreck_it_core::provenance::hash_string;
 pub use wreck_it_core::types::ProvenanceRecord;
-
-/// Hash a string using the standard library's `DefaultHasher` and return a
-/// 16-character lowercase hex string.  Not cryptographically strong, but
-/// adequate for provenance identification.
-pub fn hash_string(s: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    s.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
-}
 
 /// Compute a hex hash of the current uncommitted git diff in `work_dir`.
 /// Returns `"0000000000000000"` when the diff cannot be obtained.

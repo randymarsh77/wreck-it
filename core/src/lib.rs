@@ -13,6 +13,9 @@
 
 pub mod config;
 pub mod iteration;
+pub mod provenance;
+pub mod replanner;
 pub mod state;
 pub mod store;
+pub mod task_manager;
 pub mod types;

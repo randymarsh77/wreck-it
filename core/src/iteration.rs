@@ -3,7 +3,7 @@
 //! This module contains the pure business logic that both the CLI headless
 //! runner and the Cloudflare Worker use when processing an iteration.
 
-use crate::state::HeadlessState;
+use crate::state::{AgentPhase, HeadlessState};
 use crate::types::{Task, TaskKind, TaskStatus};
 use std::collections::HashSet;
 
@@ -77,6 +77,70 @@ pub fn reset_recurring_tasks(tasks: &mut [Task], now_secs: u64) -> usize {
         }
     }
     count
+}
+
+// ---------------------------------------------------------------------------
+// Shared iteration step
+// ---------------------------------------------------------------------------
+
+/// Outcome of a single iteration advance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IterationOutcome {
+    /// All tasks are already complete — nothing to do.
+    AllComplete,
+    /// No eligible pending tasks (dependencies not met, etc.).
+    NoPendingTasks,
+    /// A task was selected and marked in-progress.
+    TaskStarted {
+        task_id: String,
+        task_description: String,
+    },
+}
+
+/// Advance one iteration of the task loop.
+///
+/// This is the canonical shared logic used by both the CLI headless runner and
+/// the Cloudflare Worker.  It performs the following steps:
+///
+/// 1. Reset completed recurring tasks whose cooldown has elapsed.
+/// 2. Check whether all tasks are complete.
+/// 3. Select the next eligible pending task.
+/// 4. Mark the selected task as `InProgress` and update `state`.
+///
+/// The caller is responsible for loading tasks and state beforehand and
+/// persisting them afterward (via file I/O, API calls, etc.).
+pub fn advance_iteration(
+    tasks: &mut [Task],
+    state: &mut HeadlessState,
+    now_secs: u64,
+) -> IterationOutcome {
+    // Step 1: Reset completed recurring tasks.
+    reset_recurring_tasks(tasks, now_secs);
+
+    // Step 2: Check if all tasks are complete.
+    let all_done = !tasks.is_empty() && tasks.iter().all(|t| t.status == TaskStatus::Completed);
+    if all_done {
+        return IterationOutcome::AllComplete;
+    }
+
+    // Step 3: Select the next pending task.
+    let next_idx = match select_next_task(tasks, state) {
+        Some(idx) => idx,
+        None => return IterationOutcome::NoPendingTasks,
+    };
+
+    // Step 4: Advance state.
+    let task_id = tasks[next_idx].id.clone();
+    let task_desc = tasks[next_idx].description.clone();
+    tasks[next_idx].status = TaskStatus::InProgress;
+    state.phase = AgentPhase::NeedsTrigger;
+    state.current_task_id = Some(task_id.clone());
+    state.iteration += 1;
+
+    IterationOutcome::TaskStarted {
+        task_id,
+        task_description: task_desc,
+    }
 }
 
 #[cfg(test)]
@@ -234,5 +298,76 @@ mod tests {
         ];
         let count = reset_recurring_tasks(&mut tasks, 9999);
         assert_eq!(count, 0);
+    }
+
+    // ---- advance_iteration tests ----
+
+    #[test]
+    fn advance_selects_and_marks_in_progress() {
+        let mut tasks = vec![
+            make_task("a", TaskStatus::Pending, 1, vec![]),
+            make_task("b", TaskStatus::Pending, 2, vec!["a"]),
+        ];
+        let mut state = HeadlessState::default();
+
+        let outcome = advance_iteration(&mut tasks, &mut state, 0);
+        assert_eq!(
+            outcome,
+            IterationOutcome::TaskStarted {
+                task_id: "a".into(),
+                task_description: "task a".into(),
+            }
+        );
+        assert_eq!(tasks[0].status, TaskStatus::InProgress);
+        assert_eq!(state.current_task_id, Some("a".into()));
+        assert_eq!(state.iteration, 1);
+        assert_eq!(state.phase, AgentPhase::NeedsTrigger);
+    }
+
+    #[test]
+    fn advance_returns_all_complete() {
+        let mut tasks = vec![
+            make_task("a", TaskStatus::Completed, 1, vec![]),
+            make_task("b", TaskStatus::Completed, 1, vec![]),
+        ];
+        let mut state = HeadlessState::default();
+        assert_eq!(
+            advance_iteration(&mut tasks, &mut state, 0),
+            IterationOutcome::AllComplete
+        );
+    }
+
+    #[test]
+    fn advance_returns_no_pending_when_deps_unmet() {
+        let mut tasks = vec![
+            make_task("a", TaskStatus::InProgress, 1, vec![]),
+            make_task("b", TaskStatus::Pending, 1, vec!["a"]),
+        ];
+        let mut state = HeadlessState::default();
+        assert_eq!(
+            advance_iteration(&mut tasks, &mut state, 0),
+            IterationOutcome::NoPendingTasks
+        );
+    }
+
+    #[test]
+    fn advance_resets_recurring_before_selecting() {
+        let mut tasks = vec![{
+            let mut t = make_task("a", TaskStatus::Completed, 1, vec![]);
+            t.kind = TaskKind::Recurring;
+            t.last_attempt_at = Some(100);
+            t
+        }];
+        let mut state = HeadlessState::default();
+        let outcome = advance_iteration(&mut tasks, &mut state, 200);
+        // The recurring task should have been reset to Pending, then selected.
+        assert_eq!(
+            outcome,
+            IterationOutcome::TaskStarted {
+                task_id: "a".into(),
+                task_description: "task a".into(),
+            }
+        );
+        assert_eq!(tasks[0].status, TaskStatus::InProgress);
     }
 }
