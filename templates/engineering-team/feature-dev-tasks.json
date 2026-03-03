@@ -1,1 +1,158 @@
-[]
+[
+  {
+    "id": "ideas-webhook-notifications",
+    "description": "Research and design a webhook notification system for wreck-it. The system should allow users to configure one or more webhook URLs (e.g. Slack, Discord, or generic HTTP endpoints) that receive JSON payloads whenever a task changes status (started, completed, failed). Review the existing Config and Task types in cli/src/types.rs and cli/src/ralph_loop.rs to design the integration points. Propose a Config field (e.g. notify_webhooks: Vec<String>), a minimal JSON payload schema, and identify exactly where in ralph_loop.rs the hook calls should be inserted (after status transitions). Document findings as inline comments in a new cli/src/notifier.rs stub file.",
+    "status": "pending",
+    "role": "ideas",
+    "phase": 1,
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "impl-webhook-notifications",
+    "description": "Implement the webhook notification system designed in ideas-webhook-notifications. Create cli/src/notifier.rs with an async `notify` function that sends an HTTP POST with a JSON payload (task id, status, timestamp, description) to each configured URL using reqwest. Add a `notify_webhooks: Vec<String>` field to Config in cli/src/types.rs (default empty, skip_serializing_if empty). Wire calls to `notify` in cli/src/ralph_loop.rs after task status transitions to InProgress, Completed, and Failed. Add `--notify-webhook <URL>` (multi-value) CLI flag in cli/src/cli.rs that appends to the config's webhook list. Ensure failures to reach a webhook are logged as warnings but do not abort the loop.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["ideas-webhook-notifications"],
+    "priority": 3,
+    "complexity": 4
+  },
+  {
+    "id": "test-webhook-notifications",
+    "description": "Add unit and integration tests for the webhook notification system. In cli/src/notifier.rs or a separate test module, use a mock HTTP server (wiremock or httpmock crate, or a simple tokio TCP listener) to verify: (1) a POST request is sent to each configured URL on task status change, (2) the JSON payload contains the correct task id, status, and timestamp fields, (3) a webhook failure (connection refused) logs a warning but does not propagate an error. Run `cargo test` to confirm all tests pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["impl-webhook-notifications"],
+    "priority": 3,
+    "complexity": 3
+  },
+  {
+    "id": "eval-webhook-notifications",
+    "description": "Evaluate the completed webhook notification implementation. Review cli/src/notifier.rs, the Config changes in cli/src/types.rs, the call sites in cli/src/ralph_loop.rs, and the CLI flag in cli/src/cli.rs. Verify: (1) the code compiles with no warnings (`cargo clippy -- -D warnings`), (2) the JSON payload schema is documented clearly, (3) errors are handled gracefully without aborting the loop, (4) the feature is reflected in README.md Features list. Fix any issues found and mark this task complete.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": ["test-webhook-notifications"],
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-task-timeout-retry",
+    "description": "Research and design per-task timeout and auto-retry support for wreck-it. Review the Task struct in core/src/types.rs (or cli/src/types.rs) and the agent execution flow in cli/src/ralph_loop.rs and cli/src/agent.rs. Propose: (1) new optional Task fields `timeout_seconds: Option<u64>` and `max_retries: Option<u32>`, (2) how tokio::time::timeout wraps the agent call, (3) how the retry counter is tracked in task state without requiring a new state file (reuse or extend the existing failed_attempts field if present). Document the design with inline notes in a scratch section of this task's description or as comments in a new branch of the relevant source files.",
+    "status": "pending",
+    "role": "ideas",
+    "phase": 1,
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "impl-task-timeout-retry",
+    "description": "Implement per-task timeout and auto-retry. Add optional fields `timeout_seconds: Option<u64>` and `max_retries: Option<u32>` to the Task struct in core/src/types.rs (with serde defaults of None). In cli/src/ralph_loop.rs, wrap the agent execution call with `tokio::time::timeout` when `timeout_seconds` is set, treating a timeout as a task failure with a clear error message. Add retry logic: if a task fails and its `failed_attempts` count is below `max_retries`, reset its status back to Pending (instead of Failed) so the scheduler picks it up again on the next iteration. Ensure retry counts are persisted to the task file.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["ideas-task-timeout-retry"],
+    "priority": 4,
+    "complexity": 5
+  },
+  {
+    "id": "test-task-timeout-retry",
+    "description": "Add tests for the per-task timeout and auto-retry feature. In core/src/ or cli/src/, add unit tests that verify: (1) a task with `timeout_seconds: 1` that takes longer than 1 second is marked as failed with a timeout error message, (2) a task with `max_retries: 2` that fails is reset to Pending status and only marked Failed after exceeding the retry limit, (3) a task with no timeout_seconds or max_retries behaves exactly as before. Run `cargo test` to confirm all tests pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["impl-task-timeout-retry"],
+    "priority": 4,
+    "complexity": 3
+  },
+  {
+    "id": "eval-task-timeout-retry",
+    "description": "Evaluate the timeout and auto-retry implementation. Review the Task struct changes, ralph_loop.rs modifications, and new tests. Verify: (1) `cargo clippy -- -D warnings` passes cleanly, (2) the task file format documentation in README.md is updated to document the new `timeout_seconds` and `max_retries` fields in the task format table, (3) retry semantics do not conflict with the existing adaptive re-planning feature (replan threshold). Fix any issues found.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": ["test-task-timeout-retry"],
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-task-graph-export",
+    "description": "Research and design a `wreck-it graph` sub-command that reads a task file and exports the dependency graph in Mermaid flowchart and/or GraphViz DOT format. Review the existing CLI structure in cli/src/cli.rs (clap commands) and the Task type. Design: (1) a new `graph` subcommand with flags `--task-file`, `--format <mermaid|dot>`, and `--output <file>` (default stdout), (2) the Mermaid flowchart syntax for representing task nodes (id + role) and directed edges (depends_on relationships), coloured by status (pending=gray, completed=green, failed=red). No new dependencies should be needed since graph generation is pure string formatting.",
+    "status": "pending",
+    "role": "ideas",
+    "phase": 1,
+    "priority": 2,
+    "complexity": 2
+  },
+  {
+    "id": "impl-task-graph-export",
+    "description": "Implement the `wreck-it graph` sub-command. Add a `Graph` variant to the Commands enum in cli/src/cli.rs with args `--task-file`, `--format` (mermaid or dot, default mermaid), and `--output`. Create cli/src/graph.rs with a `generate_mermaid` and `generate_dot` function that reads the task list and emits the graph text: nodes labelled with task id and role, edges from each task to its dependents, node style reflecting status (pending/completed/failed/inprogress). Wire the command in cli/src/main.rs. No extra crate dependencies are needed.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["ideas-task-graph-export"],
+    "priority": 2,
+    "complexity": 3
+  },
+  {
+    "id": "test-task-graph-export",
+    "description": "Add tests for the graph export feature. In cli/src/graph.rs or a test module, add unit tests that: (1) verify `generate_mermaid` produces valid Mermaid syntax for a simple 3-task chain (A → B → C), including the correct flowchart header and arrow syntax, (2) verify `generate_dot` produces valid DOT syntax with digraph header, node definitions, and edge declarations, (3) verify tasks with no dependencies appear as isolated nodes. Run `cargo test` to confirm all tests pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["impl-task-graph-export"],
+    "priority": 2,
+    "complexity": 2
+  },
+  {
+    "id": "eval-task-graph-export",
+    "description": "Evaluate the graph export implementation. Review cli/src/graph.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the `wreck-it graph` command is documented in README.md under Usage, (3) the Mermaid output renders correctly when pasted into mermaid.live, (4) edge cases are handled (tasks with no depends_on, circular deps emitting a warning). Fix any issues found.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": ["test-task-graph-export"],
+    "priority": 2,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-github-issues-integration",
+    "description": "Research and design GitHub Issues integration for wreck-it. The feature should optionally create a GitHub Issue when a task starts (InProgress) and close it when the task completes or fails. Review the existing CLI config (cli/src/types.rs Config struct), the project_api.rs and agent_memory.rs files, and the GitHub REST API for issue creation/closure. Design: (1) new Config fields `github_issues_enabled: bool`, `github_repo: Option<String>` (owner/repo), `github_token: Option<String>` (falls back to GITHUB_TOKEN env var), (2) a minimal GitHub API client in cli/src/github_client.rs using reqwest, (3) the label strategy (add a `wreck-it` label, use task id as issue title prefix). Document the design.",
+    "status": "pending",
+    "role": "ideas",
+    "phase": 1,
+    "priority": 5,
+    "complexity": 3
+  },
+  {
+    "id": "impl-github-issues-integration",
+    "description": "Implement GitHub Issues integration. Create cli/src/github_client.rs with async functions `create_issue(token, repo, title, body) -> Result<u64>` and `close_issue(token, repo, issue_number) -> Result<()>` using reqwest and the GitHub REST API (POST /repos/{owner}/{repo}/issues, PATCH to close). Add Config fields `github_issues_enabled`, `github_repo`, `github_token`. Add CLI flags `--github-issues`, `--github-repo <owner/repo>`, `--github-token <TOKEN>`. Wire into ralph_loop.rs: call create_issue when a task moves to InProgress (store issue number in task metadata or a side-channel map), call close_issue with the appropriate state when it reaches Completed or Failed. Failures should log warnings but not abort the loop.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["ideas-github-issues-integration"],
+    "priority": 5,
+    "complexity": 6
+  },
+  {
+    "id": "test-github-issues-integration",
+    "description": "Add tests for the GitHub Issues integration. Mock the GitHub REST API (using httpmock or wiremock, or a simple tokio TCP server) to verify: (1) a POST to /repos/{owner}/{repo}/issues is made when a task transitions to InProgress, (2) a PATCH request to close the issue is made when the task reaches Completed or Failed, (3) when github_issues_enabled is false, no HTTP calls are made, (4) a GitHub API error (e.g. 401 Unauthorized) logs a warning and does not abort the loop. Run `cargo test` to confirm all tests pass.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["impl-github-issues-integration"],
+    "priority": 5,
+    "complexity": 4
+  },
+  {
+    "id": "eval-github-issues-integration",
+    "description": "Evaluate the GitHub Issues integration. Review cli/src/github_client.rs, Config changes, CLI flags, and ralph_loop.rs call sites. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the feature is opt-in (no behavior change when github_issues_enabled is false or absent), (3) GITHUB_TOKEN environment variable fallback works correctly, (4) the feature is documented in README.md with a short description and the new CLI flags, (5) no sensitive tokens are logged at any level. Fix any issues found and mark the task complete.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": ["test-github-issues-integration"],
+    "priority": 5,
+    "complexity": 2
+  }
+]
