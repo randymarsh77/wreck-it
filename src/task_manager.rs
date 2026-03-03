@@ -1,16 +1,15 @@
-use crate::types::{AgentRole, Task, TaskStatus};
+use crate::types::Task;
 use anyhow::{bail, Context, Result};
-use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use wreck_it_core::store::{StoreError, TaskStore};
 
-// Re-export from wreck-it-core so callers of `crate::task_manager::reset_recurring_tasks`
+// Re-export from wreck-it-core so callers of `crate::task_manager::*`
 // continue to work unchanged.
 pub use wreck_it_core::iteration::reset_recurring_tasks;
-
-/// Maximum number of tasks allowed in a task file (safeguard for dynamic generation).
-#[cfg_attr(not(test), allow(dead_code))]
-pub const MAX_TASKS: usize = 500;
+pub use wreck_it_core::task_manager::{
+    filter_tasks_by_role, generate_task_id, get_next_task, has_circular_dependency, MAX_TASKS,
+};
 
 /// Load tasks from a JSON file
 pub fn load_tasks(path: &Path) -> Result<Vec<Task>> {
@@ -32,88 +31,6 @@ pub fn save_tasks(path: &Path, tasks: &[Task]) -> Result<()> {
     fs::write(path, content).context("Failed to write task file")?;
 
     Ok(())
-}
-
-/// Get the next pending task
-pub fn get_next_task(tasks: &[Task]) -> Option<usize> {
-    tasks.iter().position(|t| t.status == TaskStatus::Pending)
-}
-
-/// Return references to all tasks that match the given `role`.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn filter_tasks_by_role(tasks: &[Task], role: AgentRole) -> Vec<&Task> {
-    tasks.iter().filter(|t| t.role == role).collect()
-}
-
-/// Generate a unique task ID by finding the largest numeric suffix among IDs
-/// that share the given `prefix` and returning `<prefix><n+1>`.
-///
-/// Example: prefix `"dyn-"`, existing IDs `["dyn-1", "dyn-3"]` → `"dyn-4"`.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn generate_task_id(existing_tasks: &[Task], prefix: &str) -> String {
-    let max = existing_tasks
-        .iter()
-        .filter_map(|t| t.id.strip_prefix(prefix)?.parse::<u64>().ok())
-        .max()
-        .unwrap_or(0);
-    format!("{}{}", prefix, max + 1)
-}
-
-/// Detect whether the proposed `depends_on` relationships introduce a cycle
-/// when combined with the rest of the task graph.
-///
-/// Returns `true` if a cycle is detected.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn has_circular_dependency(tasks: &[Task], new_task: &Task) -> bool {
-    // Build adjacency list: task_id → list of dependency IDs.
-    let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
-    for t in tasks {
-        adj.insert(
-            t.id.as_str(),
-            t.depends_on.iter().map(|s| s.as_str()).collect(),
-        );
-    }
-    // Include the new task (it may not be in `tasks` yet).
-    adj.insert(
-        new_task.id.as_str(),
-        new_task.depends_on.iter().map(|s| s.as_str()).collect(),
-    );
-
-    // DFS-based cycle detection.
-    let mut visited: HashSet<&str> = HashSet::new();
-    let mut in_stack: HashSet<&str> = HashSet::new();
-    let all_ids: Vec<&str> = adj.keys().copied().collect();
-    for id in all_ids {
-        if !visited.contains(id) && dfs_has_cycle(id, &adj, &mut visited, &mut in_stack) {
-            return true;
-        }
-    }
-    false
-}
-
-fn dfs_has_cycle<'a>(
-    node: &'a str,
-    adj: &HashMap<&'a str, Vec<&'a str>>,
-    visited: &mut HashSet<&'a str>,
-    in_stack: &mut HashSet<&'a str>,
-) -> bool {
-    visited.insert(node);
-    in_stack.insert(node);
-
-    if let Some(deps) = adj.get(node) {
-        for &dep in deps {
-            if !visited.contains(dep) {
-                if dfs_has_cycle(dep, adj, visited, in_stack) {
-                    return true;
-                }
-            } else if in_stack.contains(dep) {
-                return true;
-            }
-        }
-    }
-
-    in_stack.remove(node);
-    false
 }
 
 /// Append a new task to the task file, validating structure before writing.
@@ -149,10 +66,37 @@ pub fn append_task(path: &Path, new_task: Task) -> Result<()> {
     save_tasks(path, &tasks)
 }
 
+// ---------------------------------------------------------------------------
+// FileTaskStore — file-system-backed TaskStore implementation
+// ---------------------------------------------------------------------------
+
+/// File-system-backed implementation of [`TaskStore`].
+///
+/// Reads and writes tasks as a JSON array in a single file.
+pub struct FileTaskStore {
+    path: PathBuf,
+}
+
+impl FileTaskStore {
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+}
+
+impl TaskStore for FileTaskStore {
+    fn load_tasks(&self) -> Result<Vec<Task>, StoreError> {
+        load_tasks(&self.path).map_err(|e| StoreError::new(e.to_string()))
+    }
+
+    fn save_tasks(&self, tasks: &[Task]) -> Result<(), StoreError> {
+        save_tasks(&self.path, tasks).map_err(|e| StoreError::new(e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{AgentRole, TaskKind};
+    use crate::types::{AgentRole, TaskKind, TaskStatus};
     use tempfile::tempdir;
 
     fn make_task(id: &str, status: TaskStatus, depends_on: Vec<&str>) -> Task {
@@ -508,5 +452,43 @@ mod tests {
         ];
         let count = reset_recurring_tasks(&mut tasks, 9999);
         assert_eq!(count, 0);
+    }
+
+    // ---- FileTaskStore tests ----
+
+    #[test]
+    fn file_task_store_load_save_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tasks.json");
+        let store = FileTaskStore::new(&path);
+
+        // Initially returns empty when file doesn't exist.
+        let tasks = store.load_tasks().unwrap();
+        assert!(tasks.is_empty());
+
+        // Save and reload.
+        let tasks = vec![make_task("a", TaskStatus::Pending, vec![])];
+        store.save_tasks(&tasks).unwrap();
+        let loaded = store.load_tasks().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "a");
+    }
+
+    #[test]
+    fn file_task_store_overwrites_on_save() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tasks.json");
+        let store = FileTaskStore::new(&path);
+
+        store
+            .save_tasks(&[make_task("a", TaskStatus::Pending, vec![])])
+            .unwrap();
+        store
+            .save_tasks(&[make_task("b", TaskStatus::Completed, vec![])])
+            .unwrap();
+
+        let loaded = store.load_tasks().unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "b");
     }
 }
