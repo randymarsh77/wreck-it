@@ -777,7 +777,7 @@ let map = generate_repo_map(&self.work_dir);
 let augmented_prompt = format!("## Repo Map\n{}\n\n## Task\n{}", map, task.description);
 ```
 
-**Value**: Reduces the number of exploratory tool calls per task (cheaper, faster). Gives the agent immediate structural awareness — it will correctly target `src/ralph_loop.rs` rather than hunting for it.
+**Value**: Reduces the number of exploratory tool calls per task (cheaper, faster). Gives the agent immediate structural awareness — it will correctly target `cli/src/ralph_loop.rs` rather than hunting for it.
 
 ---
 

@@ -163,7 +163,7 @@ A task with all available fields:
   "complexity": 3,
   "inputs": ["design-1/spec"],
   "outputs": [
-    { "kind": "file", "name": "api", "path": "src/api.rs" }
+    { "kind": "file", "name": "api", "path": "cli/src/api.rs" }
   ],
   "runtime": "local"
 }

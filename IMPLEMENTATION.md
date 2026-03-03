@@ -8,13 +8,13 @@ A TUI agent harness implementing the Ralph Wiggum loop pattern for automated mul
 
 ### Core Components
 
-1. **Ralph Wiggum Loop** (`src/ralph_loop.rs`)
+1. **Ralph Wiggum Loop** (`cli/src/ralph_loop.rs`)
    - External bash-style loop that runs until tasks complete or max iterations reached
    - Manages iteration state and task execution
    - Integrates with task manager and agent client
    - Provides safety mechanisms (max iterations, validation)
 
-2. **Agent Client** (`src/agent.rs`)
+2. **Agent Client** (`cli/src/agent.rs`)
    - Interface for GitHub Copilot SDK integration (FULLY IMPLEMENTED)
    - Uses `copilot-sdk-supercharged` crate for real Copilot API calls
    - Manages CopilotClient lifecycle and session creation
@@ -23,20 +23,20 @@ A TUI agent harness implementing the Ralph Wiggum loop pattern for automated mul
    - Commits changes to git with validation
    - Path validation and security checks
 
-3. **Task Manager** (`src/task_manager.rs`)
+3. **Task Manager** (`cli/src/task_manager.rs`)
    - JSON-based task persistence
    - Task status tracking (pending/inprogress/completed/failed)
    - Load/save operations
    - Task selection logic
 
-4. **TUI Application** (`src/tui.rs`)
+4. **TUI Application** (`cli/src/tui.rs`)
    - Beautiful terminal UI using ratatui
    - Real-time task status display
    - Live log streaming
    - Interactive controls (pause/resume/quit)
    - Progress visualization
 
-5. **CLI Interface** (`src/cli.rs`)
+5. **CLI Interface** (`cli/src/cli.rs`)
    - Command-line argument parsing with clap
    - `run` command for executing the loop
    - `init` command for creating sample task files
@@ -145,15 +145,17 @@ wreck-it/
 ├── docs/
 │   ├── architecture.md     # Technical architecture
 │   └── getting-started.md  # User guide
-├── src/
-│   ├── agent.rs           # Copilot SDK interface
-│   ├── cli.rs             # Command-line interface
-│   ├── main.rs            # Entry point
-│   ├── ralph_loop.rs      # Core loop implementation
-│   ├── task_manager.rs    # Task persistence
-│   ├── tui.rs             # Terminal UI
-│   └── types.rs           # Core types
-├── Cargo.toml             # Rust dependencies
+├── cli/
+│   ├── Cargo.toml         # CLI crate dependencies
+│   └── src/
+│       ├── agent.rs           # Copilot SDK interface
+│       ├── cli.rs             # Command-line interface
+│       ├── main.rs            # Entry point
+│       ├── ralph_loop.rs      # Core loop implementation
+│       ├── task_manager.rs    # Task persistence
+│       ├── tui.rs             # Terminal UI
+│       └── types.rs           # Core types
+├── Cargo.toml             # Workspace manifest
 ├── flake.nix              # Nix development environment
 ├── README.md              # Project readme
 └── tasks.json             # Example task file

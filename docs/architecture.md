@@ -174,7 +174,7 @@ Terminal UI for monitoring:
 
 The following features extend the base Ralph Wiggum Loop into a full agent
 swarm orchestrator.  All features work together and are exercised by the
-end-to-end integration test in `src/integration_eval.rs`.
+end-to-end integration test in `cli/src/integration_eval.rs`.
 
 ### Role-Based Routing
 
@@ -341,9 +341,9 @@ A test-coverage guardian that only activates when coverage drops:
 }
 ```
 
-**Implementation**: `src/types.rs` — `Task.precondition_prompt`,
-`src/agent.rs` — `AgentClient::evaluate_precondition`,
-`src/ralph_loop.rs` — precondition gate in `run_single_task` /
+**Implementation**: `cli/src/types.rs` — `Task.precondition_prompt`,
+`cli/src/agent.rs` — `AgentClient::evaluate_precondition`,
+`cli/src/ralph_loop.rs` — precondition gate in `run_single_task` /
 `run_parallel_tasks`.
 
 ---
@@ -413,7 +413,7 @@ The planner prompt instructs the model to emit a JSON array of tasks with
 is validated (no empty IDs, no duplicate IDs, phase ≥ 1) before being written
 to disk.
 
-**Implementation**: `src/planner.rs` — `TaskPlanner`, `parse_and_validate_plan`.
+**Implementation**: `cli/src/planner.rs` — `TaskPlanner`, `parse_and_validate_plan`.
 
 ---
 
@@ -430,7 +430,7 @@ re-invoked with the critic's issues as additional context (up to
 reflection_rounds = 2   # 0 disables reflection
 ```
 
-**Implementation**: `src/agent.rs` — `CriticResult`, reflection loop in the
+**Implementation**: `cli/src/agent.rs` — `CriticResult`, reflection loop in the
 `AgentClient` execution path.
 
 ---
@@ -451,7 +451,7 @@ replan_threshold = 2   # 0 disables re-planning
 **Validation guards**: duplicate IDs, circular dependencies, and completed
 tasks that must not be rolled back.
 
-**Implementation**: `src/replanner.rs` — `TaskReplanner`, `parse_and_validate_replan`,
+**Implementation**: `cli/src/replanner.rs` — `TaskReplanner`, `parse_and_validate_replan`,
 `build_replan_prompt`.
 
 ---
@@ -476,7 +476,7 @@ those artefacts injected into their agent prompt automatically.
 }
 ```
 
-**Implementation**: `src/artefact_store.rs` — `ArtefactManifest`,
+**Implementation**: `cli/src/artefact_store.rs` — `ArtefactManifest`,
 `persist_output_artefacts`, `resolve_input_artefacts`.
 
 ---
@@ -501,7 +501,7 @@ execution.
 | wreck-it → gastown | `GastownClient::build_dag` / `serialise_dag` |
 | gastown → wreck-it | `GastownClient::apply_status_events` |
 
-**Implementation**: `src/gastown_client.rs` — `GastownClient`, `WorkflowDag`,
+**Implementation**: `cli/src/gastown_client.rs` — `GastownClient`, `WorkflowDag`,
 `DagNode`, `GastownStatusEvent`.
 
 ---
@@ -524,9 +524,9 @@ The openclaw export (`OpenclawDocument`) contains the complete task graph
 annotated with all provenance records and artefact links, ready to load into
 the openclaw plan-graph visualiser.
 
-**Implementation**: `src/provenance.rs` — `ProvenanceRecord`,
+**Implementation**: `cli/src/provenance.rs` — `ProvenanceRecord`,
 `persist_provenance_record`, `load_provenance_records`.
-`src/openclaw.rs` — `OpenclawDocument`, `build_document`, `serialise_document`.
+`cli/src/openclaw.rs` — `OpenclawDocument`, `build_document`, `serialise_document`.
 
 ---
 
@@ -534,7 +534,7 @@ the openclaw plan-graph visualiser.
 
 All Horizon 2–3 features are exercised together in the
 `eval7_full_horizon2_horizon3_acceptance_gate` test in
-`src/integration_eval.rs`.  The scenario:
+`cli/src/integration_eval.rs`.  The scenario:
 
 1. `wreck-it plan` generates a four-task "Build REST API" plan (impl-5).
 2. Role-based routing assigns specialist agents to each task (impl-1).
