@@ -18,7 +18,7 @@ inputs:
     default: 'wreck-it-state'
 runs:
   using: 'docker'
-  image: 'Dockerfile'
+  image: 'docker://ghcr.io/randymarsh77/wreck-it:latest'
   env:
     INPUT_MODEL_PROVIDER: ${{ inputs.model_provider }}
     INPUT_MAX_ITERATIONS: ${{ inputs.max_iterations }}
