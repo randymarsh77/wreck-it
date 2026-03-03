@@ -197,7 +197,7 @@ fn is_default_kind(k: &TaskKind) -> bool {
     *k == TaskKind::Milestone
 }
 
-pub fn default_phase() -> u32 {
+pub(crate) fn default_phase() -> u32 {
     1
 }
 
@@ -205,7 +205,7 @@ fn is_default_phase(v: &u32) -> bool {
     *v == 1
 }
 
-pub fn default_complexity() -> u32 {
+pub(crate) fn default_complexity() -> u32 {
     1
 }
 
