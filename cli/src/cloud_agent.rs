@@ -26,6 +26,10 @@ pub enum CloudAgentStatus {
 pub enum PrMergeStatus {
     /// The PR is a draft and must be marked ready for review first.
     Draft,
+    /// The PR title contains a `[wip]` prefix, indicating the coding agent
+    /// is still actively working on it.  The runner should wait until the
+    /// prefix is removed before attempting to merge.
+    AgentWorkInProgress,
     /// The PR is not yet mergeable (checks pending, conflicts, etc.).
     NotMergeable,
     /// The PR is ready to be merged.
@@ -101,6 +105,34 @@ fn is_copilot_in_assignees(issue: &serde_json::Value) -> bool {
             })
         })
         .unwrap_or(false)
+}
+
+/// Returns `true` if the PR title starts with `[wip]` (case-insensitive),
+/// indicating the coding agent is still actively working on the PR.
+fn is_wip_title(title: &str) -> bool {
+    let trimmed = title.trim_start();
+    // `get(..5)` safely returns `None` for short or non-ASCII-boundary strings.
+    matches!(trimmed.get(..5), Some(prefix) if prefix.eq_ignore_ascii_case("[wip]"))
+}
+
+/// Partition an issue's assignees into agent and non-agent logins.
+///
+/// Returns `(agent_logins, non_agent_logins)`.
+fn partition_assignees(issue: &serde_json::Value) -> (Vec<String>, Vec<String>) {
+    let mut agents = Vec::new();
+    let mut others = Vec::new();
+    if let Some(arr) = issue["assignees"].as_array() {
+        for a in arr {
+            if let Some(login) = a["login"].as_str() {
+                if KNOWN_AGENT_LOGINS.contains(&login) {
+                    agents.push(login.to_string());
+                } else {
+                    others.push(login.to_string());
+                }
+            }
+        }
+    }
+    (agents, others)
 }
 
 impl CloudAgentClient {
@@ -640,6 +672,38 @@ impl CloudAgentClient {
         }
     }
 
+    /// Fetch issue assignee details for diagnostic logging.
+    ///
+    /// Returns `(agent_logins, non_agent_logins)` so callers can determine
+    /// whether the coding agent is the sole assignee (still working) or
+    /// whether human reviewers have also been assigned (agent likely done).
+    pub async fn get_issue_assignee_summary(
+        &self,
+        issue_number: u64,
+    ) -> Result<(Vec<String>, Vec<String>)> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, issue_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch issue for assignee summary")?;
+
+        if resp.status().is_success() {
+            let issue: serde_json::Value = resp.json().await?;
+            Ok(partition_assignees(&issue))
+        } else {
+            Ok((Vec::new(), Vec::new()))
+        }
+    }
+
     /// Search for open PRs that reference the given issue number.
     async fn find_linked_pr(&self, issue_number: u64) -> Result<Option<CloudAgentStatus>> {
         // Use the issue timeline to find cross-referenced PRs.
@@ -712,14 +776,28 @@ impl CloudAgentClient {
             .context("Failed to fetch PR details")?;
 
         if !resp.status().is_success() {
+            let status = resp.status();
+            println!(
+                "[wreck-it] PR #{} fetch failed with status {}",
+                pr_number, status,
+            );
             return Ok(PrMergeStatus::NotMergeable);
         }
 
         let pr: serde_json::Value = resp.json().await?;
+        let title = pr["title"].as_str().unwrap_or("");
         let state = pr["state"].as_str().unwrap_or("unknown");
         let draft = pr["draft"].as_bool().unwrap_or(false);
-        let mergeable = pr["mergeable"].as_bool().unwrap_or(false);
+        let mergeable_raw = &pr["mergeable"];
+        let mergeable = mergeable_raw.as_bool().unwrap_or(false);
         let merged = pr["merged"].as_bool().unwrap_or(false);
+        let mergeable_state = pr["mergeable_state"].as_str().unwrap_or("unknown");
+
+        println!(
+            "[wreck-it] PR #{} details: title={:?}, state={}, draft={}, \
+             mergeable(raw)={}, mergeable_state={}, merged={}",
+            pr_number, title, state, draft, mergeable_raw, mergeable_state, merged,
+        );
 
         if merged {
             return Ok(PrMergeStatus::AlreadyMerged);
@@ -729,6 +807,10 @@ impl CloudAgentClient {
         }
         if draft {
             return Ok(PrMergeStatus::Draft);
+        }
+        // Detect agent work-in-progress via title prefix (case-insensitive).
+        if is_wip_title(title) {
+            return Ok(PrMergeStatus::AgentWorkInProgress);
         }
         if mergeable {
             Ok(PrMergeStatus::Mergeable)
@@ -1342,11 +1424,81 @@ mod tests {
     #[test]
     fn pr_merge_status_variants() {
         assert_eq!(PrMergeStatus::Draft, PrMergeStatus::Draft);
+        assert_eq!(
+            PrMergeStatus::AgentWorkInProgress,
+            PrMergeStatus::AgentWorkInProgress
+        );
         assert_eq!(PrMergeStatus::NotMergeable, PrMergeStatus::NotMergeable);
         assert_eq!(PrMergeStatus::Mergeable, PrMergeStatus::Mergeable);
         assert_eq!(PrMergeStatus::AlreadyMerged, PrMergeStatus::AlreadyMerged);
         assert_ne!(PrMergeStatus::Draft, PrMergeStatus::Mergeable);
         assert_ne!(PrMergeStatus::AlreadyMerged, PrMergeStatus::NotMergeable);
+        assert_ne!(
+            PrMergeStatus::AgentWorkInProgress,
+            PrMergeStatus::NotMergeable
+        );
+    }
+
+    #[test]
+    fn is_wip_title_detects_prefix() {
+        assert!(is_wip_title("[wip] some feature"));
+        assert!(is_wip_title("[WIP] another feature"));
+        assert!(is_wip_title("[Wip] mixed case"));
+        assert!(is_wip_title("[WIP]no space"));
+    }
+
+    #[test]
+    fn is_wip_title_rejects_non_wip() {
+        assert!(!is_wip_title("some feature"));
+        assert!(!is_wip_title("fix: [wip] embedded"));
+        assert!(!is_wip_title(""));
+        assert!(!is_wip_title("[wi"));
+    }
+
+    #[test]
+    fn is_wip_title_leading_whitespace() {
+        assert!(is_wip_title("  [wip] with leading space"));
+    }
+
+    #[test]
+    fn partition_assignees_mixed() {
+        let issue = serde_json::json!({
+            "assignees": [
+                {"login": "copilot"},
+                {"login": "user1"},
+                {"login": "copilot-swe-agent"},
+                {"login": "reviewer"},
+            ]
+        });
+        let (agents, others) = partition_assignees(&issue);
+        assert_eq!(agents, vec!["copilot", "copilot-swe-agent"]);
+        assert_eq!(others, vec!["user1", "reviewer"]);
+    }
+
+    #[test]
+    fn partition_assignees_agent_only() {
+        let issue = serde_json::json!({
+            "assignees": [{"login": "copilot"}]
+        });
+        let (agents, others) = partition_assignees(&issue);
+        assert_eq!(agents, vec!["copilot"]);
+        assert!(others.is_empty());
+    }
+
+    #[test]
+    fn partition_assignees_empty() {
+        let issue = serde_json::json!({ "assignees": [] });
+        let (agents, others) = partition_assignees(&issue);
+        assert!(agents.is_empty());
+        assert!(others.is_empty());
+    }
+
+    #[test]
+    fn partition_assignees_no_field() {
+        let issue = serde_json::json!({});
+        let (agents, others) = partition_assignees(&issue);
+        assert!(agents.is_empty());
+        assert!(others.is_empty());
     }
 
     #[test]
