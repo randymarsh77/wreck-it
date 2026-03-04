@@ -325,8 +325,7 @@ async fn advance_tracked_prs(
             }
             Ok(PrMergeStatus::AgentWorkInProgress) => {
                 println!(
-                    "[wreck-it] advance: PR #{} title has [wip] prefix — agent is still \
-                     working, skipping",
+                    "[wreck-it] advance: PR #{} — agent is still working, skipping",
                     pr_number,
                 );
                 if let Some(issue_num) = tracked.issue_number {
@@ -787,7 +786,7 @@ async fn run_needs_verification(
         }
         Ok(PrMergeStatus::AgentWorkInProgress) => {
             println!(
-                "[wreck-it] PR #{} title has [wip] prefix — agent is still working, \
+                "[wreck-it] PR #{} — agent is still working, \
                  will retry next run",
                 pr_number
             );
@@ -796,7 +795,7 @@ async fn run_needs_verification(
                 log_issue_assignees(&client, issue_num, "[wreck-it]").await;
             }
             state.memory.push(format!(
-                "iteration {}: PR #{} has [wip] prefix, agent still working",
+                "iteration {}: PR #{} agent still working",
                 state.iteration, pr_number,
             ));
             return Ok(StepOutcome::Yield);
