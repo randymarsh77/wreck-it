@@ -295,6 +295,30 @@ async fn advance_tracked_prs(
                     pr_number, tracked.task_id,
                 ));
             }
+            Ok(PrMergeStatus::AgentWorkInProgress) => {
+                println!(
+                    "[wreck-it] advance: PR #{} title has [wip] prefix — agent is still \
+                     working, skipping",
+                    pr_number,
+                );
+                // Optionally log issue assignee details for diagnostics.
+                if let Some(issue_num) = tracked.issue_number {
+                    match client.get_issue_assignee_summary(issue_num).await {
+                        Ok((agents, others)) => {
+                            println!(
+                                "[wreck-it] advance: issue #{} assignees: agents={:?}, others={:?}",
+                                issue_num, agents, others,
+                            );
+                        }
+                        Err(e) => {
+                            println!(
+                                "[wreck-it] advance: failed to fetch assignees for issue #{}: {}",
+                                issue_num, e,
+                            );
+                        }
+                    }
+                }
+            }
             Ok(PrMergeStatus::NotMergeable) => {
                 // Check whether the base branch requires status checks.
                 let has_checks = match client.has_required_checks_for_pr(pr_number).await {
@@ -329,6 +353,30 @@ async fn advance_tracked_prs(
                         "[wreck-it] advance: PR #{} not yet mergeable (no required checks), will retry",
                         pr_number
                     );
+                }
+                // Log issue assignee details for diagnostics.
+                if let Some(issue_num) = tracked.issue_number {
+                    match client.get_issue_assignee_summary(issue_num).await {
+                        Ok((agents, others)) => {
+                            println!(
+                                "[wreck-it] advance: issue #{} assignees: agents={:?}, others={:?}",
+                                issue_num, agents, others,
+                            );
+                            if !agents.is_empty() && others.is_empty() {
+                                println!(
+                                    "[wreck-it] advance: only agent(s) assigned to issue #{} — \
+                                     agent may still be working",
+                                    issue_num,
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            println!(
+                                "[wreck-it] advance: failed to fetch assignees for issue #{}: {}",
+                                issue_num, e,
+                            );
+                        }
+                    }
                 }
             }
             Ok(PrMergeStatus::Mergeable) => {
@@ -743,6 +791,35 @@ async fn run_needs_verification(
             // Mergeability may not be immediate; retry on the next run.
             return Ok(StepOutcome::Yield);
         }
+        Ok(PrMergeStatus::AgentWorkInProgress) => {
+            println!(
+                "[wreck-it] PR #{} title has [wip] prefix — agent is still working, \
+                 will retry next run",
+                pr_number
+            );
+            // Log issue assignee details for diagnostics.
+            if let Some(issue_num) = state.issue_number {
+                match client.get_issue_assignee_summary(issue_num).await {
+                    Ok((agents, others)) => {
+                        println!(
+                            "[wreck-it] issue #{} assignees: agents={:?}, others={:?}",
+                            issue_num, agents, others,
+                        );
+                    }
+                    Err(e) => {
+                        println!(
+                            "[wreck-it] failed to fetch assignees for issue #{}: {}",
+                            issue_num, e,
+                        );
+                    }
+                }
+            }
+            state.memory.push(format!(
+                "iteration {}: PR #{} has [wip] prefix, agent still working",
+                state.iteration, pr_number,
+            ));
+            return Ok(StepOutcome::Yield);
+        }
         Ok(PrMergeStatus::NotMergeable) => {
             // Check whether the base branch requires status checks.
             let has_checks = match client.has_required_checks_for_pr(pr_number).await {
@@ -777,6 +854,30 @@ async fn run_needs_verification(
                     "[wreck-it] PR #{} is not yet mergeable (no required checks), will retry next run",
                     pr_number
                 );
+            }
+            // Log issue assignee details for diagnostics.
+            if let Some(issue_num) = state.issue_number {
+                match client.get_issue_assignee_summary(issue_num).await {
+                    Ok((agents, others)) => {
+                        println!(
+                            "[wreck-it] issue #{} assignees: agents={:?}, others={:?}",
+                            issue_num, agents, others,
+                        );
+                        if !agents.is_empty() && others.is_empty() {
+                            println!(
+                                "[wreck-it] only agent(s) assigned to issue #{} — \
+                                 agent may still be working",
+                                issue_num,
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        println!(
+                            "[wreck-it] failed to fetch assignees for issue #{}: {}",
+                            issue_num, e,
+                        );
+                    }
+                }
             }
             state.memory.push(format!(
                 "iteration {}: PR #{} not yet mergeable",
