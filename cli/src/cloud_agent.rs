@@ -110,11 +110,9 @@ fn is_copilot_in_assignees(issue: &serde_json::Value) -> bool {
 /// Returns `true` if the PR title starts with `[wip]` (case-insensitive),
 /// indicating the coding agent is still actively working on the PR.
 fn is_wip_title(title: &str) -> bool {
-    title
-        .trim_start()
-        .get(..5)
-        .map(|s| s.eq_ignore_ascii_case("[wip]"))
-        .unwrap_or(false)
+    let trimmed = title.trim_start();
+    // `get(..5)` safely returns `None` for short or non-ASCII-boundary strings.
+    matches!(trimmed.get(..5), Some(prefix) if prefix.eq_ignore_ascii_case("[wip]"))
 }
 
 /// Partition an issue's assignees into agent and non-agent logins.
@@ -797,7 +795,7 @@ impl CloudAgentClient {
 
         println!(
             "[wreck-it] PR #{} details: title={:?}, state={}, draft={}, \
-             mergeable={}, mergeable_state={}, merged={}",
+             mergeable(raw)={}, mergeable_state={}, merged={}",
             pr_number, title, state, draft, mergeable_raw, mergeable_state, merged,
         );
 

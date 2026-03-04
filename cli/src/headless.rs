@@ -179,6 +179,34 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
     Ok(())
 }
 
+/// Log issue assignee details for diagnostics.
+///
+/// Fetches the assignees of `issue_number` and prints agent vs non-agent
+/// breakdowns.  Emits a hint when only agent(s) are assigned (agent may
+/// still be working).
+async fn log_issue_assignees(client: &CloudAgentClient, issue_number: u64, prefix: &str) {
+    match client.get_issue_assignee_summary(issue_number).await {
+        Ok((agents, others)) => {
+            println!(
+                "{} issue #{} assignees: agents={:?}, others={:?}",
+                prefix, issue_number, agents, others,
+            );
+            if !agents.is_empty() && others.is_empty() {
+                println!(
+                    "{} only agent(s) assigned to issue #{} — agent may still be working",
+                    prefix, issue_number,
+                );
+            }
+        }
+        Err(e) => {
+            println!(
+                "{} failed to fetch assignees for issue #{}: {}",
+                prefix, issue_number, e,
+            );
+        }
+    }
+}
+
 /// Advance all tracked PRs in the state.
 ///
 /// Only PRs that are already recorded in `state.tracked_prs` (i.e. PRs
@@ -301,22 +329,8 @@ async fn advance_tracked_prs(
                      working, skipping",
                     pr_number,
                 );
-                // Optionally log issue assignee details for diagnostics.
                 if let Some(issue_num) = tracked.issue_number {
-                    match client.get_issue_assignee_summary(issue_num).await {
-                        Ok((agents, others)) => {
-                            println!(
-                                "[wreck-it] advance: issue #{} assignees: agents={:?}, others={:?}",
-                                issue_num, agents, others,
-                            );
-                        }
-                        Err(e) => {
-                            println!(
-                                "[wreck-it] advance: failed to fetch assignees for issue #{}: {}",
-                                issue_num, e,
-                            );
-                        }
-                    }
+                    log_issue_assignees(&client, issue_num, "[wreck-it] advance:").await;
                 }
             }
             Ok(PrMergeStatus::NotMergeable) => {
@@ -356,27 +370,7 @@ async fn advance_tracked_prs(
                 }
                 // Log issue assignee details for diagnostics.
                 if let Some(issue_num) = tracked.issue_number {
-                    match client.get_issue_assignee_summary(issue_num).await {
-                        Ok((agents, others)) => {
-                            println!(
-                                "[wreck-it] advance: issue #{} assignees: agents={:?}, others={:?}",
-                                issue_num, agents, others,
-                            );
-                            if !agents.is_empty() && others.is_empty() {
-                                println!(
-                                    "[wreck-it] advance: only agent(s) assigned to issue #{} — \
-                                     agent may still be working",
-                                    issue_num,
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            println!(
-                                "[wreck-it] advance: failed to fetch assignees for issue #{}: {}",
-                                issue_num, e,
-                            );
-                        }
-                    }
+                    log_issue_assignees(&client, issue_num, "[wreck-it] advance:").await;
                 }
             }
             Ok(PrMergeStatus::Mergeable) => {
@@ -799,20 +793,7 @@ async fn run_needs_verification(
             );
             // Log issue assignee details for diagnostics.
             if let Some(issue_num) = state.issue_number {
-                match client.get_issue_assignee_summary(issue_num).await {
-                    Ok((agents, others)) => {
-                        println!(
-                            "[wreck-it] issue #{} assignees: agents={:?}, others={:?}",
-                            issue_num, agents, others,
-                        );
-                    }
-                    Err(e) => {
-                        println!(
-                            "[wreck-it] failed to fetch assignees for issue #{}: {}",
-                            issue_num, e,
-                        );
-                    }
-                }
+                log_issue_assignees(&client, issue_num, "[wreck-it]").await;
             }
             state.memory.push(format!(
                 "iteration {}: PR #{} has [wip] prefix, agent still working",
@@ -857,27 +838,7 @@ async fn run_needs_verification(
             }
             // Log issue assignee details for diagnostics.
             if let Some(issue_num) = state.issue_number {
-                match client.get_issue_assignee_summary(issue_num).await {
-                    Ok((agents, others)) => {
-                        println!(
-                            "[wreck-it] issue #{} assignees: agents={:?}, others={:?}",
-                            issue_num, agents, others,
-                        );
-                        if !agents.is_empty() && others.is_empty() {
-                            println!(
-                                "[wreck-it] only agent(s) assigned to issue #{} — \
-                                 agent may still be working",
-                                issue_num,
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        println!(
-                            "[wreck-it] failed to fetch assignees for issue #{}: {}",
-                            issue_num, e,
-                        );
-                    }
-                }
+                log_issue_assignees(&client, issue_num, "[wreck-it]").await;
             }
             state.memory.push(format!(
                 "iteration {}: PR #{} not yet mergeable",
