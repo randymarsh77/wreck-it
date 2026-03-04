@@ -37,6 +37,39 @@ mod webhook;
 use webhook::{verify_signature, WebhookEvent};
 use worker::*;
 
+/// Known coding-agent logins that are authorized to open pull requests.
+///
+/// Matches the `KNOWN_AGENT_LOGINS` list in the CLI.  Both the bare login
+/// (e.g. `"copilot"`) and the `[bot]` suffixed variant
+/// (e.g. `"copilot[bot]"`) are accepted.
+const KNOWN_AGENT_LOGINS: &[&str] = &["copilot-swe-agent", "copilot", "claude", "codex"];
+
+/// Check whether an issue was opened by a trusted author.
+///
+/// In the GitHub App flow the worker creates issues on behalf of the app,
+/// whose account type is `"Bot"`.  Issues opened by regular users are
+/// untrusted and must be rejected to prevent label-based privilege
+/// escalation.
+fn is_trusted_issue_author(issue: &types::Issue) -> bool {
+    issue
+        .user
+        .as_ref()
+        .and_then(|u| u.user_type.as_deref())
+        .is_some_and(|t| t == "Bot")
+}
+
+/// Check whether a pull request was opened by a known coding agent.
+///
+/// Accepts both bare logins (`"copilot"`) and the `[bot]` suffixed form
+/// (`"copilot[bot]"`).
+fn is_trusted_pr_author(pr: &types::PullRequest) -> bool {
+    pr.user.as_ref().is_some_and(|u| {
+        KNOWN_AGENT_LOGINS
+            .iter()
+            .any(|&agent| u.login == agent || u.login == format!("{agent}[bot]"))
+    })
+}
+
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     // Only accept POST requests at the webhook endpoint.
@@ -81,28 +114,44 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     // Only process events we care about.
     let should_process = match &event {
         WebhookEvent::Issues => {
-            // Process when an issue is opened or labeled with "wreck-it".
+            // Process when an issue is opened or labeled with "wreck-it",
+            // but only if the issue was created by our App bot (type "Bot").
+            // This prevents external users from triggering task processing
+            // by creating or labeling issues with the "wreck-it" label.
             let action = payload.action.as_deref().unwrap_or("");
             let has_label = payload
                 .issue
                 .as_ref()
                 .map(|i| i.labels.iter().any(|l| l.name == "wreck-it"))
                 .unwrap_or(false);
-            action == "opened" && has_label || action == "labeled" && has_label
+            let trusted = payload
+                .issue
+                .as_ref()
+                .map(|i| is_trusted_issue_author(i))
+                .unwrap_or(false);
+            (action == "opened" && has_label || action == "labeled" && has_label) && trusted
         }
         WebhookEvent::Push => {
             // Process pushes to the state branch (external state updates).
             true
         }
         WebhookEvent::PullRequest => {
-            // Process when a PR is merged (task completion signal).
+            // Process when a PR is merged (task completion signal), but
+            // only if the PR was opened by a known coding agent.  This
+            // prevents an attacker from marking tasks as complete by
+            // getting an unauthorized PR merged.
             let action = payload.action.as_deref().unwrap_or("");
             let merged = payload
                 .pull_request
                 .as_ref()
                 .and_then(|pr| pr.merged)
                 .unwrap_or(false);
-            action == "closed" && merged
+            let trusted = payload
+                .pull_request
+                .as_ref()
+                .map(|pr| is_trusted_pr_author(pr))
+                .unwrap_or(false);
+            action == "closed" && merged && trusted
         }
         WebhookEvent::Other(name) if name == "ping" => {
             // Respond to GitHub's ping event during app setup.
@@ -240,5 +289,131 @@ fn js_sys_now_secs() -> u64 {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_issue(login: &str, user_type: &str) -> types::Issue {
+        types::Issue {
+            number: 1,
+            title: "test".into(),
+            body: None,
+            labels: vec![],
+            user: Some(types::User {
+                login: login.into(),
+                user_type: Some(user_type.into()),
+            }),
+        }
+    }
+
+    fn make_pr(login: &str, user_type: &str) -> types::PullRequest {
+        types::PullRequest {
+            number: 1,
+            state: "open".into(),
+            merged: None,
+            user: Some(types::User {
+                login: login.into(),
+                user_type: Some(user_type.into()),
+            }),
+        }
+    }
+
+    // ---- is_trusted_issue_author ----
+
+    #[test]
+    fn trusted_issue_author_bot() {
+        let issue = make_issue("my-app[bot]", "Bot");
+        assert!(is_trusted_issue_author(&issue));
+    }
+
+    #[test]
+    fn untrusted_issue_author_user() {
+        let issue = make_issue("attacker", "User");
+        assert!(!is_trusted_issue_author(&issue));
+    }
+
+    #[test]
+    fn untrusted_issue_author_no_user() {
+        let issue = types::Issue {
+            number: 1,
+            title: "test".into(),
+            body: None,
+            labels: vec![],
+            user: None,
+        };
+        assert!(!is_trusted_issue_author(&issue));
+    }
+
+    #[test]
+    fn untrusted_issue_author_no_type() {
+        let issue = types::Issue {
+            number: 1,
+            title: "test".into(),
+            body: None,
+            labels: vec![],
+            user: Some(types::User {
+                login: "someone".into(),
+                user_type: None,
+            }),
+        };
+        assert!(!is_trusted_issue_author(&issue));
+    }
+
+    // ---- is_trusted_pr_author ----
+
+    #[test]
+    fn trusted_pr_author_copilot_swe_agent_bot() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(is_trusted_pr_author(&pr));
+    }
+
+    #[test]
+    fn trusted_pr_author_copilot_bare() {
+        let pr = make_pr("copilot", "Bot");
+        assert!(is_trusted_pr_author(&pr));
+    }
+
+    #[test]
+    fn trusted_pr_author_claude() {
+        let pr = make_pr("claude", "Bot");
+        assert!(is_trusted_pr_author(&pr));
+    }
+
+    #[test]
+    fn trusted_pr_author_codex() {
+        let pr = make_pr("codex", "Bot");
+        assert!(is_trusted_pr_author(&pr));
+    }
+
+    #[test]
+    fn trusted_pr_author_codex_bot_suffix() {
+        let pr = make_pr("codex[bot]", "Bot");
+        assert!(is_trusted_pr_author(&pr));
+    }
+
+    #[test]
+    fn untrusted_pr_author_random_user() {
+        let pr = make_pr("attacker", "User");
+        assert!(!is_trusted_pr_author(&pr));
+    }
+
+    #[test]
+    fn untrusted_pr_author_no_user() {
+        let pr = types::PullRequest {
+            number: 1,
+            state: "open".into(),
+            merged: None,
+            user: None,
+        };
+        assert!(!is_trusted_pr_author(&pr));
+    }
+
+    #[test]
+    fn untrusted_pr_author_unknown_bot() {
+        let pr = make_pr("evil-bot[bot]", "Bot");
+        assert!(!is_trusted_pr_author(&pr));
     }
 }

@@ -31,6 +31,7 @@ pub struct WebhookPayload {
     pub installation: Option<Installation>,
     pub issue: Option<Issue>,
     pub pull_request: Option<PullRequest>,
+    pub sender: Option<User>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -54,6 +55,16 @@ pub struct Installation {
     pub id: u64,
 }
 
+/// A GitHub user (or bot) as represented in webhook payloads.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct User {
+    pub login: String,
+    /// Account type — typically `"User"`, `"Bot"`, or `"Organization"`.
+    #[serde(rename = "type")]
+    pub user_type: Option<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct Issue {
@@ -61,6 +72,7 @@ pub struct Issue {
     pub title: String,
     pub body: Option<String>,
     pub labels: Vec<Label>,
+    pub user: Option<User>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,6 +87,7 @@ pub struct PullRequest {
     pub number: u64,
     pub state: String,
     pub merged: Option<bool>,
+    pub user: Option<User>,
 }
 
 #[cfg(test)]
@@ -172,5 +185,47 @@ state_file = ".docs-state.json"
         let payload: WebhookPayload = serde_json::from_str(json).unwrap();
         assert_eq!(payload.action.as_deref(), Some("opened"));
         assert_eq!(payload.repository.unwrap().full_name, "o/r");
+    }
+
+    #[test]
+    fn issue_user_parsed() {
+        let json = r#"{
+            "number": 42,
+            "title": "[wreck-it] t1",
+            "body": null,
+            "labels": [{"name": "wreck-it"}],
+            "user": {"login": "my-app[bot]", "type": "Bot"}
+        }"#;
+        let issue: Issue = serde_json::from_str(json).unwrap();
+        let user = issue.user.unwrap();
+        assert_eq!(user.login, "my-app[bot]");
+        assert_eq!(user.user_type.as_deref(), Some("Bot"));
+    }
+
+    #[test]
+    fn pr_user_parsed() {
+        let json = r#"{
+            "number": 10,
+            "state": "closed",
+            "merged": true,
+            "user": {"login": "copilot-swe-agent[bot]", "type": "Bot"}
+        }"#;
+        let pr: PullRequest = serde_json::from_str(json).unwrap();
+        let user = pr.user.unwrap();
+        assert_eq!(user.login, "copilot-swe-agent[bot]");
+        assert_eq!(user.user_type.as_deref(), Some("Bot"));
+    }
+
+    #[test]
+    fn webhook_payload_with_sender() {
+        let json = r#"{
+            "action": "opened",
+            "sender": {"login": "my-app[bot]", "type": "Bot"},
+            "repository": {"full_name": "o/r", "name": "r", "owner": {"login": "o"}}
+        }"#;
+        let payload: WebhookPayload = serde_json::from_str(json).unwrap();
+        let sender = payload.sender.unwrap();
+        assert_eq!(sender.login, "my-app[bot]");
+        assert_eq!(sender.user_type.as_deref(), Some("Bot"));
     }
 }
