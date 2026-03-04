@@ -64,9 +64,9 @@ fn is_trusted_issue_author(issue: &types::Issue) -> bool {
 /// (`"copilot[bot]"`).
 fn is_trusted_pr_author(pr: &types::PullRequest) -> bool {
     pr.user.as_ref().is_some_and(|u| {
-        KNOWN_AGENT_LOGINS
-            .iter()
-            .any(|&agent| u.login == agent || u.login == format!("{agent}[bot]"))
+        let login = u.login.as_str();
+        let bare = login.strip_suffix("[bot]").unwrap_or(login);
+        KNOWN_AGENT_LOGINS.iter().any(|&agent| bare == agent)
     })
 }
 
