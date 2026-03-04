@@ -13,6 +13,7 @@
 
 pub mod config;
 pub mod iteration;
+pub mod plan_migration;
 pub mod provenance;
 pub mod replanner;
 pub mod state;
