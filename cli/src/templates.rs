@@ -135,7 +135,7 @@ mod tests {
         let tmpl = find_template("engineering-team").expect("template should exist");
         assert_eq!(tmpl.manifest.name, "engineering-team");
         assert!(!tmpl.manifest.description.is_empty());
-        assert_eq!(tmpl.manifest.ralphs.len(), 3);
+        assert_eq!(tmpl.manifest.ralphs.len(), 4);
 
         let names: Vec<&str> = tmpl
             .manifest
@@ -146,6 +146,7 @@ mod tests {
         assert!(names.contains(&"docs"));
         assert!(names.contains(&"features"));
         assert!(names.contains(&"planner"));
+        assert!(names.contains(&"feature-dev"));
     }
 
     #[test]
@@ -182,8 +183,8 @@ mod tests {
 
         assert!(!result.written.is_empty());
         assert!(result.skipped.is_empty());
-        assert_eq!(result.ralphs_added.len(), 3);
-        assert_eq!(config.ralphs.len(), 3);
+        assert_eq!(result.ralphs_added.len(), 4);
+        assert_eq!(config.ralphs.len(), 4);
 
         // Verify files exist on disk.
         for name in &result.written {
@@ -230,10 +231,11 @@ mod tests {
         // The existing custom path should be preserved.
         assert_eq!(config.ralphs[0].task_file, "custom-docs.json");
 
-        // "features" and "planner" should be added.
-        assert_eq!(result.ralphs_added.len(), 2);
+        // "features", "planner", and "feature-dev" should be added.
+        assert_eq!(result.ralphs_added.len(), 3);
         assert!(result.ralphs_added.contains(&"features".to_string()));
         assert!(result.ralphs_added.contains(&"planner".to_string()));
+        assert!(result.ralphs_added.contains(&"feature-dev".to_string()));
     }
 
     #[test]
@@ -252,6 +254,6 @@ mod tests {
         assert!(result.written.is_empty());
         assert!(!result.skipped.is_empty());
         assert!(result.ralphs_added.is_empty());
-        assert_eq!(config.ralphs.len(), 3);
+        assert_eq!(config.ralphs.len(), 4);
     }
 }

@@ -123,7 +123,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
     // active task list on the state branch.
     let config_dir = work_dir.join(wreck_it_core::config::CONFIG_DIR);
     let task_file_for_migration = state_dir.join(&headless_cfg.task_file);
-    match migrate_pending_plans(&config_dir, &task_file_for_migration) {
+    match migrate_pending_plans(&config_dir, &state_dir, &task_file_for_migration) {
         Ok(0) => {}
         Ok(n) => {
             println!("[wreck-it] migrated {} task(s) from pending plans", n);
