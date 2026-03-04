@@ -519,6 +519,38 @@ tasks that must not be rolled back.
 
 ---
 
+### Plan Migration (Cloud Agent Replanning)
+
+Cloud agents (e.g. Copilot coding agent) work on the main branch and
+cannot modify the state branch directly.  To support agent-driven
+replanning, agents write new or revised task plans as JSON files in
+`.wreck-it/plans/` on the main branch.  At the start of each headless
+iteration the runner migrates these plans into the state branch:
+
+```
+agent PR merges → .wreck-it/plans/feature-dev-tasks.json--batch-01.json lands on main
+                          ↓
+headless cron fires → migrate_pending_plans() reads plans dir
+                          ↓
+              merge into state branch task file, remove consumed files
+                          ↓
+              normal iteration loop picks up new/revised tasks
+```
+
+**Targeted routing**: Plan files use a `{target}--{label}.json` naming
+convention to specify which task file they target.  For example,
+`feature-dev-tasks.json--assessor.json` merges into `feature-dev-tasks.json`
+on the state branch.  Plain filenames (no `--` separator) merge into the
+current ralph's default task file.
+
+**Merge rules**: New task IDs are appended; existing non-completed tasks
+are replaced (allows plan updates); completed tasks are never overwritten.
+
+**Implementation**: `cli/src/plan_migration.rs` — `migrate_pending_plans`;
+`core/src/plan_migration.rs` — `merge_pending_tasks`.
+
+---
+
 ### Typed Artefact Store / Context Chain
 
 Tasks declare optional `inputs` (references to upstream artefacts) and
