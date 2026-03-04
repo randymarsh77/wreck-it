@@ -20,6 +20,13 @@ const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
 /// repeatedly transitions through synchronous phases.
 const MAX_SYNC_STEPS: usize = 20;
 
+/// Maximum number of progress rounds in the outer loop.  Each round consists
+/// of advancing tracked PRs and running the inner state-machine loop.  When a
+/// round makes progress (any item transitions state) the loop re-runs
+/// immediately instead of waiting for the next cron / event trigger.  This
+/// cap prevents runaway loops.
+const MAX_PROGRESS_ROUNDS: usize = 10;
+
 /// Sentinel value returned by [`infer_task_id_from_title`] when no task ID
 /// can be determined from the PR title.
 const UNKNOWN_TASK_ID: &str = "unknown";
@@ -109,57 +116,100 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
     let state_path = state_dir.join(&headless_cfg.state_file);
     let mut state = load_headless_state(&state_path).context("Failed to load headless state")?;
 
-    // Advance tracked PRs before entering the main state machine.  Only PRs
-    // that are already tracked in state (created by wreck-it) are processed.
-    if let Err(e) =
-        advance_tracked_prs(&config, &headless_cfg, &mut state, &work_dir, &state_dir).await
-    {
-        println!("[wreck-it] warning: advance_tracked_prs failed: {}", e);
-    }
-
-    let mut sync_steps: usize = 0;
+    // Outer progress loop: re-run advance + state-machine as long as any item
+    // transitions state.  This lets a single invocation chain through multiple
+    // synchronous progressions (e.g. mark-ready → merge → complete) without
+    // waiting for the next cron trigger.
+    let mut progress_rounds: usize = 0;
 
     loop {
-        println!(
-            "[wreck-it] headless iteration {} | phase: {:?}",
-            state.iteration, state.phase
-        );
+        let mut made_progress = false;
 
-        let outcome = match state.phase {
-            AgentPhase::NeedsTrigger => {
-                run_needs_trigger(&config, &headless_cfg, &mut state, &work_dir, &state_dir).await?
+        // Advance tracked PRs before entering the main state machine.  Only PRs
+        // that are already tracked in state (created by wreck-it) are processed.
+        match advance_tracked_prs(&config, &headless_cfg, &mut state, &work_dir, &state_dir).await
+        {
+            Ok(progressed) => {
+                if progressed {
+                    made_progress = true;
+                }
             }
-            AgentPhase::AgentWorking => {
-                run_agent_working(&config, &headless_cfg, &mut state, &work_dir).await?
+            Err(e) => {
+                println!("[wreck-it] warning: advance_tracked_prs failed: {}", e);
             }
-            AgentPhase::NeedsVerification => {
-                run_needs_verification(&config, &headless_cfg, &mut state, &work_dir, &state_dir)
+        }
+
+        let mut sync_steps: usize = 0;
+
+        loop {
+            println!(
+                "[wreck-it] headless iteration {} | phase: {:?}",
+                state.iteration, state.phase
+            );
+
+            let outcome = match state.phase {
+                AgentPhase::NeedsTrigger => {
+                    run_needs_trigger(&config, &headless_cfg, &mut state, &work_dir, &state_dir)
+                        .await?
+                }
+                AgentPhase::AgentWorking => {
+                    run_agent_working(&config, &headless_cfg, &mut state, &work_dir).await?
+                }
+                AgentPhase::NeedsVerification => {
+                    run_needs_verification(
+                        &config,
+                        &headless_cfg,
+                        &mut state,
+                        &work_dir,
+                        &state_dir,
+                    )
                     .await?
-            }
-            AgentPhase::Completed => {
-                println!("[wreck-it] previous task completed, advancing to next trigger");
-                state.phase = AgentPhase::NeedsTrigger;
-                state.current_task_id = None;
-                state.issue_number = None;
-                state.pr_number = None;
-                state.pr_url = None;
-                state.last_prompt = None;
-                StepOutcome::Continue
-            }
-        };
+                }
+                AgentPhase::Completed => {
+                    println!("[wreck-it] previous task completed, advancing to next trigger");
+                    state.phase = AgentPhase::NeedsTrigger;
+                    state.current_task_id = None;
+                    state.issue_number = None;
+                    state.pr_number = None;
+                    state.pr_url = None;
+                    state.last_prompt = None;
+                    StepOutcome::Continue
+                }
+            };
 
-        if outcome == StepOutcome::Yield {
+            if outcome == StepOutcome::Yield {
+                break;
+            }
+
+            sync_steps += 1;
+            if sync_steps >= MAX_SYNC_STEPS {
+                println!(
+                    "[wreck-it] reached max synchronous steps ({}), yielding",
+                    MAX_SYNC_STEPS
+                );
+                break;
+            }
+        }
+
+        made_progress |= sync_steps > 0;
+
+        if !made_progress {
             break;
         }
 
-        sync_steps += 1;
-        if sync_steps >= MAX_SYNC_STEPS {
+        progress_rounds += 1;
+        if progress_rounds >= MAX_PROGRESS_ROUNDS {
             println!(
-                "[wreck-it] reached max synchronous steps ({}), yielding",
-                MAX_SYNC_STEPS
+                "[wreck-it] reached max progress rounds ({}), yielding",
+                MAX_PROGRESS_ROUNDS
             );
             break;
         }
+
+        println!(
+            "[wreck-it] progress detected, re-running advance loop (round {})",
+            progress_rounds
+        );
     }
 
     save_headless_state(&state_path, &state).context("Failed to save headless state")?;
@@ -223,13 +273,17 @@ async fn log_issue_assignees(client: &CloudAgentClient, issue_number: u64, prefi
 /// When a merged PR corresponds to the currently tracked task in `state`, the
 /// headless state is advanced to [`AgentPhase::Completed`] so the next
 /// invocation can pick up a new task.
+///
+/// Returns `true` when at least one tracked PR transitioned state (e.g. was
+/// marked ready, merged, or resolved), signalling that another progress round
+/// may be worthwhile.
 async fn advance_tracked_prs(
     config: &Config,
     headless_cfg: &HeadlessConfig,
     state: &mut HeadlessState,
     work_dir: &Path,
     state_dir: &Path,
-) -> Result<()> {
+) -> Result<bool> {
     let github_token = config
         .api_token
         .clone()
@@ -257,7 +311,7 @@ async fn advance_tracked_prs(
 
     if state.tracked_prs.is_empty() {
         println!("[wreck-it] advance: no tracked PRs");
-        return Ok(());
+        return Ok(false);
     }
 
     println!(
@@ -265,6 +319,7 @@ async fn advance_tracked_prs(
         state.tracked_prs.len(),
     );
 
+    let mut made_progress = false;
     let task_file = state_dir.join(&headless_cfg.task_file);
 
     // Process each tracked PR.  Collect PR numbers that have been merged or
@@ -317,6 +372,8 @@ async fn advance_tracked_prs(
                         "[wreck-it] advance: failed to mark PR #{} ready: {}",
                         pr_number, e
                     );
+                } else {
+                    made_progress = true;
                 }
                 state.memory.push(format!(
                     "advance: marked PR #{} (task {}) as ready for review",
@@ -420,6 +477,7 @@ async fn advance_tracked_prs(
                                 state.phase = AgentPhase::Completed;
                             }
                             resolved_pr_numbers.push(pr_number);
+                            made_progress = true;
                         }
                         Err(e) => {
                             println!(
@@ -440,6 +498,7 @@ async fn advance_tracked_prs(
                     state.phase = AgentPhase::Completed;
                 }
                 resolved_pr_numbers.push(pr_number);
+                made_progress = true;
             }
             Err(e) => {
                 println!(
@@ -456,7 +515,7 @@ async fn advance_tracked_prs(
         .tracked_prs
         .retain(|tp| !resolved_set.contains(&tp.pr_number));
 
-    Ok(())
+    Ok(made_progress)
 }
 
 /// Try to infer a task ID from a PR title.
@@ -996,6 +1055,13 @@ mod tests {
         // Ensure the constant exists and is reasonable.
         assert!(MAX_SYNC_STEPS > 0);
         assert!(MAX_SYNC_STEPS <= 100);
+    }
+
+    #[test]
+    fn max_progress_rounds_is_bounded() {
+        // Ensure the progress-loop cap exists and is reasonable.
+        assert!(MAX_PROGRESS_ROUNDS > 0);
+        assert!(MAX_PROGRESS_ROUNDS <= 100);
     }
 
     #[test]
