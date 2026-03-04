@@ -4,6 +4,8 @@ set -e
 cd "${GITHUB_WORKSPACE:-.}"
 
 git config --global --add safe.directory "$(pwd)"
+git config --global user.name "wreck-it[bot]"
+git config --global user.email "wreck-it[bot]@users.noreply.github.com"
 
 echo "[wreck-it] running headless iteration in $(pwd)"
 
