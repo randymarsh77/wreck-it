@@ -12,6 +12,11 @@ pub const DEFAULT_STATE_BRANCH: &str = "wreck-it-state";
 /// Directory on the main branch that holds the wreck-it repo config.
 pub const CONFIG_DIR: &str = ".wreck-it";
 
+/// Subdirectory under [`CONFIG_DIR`] on the main branch where agents can drop
+/// new or revised task plans.  The headless runner migrates these into the
+/// state branch at the start of each iteration.
+pub const PLANS_DIR: &str = "plans";
+
 /// Repository-level wreck-it configuration.
 ///
 /// This file lives on the main branch (the branch where `wreck-it init` was

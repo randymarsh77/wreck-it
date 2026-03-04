@@ -3,6 +3,7 @@ use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::headless_state::{
     load_headless_state, save_headless_state, AgentPhase, HeadlessState, TrackedPr,
 };
+use crate::plan_migration::migrate_pending_plans;
 use crate::repo_config::{load_repo_config, RalphConfig};
 use crate::state_worktree::{commit_and_push_state, ensure_state_worktree};
 use crate::task_manager::{load_tasks, reset_recurring_tasks, save_tasks};
@@ -115,6 +116,22 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
 
     let state_path = state_dir.join(&headless_cfg.state_file);
     let mut state = load_headless_state(&state_path).context("Failed to load headless state")?;
+
+    // Migrate pending plans from the main branch into the state branch.
+    // Cloud agents write new/revised task plans as JSON files in
+    // `.wreck-it/plans/` on the main branch; this step merges them into the
+    // active task list on the state branch.
+    let config_dir = work_dir.join(wreck_it_core::config::CONFIG_DIR);
+    let task_file_for_migration = state_dir.join(&headless_cfg.task_file);
+    match migrate_pending_plans(&config_dir, &task_file_for_migration) {
+        Ok(0) => {}
+        Ok(n) => {
+            println!("[wreck-it] migrated {} task(s) from pending plans", n);
+        }
+        Err(e) => {
+            println!("[wreck-it] warning: plan migration failed: {}", e);
+        }
+    }
 
     // Outer progress loop: re-run advance + state-machine as long as any item
     // transitions state.  This lets a single invocation chain through multiple
