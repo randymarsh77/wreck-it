@@ -299,22 +299,47 @@ async fn fetch_authenticated_login(token: &str) -> Option<String> {
     headers.set("User-Agent", "wreck-it-worker").ok();
     headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
 
-    let request = worker::Request::new_with_init(
+    let request = match worker::Request::new_with_init(
         url,
         worker::RequestInit::new()
             .with_method(worker::Method::Get)
             .with_headers(headers),
-    )
-    .ok()?;
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            console_warn!("Failed to build /user request: {e}");
+            return None;
+        }
+    };
 
-    let mut response = Fetch::Request(request).send().await.ok()?;
+    let mut response = match Fetch::Request(request).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            console_warn!("GET /user failed: {e}");
+            return None;
+        }
+    };
 
     if response.status_code() != 200 {
+        console_warn!(
+            "GET /user returned status {}; falling back to Bot-only trust check",
+            response.status_code(),
+        );
         return None;
     }
 
-    let body: serde_json::Value = response.json().await.ok()?;
-    body["login"].as_str().map(|s| s.to_string())
+    let body: serde_json::Value = match response.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            console_warn!("Failed to parse /user response: {e}");
+            return None;
+        }
+    };
+    let login = body["login"].as_str().map(|s| s.to_string());
+    if login.is_none() {
+        console_warn!("GET /user response has no login field");
+    }
+    login
 }
 
 /// Current Unix timestamp in seconds.

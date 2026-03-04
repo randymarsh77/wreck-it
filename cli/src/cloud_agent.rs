@@ -210,14 +210,31 @@ impl CloudAgentClient {
             .header("Accept", "application/vnd.github+json")
             .send()
             .await;
-        if let Ok(resp) = resp {
-            if resp.status().is_success() {
-                if let Ok(body) = resp.json::<serde_json::Value>().await {
-                    if let Some(login) = body["login"].as_str() {
-                        tracing::info!("Authenticated as GitHub user '{}'", login);
-                        self.authenticated_login = Some(login.to_string());
+        match resp {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    tracing::warn!(
+                        "GET /user returned status {}; falling back to Bot/agent-only trust check",
+                        resp.status(),
+                    );
+                    return;
+                }
+                match resp.json::<serde_json::Value>().await {
+                    Ok(body) => {
+                        if let Some(login) = body["login"].as_str() {
+                            tracing::info!("Authenticated as GitHub user '{}'", login);
+                            self.authenticated_login = Some(login.to_string());
+                        } else {
+                            tracing::warn!("GET /user response has no login field");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to parse GET /user response: {}", e);
                     }
                 }
+            }
+            Err(e) => {
+                tracing::warn!("GET /user request failed: {}", e);
             }
         }
     }
