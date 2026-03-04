@@ -402,21 +402,52 @@ async fn advance_tracked_prs(
                     }
                 };
                 if has_checks {
-                    println!(
-                        "[wreck-it] advance: PR #{} not yet mergeable, approving workflows and enabling auto-merge",
-                        pr_number
-                    );
-                    if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                    // Check if any checks are actively failing.
+                    let has_failures =
+                        match client.has_failing_checks_for_pr(pr_number).await {
+                            Ok(v) => v,
+                            Err(e) => {
+                                println!(
+                                    "[wreck-it] advance: failed to check failing checks for PR #{}: {}",
+                                    pr_number, e
+                                );
+                                false
+                            }
+                        };
+                    if has_failures {
                         println!(
-                            "[wreck-it] advance: failed to approve workflows for PR #{}: {}",
-                            pr_number, e
+                            "[wreck-it] advance: PR #{} has failing checks, requesting @copilot fix",
+                            pr_number
                         );
-                    }
-                    if let Err(e) = client.enable_auto_merge(pr_number).await {
+                        if let Err(e) = client
+                            .comment_on_pr(
+                                pr_number,
+                                "@copilot The CI checks on this PR are failing. Please fix the failing checks.",
+                            )
+                            .await
+                        {
+                            println!(
+                                "[wreck-it] advance: failed to comment on PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
+                    } else {
                         println!(
-                            "[wreck-it] advance: failed to enable auto-merge for PR #{}: {}",
-                            pr_number, e
+                            "[wreck-it] advance: PR #{} not yet mergeable, approving workflows and enabling auto-merge",
+                            pr_number
                         );
+                        if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                            println!(
+                                "[wreck-it] advance: failed to approve workflows for PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
+                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                            println!(
+                                "[wreck-it] advance: failed to enable auto-merge for PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
                     }
                 } else {
                     println!(
@@ -879,21 +910,52 @@ async fn run_needs_verification(
                 }
             };
             if has_checks {
-                println!(
-                    "[wreck-it] PR #{} is not yet mergeable, approving workflows and enabling auto-merge",
-                    pr_number
-                );
-                if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                // Check if any checks are actively failing.
+                let has_failures =
+                    match client.has_failing_checks_for_pr(pr_number).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            println!(
+                                "[wreck-it] failed to check failing checks for PR #{}: {}",
+                                pr_number, e
+                            );
+                            false
+                        }
+                    };
+                if has_failures {
                     println!(
-                        "[wreck-it] failed to approve workflow runs for PR #{}: {}",
-                        pr_number, e
+                        "[wreck-it] PR #{} has failing checks, requesting @copilot fix",
+                        pr_number
                     );
-                }
-                if let Err(e) = client.enable_auto_merge(pr_number).await {
+                    if let Err(e) = client
+                        .comment_on_pr(
+                            pr_number,
+                            "@copilot The CI checks on this PR are failing. Please fix the failing checks.",
+                        )
+                        .await
+                    {
+                        println!(
+                            "[wreck-it] failed to comment on PR #{}: {}",
+                            pr_number, e
+                        );
+                    }
+                } else {
                     println!(
-                        "[wreck-it] failed to enable auto-merge for PR #{}: {}",
-                        pr_number, e
+                        "[wreck-it] PR #{} is not yet mergeable, approving workflows and enabling auto-merge",
+                        pr_number
                     );
+                    if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                        println!(
+                            "[wreck-it] failed to approve workflow runs for PR #{}: {}",
+                            pr_number, e
+                        );
+                    }
+                    if let Err(e) = client.enable_auto_merge(pr_number).await {
+                        println!(
+                            "[wreck-it] failed to enable auto-merge for PR #{}: {}",
+                            pr_number, e
+                        );
+                    }
                 }
             } else {
                 println!(
