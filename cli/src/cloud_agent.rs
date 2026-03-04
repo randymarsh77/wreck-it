@@ -249,6 +249,7 @@ impl CloudAgentClient {
     /// that is appended to the issue body so the agent has historical context.
     pub async fn trigger_agent(
         &self,
+        ralph_name: &str,
         task_id: &str,
         task_description: &str,
         memory_context: &[String],
@@ -256,7 +257,7 @@ impl CloudAgentClient {
         let issue_body = build_issue_body(task_id, task_description, memory_context);
 
         let create_body = serde_json::json!({
-            "title": format!("[wreck-it] {}", task_id),
+            "title": format!("[wreck-it] {} {}", ralph_name, task_id),
             "body": issue_body,
             "labels": ["wreck-it", "copilot"],
         });
