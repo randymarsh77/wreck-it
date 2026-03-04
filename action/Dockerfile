@@ -9,6 +9,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock* ./
 COPY cli/ cli/
 COPY core/ core/
+COPY templates/ templates/
 
 RUN cargo build --release
 
