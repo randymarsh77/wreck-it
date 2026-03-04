@@ -191,9 +191,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
             }
         }
 
-        if sync_steps > 0 {
-            made_progress = true;
-        }
+        made_progress |= sync_steps > 0;
 
         if !made_progress {
             break;
