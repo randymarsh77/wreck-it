@@ -547,6 +547,12 @@ fn mark_task_complete_by_id(task_id: &str, task_file: &Path) -> Result<()> {
     if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
         if task.status != crate::types::TaskStatus::Completed {
             task.status = crate::types::TaskStatus::Completed;
+            task.last_attempt_at = Some(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+            );
             save_tasks(task_file, &tasks)?;
         }
     }
@@ -1151,5 +1157,85 @@ mod tests {
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Pending);
+    }
+
+    #[test]
+    fn mark_task_complete_by_id_sets_last_attempt_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+
+        let tasks = vec![crate::types::Task {
+            id: "rec-1".to_string(),
+            description: "recurring task".to_string(),
+            status: crate::types::TaskStatus::InProgress,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::Recurring,
+            cooldown_seconds: Some(3600),
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
+        }];
+        save_tasks(&task_file, &tasks).unwrap();
+
+        mark_task_complete_by_id("rec-1", &task_file).unwrap();
+
+        let reloaded = load_tasks(&task_file).unwrap();
+        assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
+        assert!(
+            reloaded[0].last_attempt_at.is_some(),
+            "last_attempt_at should be set on completion so cooldown is respected"
+        );
+    }
+
+    #[test]
+    fn mark_task_complete_then_cooldown_prevents_immediate_reset() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+
+        let tasks = vec![crate::types::Task {
+            id: "rec-1".to_string(),
+            description: "recurring task".to_string(),
+            status: crate::types::TaskStatus::InProgress,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::Recurring,
+            cooldown_seconds: Some(3600),
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
+        }];
+        save_tasks(&task_file, &tasks).unwrap();
+
+        // Complete the task (sets last_attempt_at to now).
+        mark_task_complete_by_id("rec-1", &task_file).unwrap();
+
+        // Reload and immediately try to reset recurring tasks.
+        let mut reloaded = load_tasks(&task_file).unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let reset_count = reset_recurring_tasks(&mut reloaded, now);
+
+        // Cooldown of 3600s should prevent an immediate reset.
+        assert_eq!(reset_count, 0, "recurring task should not reset before cooldown elapses");
+        assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
     }
 }
