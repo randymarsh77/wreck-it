@@ -106,6 +106,9 @@ async fn main() -> Result<()> {
                         return Ok(());
                     }
                 }
+            } else if headless && !repo_cfg.ralphs.is_empty() {
+                // Headless mode with [[ralphs]] configured – run all of them.
+                repo_cfg.ralphs.clone()
             } else {
                 // No ralph specified – single anonymous run.
                 vec![]
