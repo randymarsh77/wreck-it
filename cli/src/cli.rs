@@ -88,9 +88,15 @@ pub enum Commands {
     /// Generate a structured task plan from a natural-language goal using the
     /// configured LLM and write it to the state worktree as a new ralph context.
     Plan {
-        /// Natural-language goal to plan tasks for (required)
-        #[arg(short, long)]
-        goal: String,
+        /// Natural-language goal to plan tasks for.
+        /// Mutually exclusive with --goal-file; exactly one must be provided.
+        #[arg(short, long, conflicts_with = "goal_file")]
+        goal: Option<String>,
+
+        /// Path to a file containing the natural-language goal.
+        /// Mutually exclusive with --goal; exactly one must be provided.
+        #[arg(long, conflicts_with = "goal")]
+        goal_file: Option<PathBuf>,
 
         /// Name for the ralph context.  Defaults to a slug derived from the goal.
         /// If a ralph with this name already exists the task file is overwritten.

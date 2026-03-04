@@ -246,12 +246,28 @@ async fn main() -> Result<()> {
 
         Commands::Plan {
             goal,
+            goal_file,
             ralph,
             output,
             api_endpoint,
             api_token,
             model_provider,
         } => {
+            // Resolve goal: read from file or use raw string; exactly one must be set.
+            let goal = match (goal, goal_file) {
+                (Some(g), None) => g,
+                (None, Some(path)) => std::fs::read_to_string(&path)
+                    .with_context(|| format!("Failed to read goal file '{}'", path.display()))?,
+                (None, None) => {
+                    anyhow::bail!("Either --goal or --goal-file must be provided");
+                }
+                (Some(_), Some(_)) => {
+                    // clap `conflicts_with` prevents this, but be defensive.
+                    anyhow::bail!("--goal and --goal-file are mutually exclusive");
+                }
+            };
+            let goal = goal.trim().to_string();
+
             let work_dir = std::env::current_dir()?;
 
             // Load (or fail) the repo config — plan needs a repo.
@@ -658,5 +674,46 @@ fn slugify_for_ralph(goal: &str) -> String {
         "plan".to_string()
     } else {
         collapsed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- slugify_for_ralph tests ----
+
+    #[test]
+    fn slugify_basic_sentence() {
+        assert_eq!(slugify_for_ralph("Build a REST API"), "build-a-rest-api");
+    }
+
+    #[test]
+    fn slugify_empty_string() {
+        assert_eq!(slugify_for_ralph(""), "plan");
+    }
+
+    #[test]
+    fn slugify_special_chars() {
+        assert_eq!(slugify_for_ralph("Hello, World!"), "hello-world");
+    }
+
+    #[test]
+    fn slugify_truncates_long_goal() {
+        let goal = "word1 word2 word3 word4 word5 word6 word7 word8";
+        let result = slugify_for_ralph(goal);
+        // Takes first 6 words
+        assert_eq!(result, "word1-word2-word3-word4-word5-word6");
+    }
+
+    // ---- goal-file resolution tests ----
+
+    #[test]
+    fn goal_file_contents_are_read_and_trimmed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("goal.txt");
+        std::fs::write(&path, "  Build a pipeline  \n").unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(contents.trim(), "Build a pipeline");
     }
 }
