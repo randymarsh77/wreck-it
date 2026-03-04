@@ -361,13 +361,21 @@ mod tests {
     #[test]
     fn trusted_issue_author_bot_ignores_login() {
         // Bot type is trusted regardless of login/authenticated_login.
-        assert!(is_trusted_issue_author(Some("Bot"), Some("any"), Some("other")));
+        assert!(is_trusted_issue_author(
+            Some("Bot"),
+            Some("any"),
+            Some("other")
+        ));
     }
 
     #[test]
     fn trusted_issue_author_matching_login() {
         // PAT flow: author login matches authenticated_login.
-        assert!(is_trusted_issue_author(Some("User"), Some("my-user"), Some("my-user")));
+        assert!(is_trusted_issue_author(
+            Some("User"),
+            Some("my-user"),
+            Some("my-user")
+        ));
     }
 
     #[test]
@@ -377,12 +385,20 @@ mod tests {
 
     #[test]
     fn untrusted_issue_author_user_no_authenticated_login() {
-        assert!(!is_trusted_issue_author(Some("User"), Some("attacker"), None));
+        assert!(!is_trusted_issue_author(
+            Some("User"),
+            Some("attacker"),
+            None
+        ));
     }
 
     #[test]
     fn untrusted_issue_author_login_mismatch() {
-        assert!(!is_trusted_issue_author(Some("User"), Some("attacker"), Some("my-user")));
+        assert!(!is_trusted_issue_author(
+            Some("User"),
+            Some("attacker"),
+            Some("my-user")
+        ));
     }
 
     #[test]

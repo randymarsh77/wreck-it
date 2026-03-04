@@ -144,8 +144,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
 
         // Advance tracked PRs before entering the main state machine.  Only PRs
         // that are already tracked in state (created by wreck-it) are processed.
-        match advance_tracked_prs(&config, &headless_cfg, &mut state, &work_dir, &state_dir).await
-        {
+        match advance_tracked_prs(&config, &headless_cfg, &mut state, &work_dir, &state_dir).await {
             Ok(progressed) => {
                 if progressed {
                     made_progress = true;
@@ -421,17 +420,16 @@ async fn advance_tracked_prs(
                 };
                 if has_checks {
                     // Check if any checks are actively failing.
-                    let has_failures =
-                        match client.has_failing_checks_for_pr(pr_number).await {
-                            Ok(v) => v,
-                            Err(e) => {
-                                println!(
-                                    "[wreck-it] advance: failed to check failing checks for PR #{}: {}",
-                                    pr_number, e
-                                );
-                                false
-                            }
-                        };
+                    let has_failures = match client.has_failing_checks_for_pr(pr_number).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            println!(
+                                "[wreck-it] advance: failed to check failing checks for PR #{}: {}",
+                                pr_number, e
+                            );
+                            false
+                        }
+                    };
                     if has_failures {
                         println!(
                             "[wreck-it] advance: PR #{} has failing checks, requesting @copilot fix",
@@ -932,17 +930,16 @@ async fn run_needs_verification(
             };
             if has_checks {
                 // Check if any checks are actively failing.
-                let has_failures =
-                    match client.has_failing_checks_for_pr(pr_number).await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            println!(
-                                "[wreck-it] failed to check failing checks for PR #{}: {}",
-                                pr_number, e
-                            );
-                            false
-                        }
-                    };
+                let has_failures = match client.has_failing_checks_for_pr(pr_number).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        println!(
+                            "[wreck-it] failed to check failing checks for PR #{}: {}",
+                            pr_number, e
+                        );
+                        false
+                    }
+                };
                 if has_failures {
                     println!(
                         "[wreck-it] PR #{} has failing checks, requesting @copilot fix",
@@ -1318,7 +1315,10 @@ mod tests {
         let reset_count = reset_recurring_tasks(&mut reloaded, now);
 
         // Cooldown of 3600s should prevent an immediate reset.
-        assert_eq!(reset_count, 0, "recurring task should not reset before cooldown elapses");
+        assert_eq!(
+            reset_count, 0,
+            "recurring task should not reset before cooldown elapses"
+        );
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
     }
 }

@@ -831,7 +831,10 @@ impl CloudAgentClient {
                                     let pr_author = issue_obj
                                         .and_then(|i| i.pointer("/user/login"))
                                         .and_then(|v| v.as_str());
-                                    if !wreck_it_core::types::is_trusted_pr_author(pr_author, self.authenticated_login.as_deref()) {
+                                    if !wreck_it_core::types::is_trusted_pr_author(
+                                        pr_author,
+                                        self.authenticated_login.as_deref(),
+                                    ) {
                                         tracing::warn!(
                                             "Ignoring cross-referenced PR by {:?} (not a known agent or authenticated user)",
                                             pr_author.unwrap_or("<unknown>"),
@@ -901,10 +904,7 @@ impl CloudAgentClient {
             .header("Authorization", format!("Bearer {}", self.github_token))
             .header("User-Agent", "wreck-it")
             .header("Accept", "application/vnd.github+json")
-            .header(
-                "GraphQL-Features",
-                "copilot_pull_request_agent_session",
-            )
+            .header("GraphQL-Features", "copilot_pull_request_agent_session")
             .json(&query)
             .send()
             .await
@@ -966,7 +966,10 @@ impl CloudAgentClient {
 
         // Supply-chain protection: reject PRs not opened by a known agent
         // or the authenticated user.
-        if !wreck_it_core::types::is_trusted_pr_author(pr_author, self.authenticated_login.as_deref()) {
+        if !wreck_it_core::types::is_trusted_pr_author(
+            pr_author,
+            self.authenticated_login.as_deref(),
+        ) {
             println!(
                 "[wreck-it] PR #{} was opened by {:?}, not a known agent or authenticated user — refusing to process",
                 pr_number,
@@ -1396,9 +1399,8 @@ impl CloudAgentClient {
         let has_failure = body["check_runs"]
             .as_array()
             .map(|runs| {
-                runs.iter().any(|r| {
-                    r["conclusion"].as_str() == Some("failure")
-                })
+                runs.iter()
+                    .any(|r| r["conclusion"].as_str() == Some("failure"))
             })
             .unwrap_or(false);
 

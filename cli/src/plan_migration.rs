@@ -73,11 +73,7 @@ pub fn migrate_pending_plans(
     let entries: Vec<_> = std::fs::read_dir(&plans_dir)
         .context("Failed to read plans directory")?
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext == "json")
-        })
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
         .collect();
 
     if entries.is_empty() {
@@ -121,8 +117,9 @@ pub fn migrate_pending_plans(
         }
 
         if file_changed > 0 {
-            save_tasks(target_file, &existing)
-                .with_context(|| format!("Failed to save merged tasks to {}", target_file.display()))?;
+            save_tasks(target_file, &existing).with_context(|| {
+                format!("Failed to save merged tasks to {}", target_file.display())
+            })?;
         }
 
         total_changed += file_changed;
@@ -180,8 +177,7 @@ mod tests {
         let task_file = state_dir.path().join("tasks.json");
         save_tasks(&task_file, &[]).unwrap();
 
-        let count =
-            migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
+        let count = migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
         assert_eq!(count, 0);
     }
 
@@ -193,8 +189,7 @@ mod tests {
         let task_file = state_dir.path().join("tasks.json");
         save_tasks(&task_file, &[]).unwrap();
 
-        let count =
-            migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
+        let count = migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
         assert_eq!(count, 0);
     }
 
@@ -216,8 +211,7 @@ mod tests {
         let existing = vec![make_task("old-1", TaskStatus::Completed)];
         save_tasks(&task_file, &existing).unwrap();
 
-        let count =
-            migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
+        let count = migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
         assert_eq!(count, 1);
 
         // Task file should now contain both tasks.
@@ -244,8 +238,7 @@ mod tests {
         let task_file = state_dir.path().join("tasks.json");
         save_tasks(&task_file, &[]).unwrap();
 
-        let count =
-            migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
+        let count = migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
         assert_eq!(count, 0);
     }
 
@@ -274,8 +267,7 @@ mod tests {
         let task_file = state_dir.path().join("tasks.json");
         save_tasks(&task_file, &[]).unwrap();
 
-        let count =
-            migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
+        let count = migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
         assert_eq!(count, 2);
 
         let reloaded = load_tasks(&task_file).unwrap();
@@ -305,8 +297,7 @@ mod tests {
         let existing = vec![make_task("done", TaskStatus::Completed)];
         save_tasks(&task_file, &existing).unwrap();
 
-        let count =
-            migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
+        let count = migrate_pending_plans(config_dir.path(), state_dir.path(), &task_file).unwrap();
         // The task is completed, so it should not be replaced.
         assert_eq!(count, 0);
     }
@@ -362,7 +353,10 @@ mod tests {
 
         // Default task file should remain empty.
         let default_tasks = load_tasks(&default_task_file).unwrap();
-        assert!(default_tasks.is_empty(), "default task file should be empty");
+        assert!(
+            default_tasks.is_empty(),
+            "default task file should be empty"
+        );
 
         // Target task file should contain the new task.
         let target_tasks = load_tasks(&target_task_file).unwrap();
