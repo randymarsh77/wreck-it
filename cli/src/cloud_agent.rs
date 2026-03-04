@@ -681,10 +681,14 @@ impl CloudAgentClient {
         // Look for open PRs that reference this issue.
         if let Some(status) = self.find_linked_pr(issue_number).await? {
             // A linked PR was found.  Check whether the coding agent is still
-            // assigned to the triggering issue — if so, it is still actively
-            // pushing changes and the PR is not ready for verification yet.
+            // assigned to the triggering issue — if so, it *may* be still
+            // actively pushing changes.  However, some agents (e.g. Copilot)
+            // remain assigned after finishing, so also consult PR-level
+            // signals before declaring the agent is still working.
             if let CloudAgentStatus::PrCreated { pr_number, pr_url } = status {
-                if self.is_agent_assigned_to_issue(issue_number).await? {
+                if self.is_agent_assigned_to_issue(issue_number).await?
+                    && !self.is_pr_work_completed(pr_number).await
+                {
                     return Ok(CloudAgentStatus::PrCreatedAgentWorking { pr_number, pr_url });
                 }
                 return Ok(CloudAgentStatus::PrCreated { pr_number, pr_url });
@@ -765,6 +769,51 @@ impl CloudAgentClient {
         } else {
             Ok(false)
         }
+    }
+
+    /// Check whether PR-level signals indicate the coding agent has finished
+    /// working on the PR, even though it may still appear as an issue assignee.
+    ///
+    /// Uses the same two-tier strategy as [`check_pr_merge_status`]:
+    ///   1. **Primary**: Copilot agent session completion via GraphQL.
+    ///   2. **Fallback**: absence of a `[wip]` title prefix.
+    ///
+    /// Returns `true` when the agent appears to have finished, `false` when it
+    /// is still working or the status cannot be determined.
+    async fn is_pr_work_completed(&self, pr_number: u64) -> bool {
+        // Primary signal: Copilot session completion via GraphQL.
+        match self.check_copilot_session_completed(pr_number).await {
+            Some(true) => return true,
+            Some(false) => return false,
+            None => {}
+        }
+
+        // Fallback: check whether the PR title starts with [wip].
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await;
+
+        if let Ok(resp) = resp {
+            if resp.status().is_success() {
+                if let Ok(pr) = resp.json::<serde_json::Value>().await {
+                    let title = pr["title"].as_str().unwrap_or("");
+                    return !is_wip_title(title);
+                }
+            }
+        }
+
+        // Cannot determine; conservatively assume still working.
+        false
     }
 
     /// Fetch issue assignee details for diagnostic logging.
