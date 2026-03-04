@@ -840,8 +840,9 @@ async fn run_needs_verification(
                 "iteration {}: marked PR #{} as ready for review",
                 state.iteration, pr_number,
             ));
-            // Mergeability may not be immediate; retry on the next run.
-            return Ok(StepOutcome::Yield);
+            // We made progress — loop again so the PR can be re-checked
+            // immediately (it may now be mergeable).
+            return Ok(StepOutcome::Continue);
         }
         Ok(PrMergeStatus::AgentWorkInProgress) => {
             println!(
