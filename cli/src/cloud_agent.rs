@@ -26,9 +26,11 @@ pub enum CloudAgentStatus {
 pub enum PrMergeStatus {
     /// The PR is a draft and must be marked ready for review first.
     Draft,
-    /// The PR title contains a `[wip]` prefix, indicating the coding agent
-    /// is still actively working on it.  The runner should wait until the
-    /// prefix is removed before attempting to merge.
+    /// The coding agent is still actively working on the PR.
+    ///
+    /// Detected via Copilot agent session events (GraphQL) or by the
+    /// `[wip]` title prefix heuristic as a fallback.  The runner should
+    /// wait until the agent finishes before attempting to merge.
     AgentWorkInProgress,
     /// The PR is not yet mergeable (checks pending, conflicts, etc.).
     NotMergeable,
@@ -113,6 +115,47 @@ fn is_wip_title(title: &str) -> bool {
     let trimmed = title.trim_start();
     // `get(..5)` safely returns `None` for short or non-ASCII-boundary strings.
     matches!(trimmed.get(..5), Some(prefix) if prefix.eq_ignore_ascii_case("[wip]"))
+}
+
+/// Parse Copilot agent session completion status from a GraphQL response.
+///
+/// The expected response shape is produced by a `timelineItems` query
+/// filtered to `COPILOT_PULL_REQUEST_SESSION_EVENT` items:
+///
+/// ```json
+/// { "data": { "repository": { "pullRequest": { "timelineItems": {
+///     "nodes": [ { "copilotSession": { "completedAt": "..." } } ]
+/// } } } } }
+/// ```
+///
+/// Returns `Some(true)` if the latest session has a `completedAt` timestamp,
+/// `Some(false)` if a session exists but is not completed, and `None` if no
+/// session data is present or the response structure is unexpected.
+fn parse_copilot_session_status(graphql_response: &serde_json::Value) -> Option<bool> {
+    // GraphQL-level errors indicate the feature flag may not be available.
+    if graphql_response.get("errors").is_some() {
+        return None;
+    }
+
+    let nodes = graphql_response
+        .pointer("/data/repository/pullRequest/timelineItems/nodes")
+        .and_then(|v| v.as_array())?;
+
+    if nodes.is_empty() {
+        return None;
+    }
+
+    // The query uses `last: N`, so the final element is the most recent session.
+    let latest = nodes.last()?;
+    let completed_at = latest
+        .pointer("/copilotSession/completedAt")
+        .and_then(|v| v.as_str());
+
+    if completed_at.is_some() {
+        Some(true)
+    } else {
+        Some(false)
+    }
 }
 
 /// Partition an issue's assignees into agent and non-agent logins.
@@ -754,6 +797,63 @@ impl CloudAgentClient {
         Ok(None)
     }
 
+    /// Check whether a Copilot agent has finished working on a pull request
+    /// by querying for agent session events via the GraphQL API.
+    ///
+    /// Returns `Some(true)` when a completed agent session is found,
+    /// `Some(false)` when only in-progress sessions exist, and `None`
+    /// when the query fails or no session data is available (e.g. the
+    /// API does not support the required feature flag).
+    pub async fn check_copilot_session_completed(&self, pr_number: u64) -> Option<bool> {
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": r#"query($owner: String!, $name: String!, $number: Int!) {
+                repository(owner: $owner, name: $name) {
+                    pullRequest(number: $number) {
+                        timelineItems(last: 10, itemTypes: [COPILOT_PULL_REQUEST_SESSION_EVENT]) {
+                            nodes {
+                                __typename
+                                ... on CopilotPullRequestSessionEvent {
+                                    createdAt
+                                    copilotSession {
+                                        completedAt
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }"#,
+            "variables": {
+                "owner": self.repo_owner,
+                "name": self.repo_name,
+                "number": pr_number,
+            },
+        });
+
+        let resp = self
+            .http
+            .post(&graphql_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .header(
+                "GraphQL-Features",
+                "copilot_pull_request_agent_session",
+            )
+            .json(&query)
+            .send()
+            .await
+            .ok()?;
+
+        if !resp.status().is_success() {
+            return None;
+        }
+
+        let body: serde_json::Value = resp.json().await.ok()?;
+        parse_copilot_session_status(&body)
+    }
+
     /// Check the merge readiness of a PR in a single API call.
     ///
     /// Returns [`PrMergeStatus::Draft`] if the PR is still a draft,
@@ -808,9 +908,32 @@ impl CloudAgentClient {
         if draft {
             return Ok(PrMergeStatus::Draft);
         }
-        // Detect agent work-in-progress via title prefix (case-insensitive).
-        if is_wip_title(title) {
-            return Ok(PrMergeStatus::AgentWorkInProgress);
+        // Detect agent work-in-progress.
+        //
+        // Primary signal: query the Copilot agent session status via GraphQL.
+        // Fallback: check whether the title starts with [wip].
+        match self.check_copilot_session_completed(pr_number).await {
+            Some(true) => {
+                // Agent session completed; skip the [wip] title heuristic.
+                println!(
+                    "[wreck-it] PR #{} has a completed Copilot agent session",
+                    pr_number,
+                );
+            }
+            Some(false) => {
+                // Agent session is still active.
+                println!(
+                    "[wreck-it] PR #{} has an active Copilot agent session — still working",
+                    pr_number,
+                );
+                return Ok(PrMergeStatus::AgentWorkInProgress);
+            }
+            None => {
+                // Could not determine from GraphQL; fall back to title heuristic.
+                if is_wip_title(title) {
+                    return Ok(PrMergeStatus::AgentWorkInProgress);
+                }
+            }
         }
         if mergeable {
             Ok(PrMergeStatus::Mergeable)
@@ -1458,6 +1581,78 @@ mod tests {
     #[test]
     fn is_wip_title_leading_whitespace() {
         assert!(is_wip_title("  [wip] with leading space"));
+    }
+
+    // ---- parse_copilot_session_status tests ----
+
+    #[test]
+    fn copilot_session_completed() {
+        let resp = serde_json::json!({
+            "data": { "repository": { "pullRequest": { "timelineItems": {
+                "nodes": [{
+                    "__typename": "CopilotPullRequestSessionEvent",
+                    "createdAt": "2025-01-01T00:00:00Z",
+                    "copilotSession": { "completedAt": "2025-01-01T01:00:00Z" }
+                }]
+            }}}}
+        });
+        assert_eq!(parse_copilot_session_status(&resp), Some(true));
+    }
+
+    #[test]
+    fn copilot_session_in_progress() {
+        let resp = serde_json::json!({
+            "data": { "repository": { "pullRequest": { "timelineItems": {
+                "nodes": [{
+                    "__typename": "CopilotPullRequestSessionEvent",
+                    "createdAt": "2025-01-01T00:00:00Z",
+                    "copilotSession": { "completedAt": null }
+                }]
+            }}}}
+        });
+        assert_eq!(parse_copilot_session_status(&resp), Some(false));
+    }
+
+    #[test]
+    fn copilot_session_no_nodes() {
+        let resp = serde_json::json!({
+            "data": { "repository": { "pullRequest": { "timelineItems": {
+                "nodes": []
+            }}}}
+        });
+        assert_eq!(parse_copilot_session_status(&resp), None);
+    }
+
+    #[test]
+    fn copilot_session_graphql_errors() {
+        let resp = serde_json::json!({
+            "errors": [{"message": "Field not found"}]
+        });
+        assert_eq!(parse_copilot_session_status(&resp), None);
+    }
+
+    #[test]
+    fn copilot_session_unexpected_shape() {
+        let resp = serde_json::json!({ "data": {} });
+        assert_eq!(parse_copilot_session_status(&resp), None);
+    }
+
+    #[test]
+    fn copilot_session_multiple_takes_latest() {
+        let resp = serde_json::json!({
+            "data": { "repository": { "pullRequest": { "timelineItems": {
+                "nodes": [
+                    {
+                        "copilotSession": { "completedAt": "2025-01-01T01:00:00Z" }
+                    },
+                    {
+                        "copilotSession": { "completedAt": null }
+                    }
+                ]
+            }}}}
+        });
+        // The last node (most recent) is in-progress.
+        assert_eq!(parse_copilot_session_status(&resp), Some(false));
     }
 
     #[test]
