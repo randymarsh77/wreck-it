@@ -570,17 +570,20 @@ async fn advance_tracked_prs(
 /// Try to infer a task ID from a PR title.
 ///
 /// Agent-created PRs often reference the triggering issue whose title is
-/// `[wreck-it] <ralph_name> <task_id>`.  PR titles may contain the issue
-/// number (e.g. "Fixes #42") or quote the task ID directly.  This is a
-/// best-effort extraction; returns [`UNKNOWN_TASK_ID`] when no ID can be
-/// inferred.
+/// `[wreck-it] <ralph_name> <task_id>` (current format) or the legacy
+/// `[wreck-it] <task_id>` (without a ralph name).  PR titles may contain
+/// the issue number (e.g. "Fixes #42") or quote the task ID directly.
+/// This is a best-effort extraction; returns [`UNKNOWN_TASK_ID`] when no
+/// ID can be inferred.
 #[cfg(test)]
 fn infer_task_id_from_title(title: &str) -> String {
     // Look for "[wreck-it] <ralph_name> <task_id>" or "[wreck-it] <task_id>" pattern.
     if let Some(rest) = title.strip_prefix("[wreck-it] ") {
         let trimmed = rest.trim();
-        // The task ID is the last space-separated token (handles both
-        // "[wreck-it] task-1" and "[wreck-it] my-ralph task-1").
+        // Task IDs are single-token identifiers (e.g. "impl-3", "1"),
+        // so the task ID is the last space-separated token.  This handles
+        // both the current "[wreck-it] my-ralph task-1" and the legacy
+        // "[wreck-it] task-1" formats.
         return trimmed
             .rsplit_once(' ')
             .map(|(_, id)| id)
