@@ -63,7 +63,9 @@ pub fn migrate_pending_plans(config_dir: &Path, task_file: &Path) -> Result<usiz
         save_tasks(task_file, &existing).context("Failed to save merged tasks")?;
     }
 
-    // Remove consumed plan files so they are not re-processed.
+    // Remove consumed plan files regardless of whether any tasks changed.
+    // A plan that only contains already-completed tasks still needs to be
+    // removed so it is not re-processed on every subsequent iteration.
     for path in consumed {
         if let Err(e) = std::fs::remove_file(&path) {
             println!(
