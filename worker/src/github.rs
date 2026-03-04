@@ -421,9 +421,10 @@ impl GitHubClient {
 
         for &known in Self::KNOWN_AGENT_LOGINS {
             for node in nodes {
-                if node["login"].as_str() == Some(known) {
+                let node_login = node["login"].as_str().unwrap_or_default();
+                if node_login.eq_ignore_ascii_case(known) {
                     if let Some(id) = node["id"].as_str() {
-                        return Some((id.to_string(), known.to_string()));
+                        return Some((id.to_string(), node_login.to_string()));
                     }
                 }
             }
@@ -607,7 +608,7 @@ impl GitHubClient {
                 arr.iter().any(|a| {
                     a["login"]
                         .as_str()
-                        .map(|l| Self::KNOWN_AGENT_LOGINS.contains(&l))
+                        .map(wreck_it_core::types::is_known_agent_login)
                         .unwrap_or(false)
                 })
             })

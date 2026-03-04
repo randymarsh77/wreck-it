@@ -265,7 +265,9 @@ pub const KNOWN_AGENT_LOGINS: &[&str] = &["copilot-swe-agent", "copilot", "claud
 /// (`"copilot[bot]"`).
 pub fn is_known_agent_login(login: &str) -> bool {
     let bare = login.strip_suffix("[bot]").unwrap_or(login);
-    KNOWN_AGENT_LOGINS.contains(&bare)
+    KNOWN_AGENT_LOGINS
+        .iter()
+        .any(|known| known.eq_ignore_ascii_case(bare))
 }
 
 /// Check whether an issue was opened by a trusted author.
@@ -349,6 +351,18 @@ mod tests {
         assert!(!is_known_agent_login("attacker"));
         assert!(!is_known_agent_login("evil-bot[bot]"));
         assert!(!is_known_agent_login(""));
+    }
+
+    #[test]
+    fn known_agent_case_insensitive() {
+        // GitHub may return display-name casing (e.g. "Copilot") instead of
+        // the lowercase login.
+        assert!(is_known_agent_login("Copilot"));
+        assert!(is_known_agent_login("COPILOT"));
+        assert!(is_known_agent_login("Copilot-Swe-Agent"));
+        assert!(is_known_agent_login("Claude"));
+        assert!(is_known_agent_login("Codex"));
+        assert!(is_known_agent_login("Copilot[bot]"));
     }
 
     // ---- is_trusted_issue_author ----
@@ -457,5 +471,13 @@ mod tests {
     #[test]
     fn untrusted_pr_author_login_mismatch() {
         assert!(!is_trusted_pr_author(Some("attacker"), Some("my-user")));
+    }
+
+    #[test]
+    fn trusted_pr_author_case_insensitive() {
+        // GitHub may return "Copilot" (display-name casing) as the login.
+        assert!(is_trusted_pr_author(Some("Copilot"), None));
+        assert!(is_trusted_pr_author(Some("COPILOT-SWE-AGENT"), None));
+        assert!(is_trusted_pr_author(Some("Claude[bot]"), None));
     }
 }

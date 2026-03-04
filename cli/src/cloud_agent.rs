@@ -105,7 +105,7 @@ fn is_copilot_in_assignees(issue: &serde_json::Value) -> bool {
             arr.iter().any(|a| {
                 a["login"]
                     .as_str()
-                    .map(|login| KNOWN_AGENT_LOGINS.contains(&login))
+                    .map(wreck_it_core::types::is_known_agent_login)
                     .unwrap_or(false)
             })
         })
@@ -170,7 +170,7 @@ fn partition_assignees(issue: &serde_json::Value) -> (Vec<String>, Vec<String>) 
     if let Some(arr) = issue["assignees"].as_array() {
         for a in arr {
             if let Some(login) = a["login"].as_str() {
-                if KNOWN_AGENT_LOGINS.contains(&login) {
+                if wreck_it_core::types::is_known_agent_login(login) {
                     agents.push(login.to_string());
                 } else {
                     others.push(login.to_string());
@@ -399,14 +399,15 @@ impl CloudAgentClient {
         // Search for the first known agent login in priority order.
         for &known_login in KNOWN_AGENT_LOGINS {
             for node in nodes {
-                if node["login"].as_str() == Some(known_login) {
+                let node_login = node["login"].as_str().unwrap_or_default();
+                if node_login.eq_ignore_ascii_case(known_login) {
                     if let Some(id) = node["id"].as_str() {
                         tracing::info!(
                             "Found coding agent '{}' (id: {}) via suggestedActors",
-                            known_login,
+                            node_login,
                             id,
                         );
-                        return Some((id.to_string(), known_login.to_string()));
+                        return Some((id.to_string(), node_login.to_string()));
                     }
                 }
             }
@@ -546,7 +547,7 @@ impl CloudAgentClient {
                             arr.iter().any(|a| {
                                 a["login"]
                                     .as_str()
-                                    .map(|l| KNOWN_AGENT_LOGINS.contains(&l))
+                                    .map(wreck_it_core::types::is_known_agent_login)
                                     .unwrap_or(false)
                             })
                         })
