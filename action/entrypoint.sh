@@ -3,6 +3,8 @@ set -e
 
 cd "${GITHUB_WORKSPACE:-.}"
 
+git config --global --add safe.directory "$(pwd)"
+
 echo "[wreck-it] running headless iteration in $(pwd)"
 
 # wreck-it automatically creates a worktree at .wreck-it/state for the state
