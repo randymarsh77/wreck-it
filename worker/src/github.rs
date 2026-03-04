@@ -608,12 +608,7 @@ impl GitHubClient {
                 arr.iter().any(|a| {
                     a["login"]
                         .as_str()
-                        .map(|l| {
-                            let bare = l.strip_suffix("[bot]").unwrap_or(l);
-                            Self::KNOWN_AGENT_LOGINS
-                                .iter()
-                                .any(|k| k.eq_ignore_ascii_case(bare))
-                        })
+                        .map(wreck_it_core::types::is_known_agent_login)
                         .unwrap_or(false)
                 })
             })
