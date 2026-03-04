@@ -1262,6 +1262,108 @@ impl CloudAgentClient {
         Ok(true)
     }
 
+    /// Check whether the head commit of a pull request has any failing
+    /// check runs (i.e. runs with `conclusion` set to `"failure"`).
+    ///
+    /// Returns `true` when at least one check run has failed, `false`
+    /// otherwise (all passing, still pending, or unable to determine).
+    pub async fn has_failing_checks_for_pr(&self, pr_number: u64) -> Result<bool> {
+        // Fetch the PR to obtain the head SHA.
+        let pr_url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let pr_resp = self
+            .http
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for head SHA")?;
+
+        if !pr_resp.status().is_success() {
+            return Ok(false);
+        }
+
+        let pr: serde_json::Value = pr_resp.json().await?;
+        let head_sha = pr
+            .pointer("/head/sha")
+            .and_then(|v| v.as_str())
+            .context("Missing head SHA in PR response")?;
+
+        // Query check runs for the head SHA, filtering by status=completed.
+        // Note: fetches up to 100 results (one page).  In practice, a single
+        // commit rarely exceeds 100 completed check runs.
+        let checks_url = format!(
+            "{}/repos/{}/{}/commits/{}/check-runs?status=completed&per_page=100",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, head_sha,
+        );
+
+        let resp = self
+            .http
+            .get(&checks_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to list check runs")?;
+
+        if !resp.status().is_success() {
+            return Ok(false);
+        }
+
+        let body: serde_json::Value = resp.json().await?;
+        let has_failure = body["check_runs"]
+            .as_array()
+            .map(|runs| {
+                runs.iter().any(|r| {
+                    r["conclusion"].as_str() == Some("failure")
+                })
+            })
+            .unwrap_or(false);
+
+        Ok(has_failure)
+    }
+
+    /// Post a comment on a pull request (via the issues comments API).
+    pub async fn comment_on_pr(&self, pr_number: u64, body: &str) -> Result<()> {
+        let url = format!(
+            "{}/repos/{}/{}/issues/{}/comments",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let payload = serde_json::json!({ "body": body });
+
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&payload)
+            .send()
+            .await
+            .context("Failed to post PR comment")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let resp_body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to comment on PR #{} ({}): {}",
+                pr_number,
+                status,
+                resp_body,
+            );
+        }
+
+        tracing::info!("Posted comment on PR #{}", pr_number);
+        Ok(())
+    }
+
     /// Enable auto-merge on a pull request using the squash merge method.
     ///
     /// This uses the GraphQL `enablePullRequestAutoMerge` mutation so that

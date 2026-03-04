@@ -947,6 +947,155 @@ impl GitHubClient {
         // 404 means no branch protection or no required status checks.
         Ok(prot_response.status_code() == 200)
     }
+
+    /// Check whether the head commit of a pull request has any failing
+    /// check runs (i.e. runs with `conclusion` set to `"failure"`).
+    ///
+    /// Returns `true` when at least one check run has failed, `false`
+    /// otherwise (all passing, still pending, or unable to determine).
+    pub async fn has_failing_checks_for_pr(&self, pr_number: u64) -> Result<bool, String> {
+        // Fetch the PR to obtain the head SHA.
+        let pr_url = format!(
+            "https://api.github.com/repos/{}/{}/pulls/{}",
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            pr_number,
+        );
+
+        let mut headers = worker::Headers::new();
+        headers.set("Accept", "application/vnd.github+json").ok();
+        headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        headers.set("User-Agent", "wreck-it-worker").ok();
+        headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+        let request = worker::Request::new_with_init(
+            &pr_url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Get)
+                .with_headers(headers),
+        )
+        .map_err(|e| format!("Failed to create request: {e}"))?;
+
+        let mut response = Fetch::Request(request)
+            .send()
+            .await
+            .map_err(|e| format!("GitHub API request failed: {e}"))?;
+
+        if response.status_code() != 200 {
+            return Ok(false);
+        }
+
+        let pr: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse PR response: {e}"))?;
+
+        let head_sha = pr
+            .pointer("/head/sha")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing head SHA in PR response".to_string())?;
+
+        // Query check runs for the head SHA, filtering by status=completed.
+        // Note: fetches up to 100 results (one page).  In practice, a single
+        // commit rarely exceeds 100 completed check runs.
+        let checks_url = format!(
+            "https://api.github.com/repos/{}/{}/commits/{}/check-runs?status=completed&per_page=100",
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            url_encode(head_sha),
+        );
+
+        let mut chk_headers = worker::Headers::new();
+        chk_headers.set("Accept", "application/vnd.github+json").ok();
+        chk_headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        chk_headers.set("User-Agent", "wreck-it-worker").ok();
+        chk_headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+        let chk_request = worker::Request::new_with_init(
+            &checks_url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Get)
+                .with_headers(chk_headers),
+        )
+        .map_err(|e| format!("Failed to create request: {e}"))?;
+
+        let mut chk_response = Fetch::Request(chk_request)
+            .send()
+            .await
+            .map_err(|e| format!("GitHub API request failed: {e}"))?;
+
+        if chk_response.status_code() != 200 {
+            return Ok(false);
+        }
+
+        let body: serde_json::Value = chk_response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse check runs response: {e}"))?;
+
+        let has_failure = body["check_runs"]
+            .as_array()
+            .map(|runs| {
+                runs.iter().any(|r| {
+                    r["conclusion"].as_str() == Some("failure")
+                })
+            })
+            .unwrap_or(false);
+
+        Ok(has_failure)
+    }
+
+    /// Post a comment on a pull request (via the issues comments API).
+    pub async fn comment_on_pr(&self, pr_number: u64, body: &str) -> Result<(), String> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/issues/{}/comments",
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            pr_number,
+        );
+
+        let payload = serde_json::json!({ "body": body });
+        let body_json =
+            serde_json::to_string(&payload).map_err(|e| format!("Failed to serialize: {e}"))?;
+
+        let mut headers = worker::Headers::new();
+        headers.set("Accept", "application/vnd.github+json").ok();
+        headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        headers.set("User-Agent", "wreck-it-worker").ok();
+        headers.set("Content-Type", "application/json").ok();
+        headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+        let request = worker::Request::new_with_init(
+            &url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Post)
+                .with_headers(headers)
+                .with_body(Some(worker::wasm_bindgen::JsValue::from_str(&body_json))),
+        )
+        .map_err(|e| format!("Failed to create comment request: {e}"))?;
+
+        let mut response = Fetch::Request(request)
+            .send()
+            .await
+            .map_err(|e| format!("Comment request failed: {e}"))?;
+
+        let status = response.status_code();
+        if status != 201 {
+            let resp_body = response.text().await.unwrap_or_default();
+            return Err(format!(
+                "Failed to comment on PR #{pr_number} ({status}): {resp_body}"
+            ));
+        }
+
+        worker::console_log!("Posted comment on PR #{}", pr_number);
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
