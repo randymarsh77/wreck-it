@@ -12,6 +12,11 @@ task_file = "features-tasks.json"
 state_file = ".features-state.json"
 
 [[ralphs]]
-name = "md-import-tasks"
-task_file = "md-import-tasks.json"
-state_file = ".md-import-state.json"
+name = "planner"
+task_file = "planner-tasks.json"
+state_file = ".planner-state.json"
+
+[[ralphs]]
+name = "feature-dev"
+task_file = "feature-dev-tasks.json"
+state_file = ".feature-dev-state.json"
