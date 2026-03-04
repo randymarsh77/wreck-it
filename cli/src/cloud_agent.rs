@@ -1295,6 +1295,8 @@ impl CloudAgentClient {
             .context("Missing head SHA in PR response")?;
 
         // Query check runs for the head SHA, filtering by status=completed.
+        // Note: fetches up to 100 results (one page).  In practice, a single
+        // commit rarely exceeds 100 completed check runs.
         let checks_url = format!(
             "{}/repos/{}/{}/commits/{}/check-runs?status=completed&per_page=100",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, head_sha,

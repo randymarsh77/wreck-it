@@ -998,6 +998,8 @@ impl GitHubClient {
             .ok_or_else(|| "Missing head SHA in PR response".to_string())?;
 
         // Query check runs for the head SHA, filtering by status=completed.
+        // Note: fetches up to 100 results (one page).  In practice, a single
+        // commit rarely exceeds 100 completed check runs.
         let checks_url = format!(
             "https://api.github.com/repos/{}/{}/commits/{}/check-runs?status=completed&per_page=100",
             url_encode(&self.owner),
