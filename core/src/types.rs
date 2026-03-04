@@ -270,23 +270,46 @@ pub fn is_known_agent_login(login: &str) -> bool {
 
 /// Check whether an issue was opened by a trusted author.
 ///
-/// In the GitHub App flow the worker/CLI creates issues on behalf of the
-/// app, whose account type is `"Bot"`.  Issues opened by regular users are
-/// untrusted and must be rejected to prevent label-based privilege
-/// escalation.
+/// Trusted if any of the following hold:
+///
+/// - **App flow**: the author's account type is `"Bot"` (GitHub App created
+///   the issue on behalf of itself).
+/// - **PAT flow**: `user_login` matches `authenticated_login` (the issue
+///   was created by the same user whose token we are using).
 ///
 /// `user_type` is the GitHub account `type` field (e.g. `"User"`, `"Bot"`,
-/// `"Organization"`).
-pub fn is_trusted_issue_author(user_type: Option<&str>) -> bool {
-    user_type.is_some_and(|t| t == "Bot")
+/// `"Organization"`).  `user_login` is the author's login.
+/// `authenticated_login` is the login of the user whose token is being used
+/// (may be `None` when unavailable, e.g. before token resolution).
+pub fn is_trusted_issue_author(
+    user_type: Option<&str>,
+    user_login: Option<&str>,
+    authenticated_login: Option<&str>,
+) -> bool {
+    // App flow: Bot type is always trusted.
+    if user_type.is_some_and(|t| t == "Bot") {
+        return true;
+    }
+    // PAT flow: trust if the author matches our authenticated user.
+    matches!((user_login, authenticated_login), (Some(l), Some(al)) if l == al)
 }
 
-/// Check whether a pull request was opened by a known coding agent.
+/// Check whether a pull request was opened by a known coding agent or the
+/// authenticated user.
 ///
-/// `login` is the PR author's GitHub login.  Accepts both bare logins
-/// (`"copilot"`) and the `[bot]` suffixed form (`"copilot[bot]"`).
-pub fn is_trusted_pr_author(login: Option<&str>) -> bool {
-    login.is_some_and(is_known_agent_login)
+/// Trusted if any of the following hold:
+///
+/// - `login` belongs to a known coding agent (bare or `[bot]`-suffixed).
+/// - `login` matches `authenticated_login` (the PR was created by the same
+///   user whose token we are using).
+///
+/// `authenticated_login` may be `None` when unavailable; in that case only
+/// the known-agent check applies.
+pub fn is_trusted_pr_author(login: Option<&str>, authenticated_login: Option<&str>) -> bool {
+    if login.is_some_and(is_known_agent_login) {
+        return true;
+    }
+    matches!((login, authenticated_login), (Some(l), Some(al)) if l == al)
 }
 
 #[cfg(test)]
@@ -332,58 +355,91 @@ mod tests {
 
     #[test]
     fn trusted_issue_author_bot() {
-        assert!(is_trusted_issue_author(Some("Bot")));
+        assert!(is_trusted_issue_author(Some("Bot"), None, None));
+    }
+
+    #[test]
+    fn trusted_issue_author_bot_ignores_login() {
+        // Bot type is trusted regardless of login/authenticated_login.
+        assert!(is_trusted_issue_author(Some("Bot"), Some("any"), Some("other")));
+    }
+
+    #[test]
+    fn trusted_issue_author_matching_login() {
+        // PAT flow: author login matches authenticated_login.
+        assert!(is_trusted_issue_author(Some("User"), Some("my-user"), Some("my-user")));
     }
 
     #[test]
     fn untrusted_issue_author_user() {
-        assert!(!is_trusted_issue_author(Some("User")));
+        assert!(!is_trusted_issue_author(Some("User"), None, None));
+    }
+
+    #[test]
+    fn untrusted_issue_author_user_no_authenticated_login() {
+        assert!(!is_trusted_issue_author(Some("User"), Some("attacker"), None));
+    }
+
+    #[test]
+    fn untrusted_issue_author_login_mismatch() {
+        assert!(!is_trusted_issue_author(Some("User"), Some("attacker"), Some("my-user")));
     }
 
     #[test]
     fn untrusted_issue_author_none() {
-        assert!(!is_trusted_issue_author(None));
+        assert!(!is_trusted_issue_author(None, None, None));
     }
 
     #[test]
     fn untrusted_issue_author_organization() {
-        assert!(!is_trusted_issue_author(Some("Organization")));
+        assert!(!is_trusted_issue_author(Some("Organization"), None, None));
     }
 
     // ---- is_trusted_pr_author ----
 
     #[test]
     fn trusted_pr_author_copilot() {
-        assert!(is_trusted_pr_author(Some("copilot")));
+        assert!(is_trusted_pr_author(Some("copilot"), None));
     }
 
     #[test]
     fn trusted_pr_author_copilot_swe_agent_bot() {
-        assert!(is_trusted_pr_author(Some("copilot-swe-agent[bot]")));
+        assert!(is_trusted_pr_author(Some("copilot-swe-agent[bot]"), None));
     }
 
     #[test]
     fn trusted_pr_author_claude() {
-        assert!(is_trusted_pr_author(Some("claude")));
+        assert!(is_trusted_pr_author(Some("claude"), None));
     }
 
     #[test]
     fn trusted_pr_author_codex_bot() {
-        assert!(is_trusted_pr_author(Some("codex[bot]")));
+        assert!(is_trusted_pr_author(Some("codex[bot]"), None));
+    }
+
+    #[test]
+    fn trusted_pr_author_matching_login() {
+        // PAT flow: author login matches authenticated_login.
+        assert!(is_trusted_pr_author(Some("my-user"), Some("my-user")));
     }
 
     #[test]
     fn untrusted_pr_author_random_user() {
-        assert!(!is_trusted_pr_author(Some("attacker")));
+        assert!(!is_trusted_pr_author(Some("attacker"), None));
     }
 
     #[test]
     fn untrusted_pr_author_unknown_bot() {
-        assert!(!is_trusted_pr_author(Some("evil-bot[bot]")));
+        assert!(!is_trusted_pr_author(Some("evil-bot[bot]"), None));
     }
 
     #[test]
     fn untrusted_pr_author_none() {
-        assert!(!is_trusted_pr_author(None));
+        assert!(!is_trusted_pr_author(None, None));
+    }
+
+    #[test]
+    fn untrusted_pr_author_login_mismatch() {
+        assert!(!is_trusted_pr_author(Some("attacker"), Some("my-user")));
     }
 }

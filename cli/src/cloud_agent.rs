@@ -91,6 +91,10 @@ pub struct CloudAgentClient {
     repo_owner: String,
     repo_name: String,
     http: reqwest::Client,
+    /// Login of the user authenticated by `github_token`.  Populated lazily
+    /// via [`fetch_authenticated_login`].  When set, trust checks also accept
+    /// issues/PRs created by this user (PAT flow).
+    authenticated_login: Option<String>,
 }
 
 /// Check whether any known coding agent appears in an issue's assignees array.
@@ -184,6 +188,37 @@ impl CloudAgentClient {
             repo_owner,
             repo_name,
             http: reqwest::Client::new(),
+            authenticated_login: None,
+        }
+    }
+
+    /// Fetch the login of the user authenticated by our token and cache it.
+    ///
+    /// Calls `GET /user` and stores the result so subsequent trust checks can
+    /// recognise issues/PRs created by the PAT owner as trusted.  Safe to
+    /// call multiple times — the API call is only made once.
+    pub async fn resolve_authenticated_login(&mut self) {
+        if self.authenticated_login.is_some() {
+            return;
+        }
+        let url = format!("{}/user", GITHUB_API_BASE);
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await;
+        if let Ok(resp) = resp {
+            if resp.status().is_success() {
+                if let Ok(body) = resp.json::<serde_json::Value>().await {
+                    if let Some(login) = body["login"].as_str() {
+                        tracing::info!("Authenticated as GitHub user '{}'", login);
+                        self.authenticated_login = Some(login.to_string());
+                    }
+                }
+            }
         }
     }
 
@@ -774,13 +809,14 @@ impl CloudAgentClient {
                                 let is_pr = issue_obj.and_then(|i| i.get("pull_request")).is_some();
                                 if is_pr {
                                     // Supply-chain protection: only accept PRs
-                                    // opened by a known coding agent.
+                                    // opened by a known coding agent or the
+                                    // authenticated user.
                                     let pr_author = issue_obj
                                         .and_then(|i| i.pointer("/user/login"))
                                         .and_then(|v| v.as_str());
-                                    if !wreck_it_core::types::is_trusted_pr_author(pr_author) {
+                                    if !wreck_it_core::types::is_trusted_pr_author(pr_author, self.authenticated_login.as_deref()) {
                                         tracing::warn!(
-                                            "Ignoring cross-referenced PR by {:?} (not a known agent)",
+                                            "Ignoring cross-referenced PR by {:?} (not a known agent or authenticated user)",
                                             pr_author.unwrap_or("<unknown>"),
                                         );
                                         continue;
@@ -911,10 +947,11 @@ impl CloudAgentClient {
             pr_number, title, state, draft, mergeable_raw, mergeable_state, merged, pr_author,
         );
 
-        // Supply-chain protection: reject PRs not opened by a known agent.
-        if !wreck_it_core::types::is_trusted_pr_author(pr_author) {
+        // Supply-chain protection: reject PRs not opened by a known agent
+        // or the authenticated user.
+        if !wreck_it_core::types::is_trusted_pr_author(pr_author, self.authenticated_login.as_deref()) {
             println!(
-                "[wreck-it] PR #{} was opened by {:?}, not a known agent — refusing to process",
+                "[wreck-it] PR #{} was opened by {:?}, not a known agent or authenticated user — refusing to process",
                 pr_number,
                 pr_author.unwrap_or("<unknown>"),
             );
@@ -1616,6 +1653,7 @@ mod tests {
         assert_eq!(client.github_token, "test-token");
         assert_eq!(client.repo_owner, "owner");
         assert_eq!(client.repo_name, "repo");
+        assert!(client.authenticated_login.is_none());
     }
 
     #[test]

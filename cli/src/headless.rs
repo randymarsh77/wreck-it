@@ -296,7 +296,8 @@ async fn advance_tracked_prs(
         work_dir,
     )?;
 
-    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    client.resolve_authenticated_login().await;
 
     // Ensure the current task's PR is tracked.
     if let (Some(pr_num), Some(task_id)) = (state.pr_number, state.current_task_id.clone()) {
@@ -669,7 +670,8 @@ async fn run_needs_trigger(
         work_dir,
     )?;
 
-    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    client.resolve_authenticated_login().await;
 
     println!(
         "[wreck-it] triggering cloud agent for task {}: {}",
@@ -737,7 +739,8 @@ async fn run_agent_working(
         work_dir,
     )?;
 
-    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    client.resolve_authenticated_login().await;
 
     println!(
         "[wreck-it] checking cloud agent status for issue #{}",
@@ -850,7 +853,8 @@ async fn run_needs_verification(
         work_dir,
     )?;
 
-    let client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    client.resolve_authenticated_login().await;
 
     println!("[wreck-it] checking PR #{} for merge readiness", pr_number);
 
