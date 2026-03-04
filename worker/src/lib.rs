@@ -37,37 +37,22 @@ mod webhook;
 use webhook::{verify_signature, WebhookEvent};
 use worker::*;
 
-/// Known coding-agent logins that are authorized to open pull requests.
-///
-/// Matches the `KNOWN_AGENT_LOGINS` list in the CLI.  Both the bare login
-/// (e.g. `"copilot"`) and the `[bot]` suffixed variant
-/// (e.g. `"copilot[bot]"`) are accepted.
-const KNOWN_AGENT_LOGINS: &[&str] = &["copilot-swe-agent", "copilot", "claude", "codex"];
-
 /// Check whether an issue was opened by a trusted author.
 ///
-/// In the GitHub App flow the worker creates issues on behalf of the app,
-/// whose account type is `"Bot"`.  Issues opened by regular users are
-/// untrusted and must be rejected to prevent label-based privilege
-/// escalation.
+/// Delegates to the shared [`wreck_it_core::types::is_trusted_issue_author`]
+/// function.
 fn is_trusted_issue_author(issue: &types::Issue) -> bool {
-    issue
-        .user
-        .as_ref()
-        .and_then(|u| u.user_type.as_deref())
-        .is_some_and(|t| t == "Bot")
+    let user_type = issue.user.as_ref().and_then(|u| u.user_type.as_deref());
+    wreck_it_core::types::is_trusted_issue_author(user_type)
 }
 
 /// Check whether a pull request was opened by a known coding agent.
 ///
-/// Accepts both bare logins (`"copilot"`) and the `[bot]` suffixed form
-/// (`"copilot[bot]"`).
+/// Delegates to the shared [`wreck_it_core::types::is_trusted_pr_author`]
+/// function.
 fn is_trusted_pr_author(pr: &types::PullRequest) -> bool {
-    pr.user.as_ref().is_some_and(|u| {
-        let login = u.login.as_str();
-        let bare = login.strip_suffix("[bot]").unwrap_or(login);
-        KNOWN_AGENT_LOGINS.iter().any(|&agent| bare == agent)
-    })
+    let login = pr.user.as_ref().map(|u| u.login.as_str());
+    wreck_it_core::types::is_trusted_pr_author(login)
 }
 
 #[event(fetch)]

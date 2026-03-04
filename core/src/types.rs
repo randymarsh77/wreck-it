@@ -245,3 +245,145 @@ pub struct ProvenanceRecord {
     /// Outcome of the invocation: `"success"` or `"failure"`.
     pub outcome: String,
 }
+
+// ---------------------------------------------------------------------------
+// Trusted author validation (supply-chain protection)
+// ---------------------------------------------------------------------------
+
+/// Known coding-agent logins that are authorized to open pull requests and
+/// work on issues.
+///
+/// Both the CLI and worker use this list to validate that events originate
+/// from a known agent rather than an unauthorized third party.  The bare
+/// login (e.g. `"copilot"`) and the `[bot]` suffixed variant
+/// (e.g. `"copilot[bot]"`) are both accepted by the helper functions.
+pub const KNOWN_AGENT_LOGINS: &[&str] = &["copilot-swe-agent", "copilot", "claude", "codex"];
+
+/// Check whether a login belongs to a known coding agent.
+///
+/// Accepts both bare logins (`"copilot"`) and the `[bot]` suffixed form
+/// (`"copilot[bot]"`).
+pub fn is_known_agent_login(login: &str) -> bool {
+    let bare = login.strip_suffix("[bot]").unwrap_or(login);
+    KNOWN_AGENT_LOGINS.contains(&bare)
+}
+
+/// Check whether an issue was opened by a trusted author.
+///
+/// In the GitHub App flow the worker/CLI creates issues on behalf of the
+/// app, whose account type is `"Bot"`.  Issues opened by regular users are
+/// untrusted and must be rejected to prevent label-based privilege
+/// escalation.
+///
+/// `user_type` is the GitHub account `type` field (e.g. `"User"`, `"Bot"`,
+/// `"Organization"`).
+pub fn is_trusted_issue_author(user_type: Option<&str>) -> bool {
+    user_type.is_some_and(|t| t == "Bot")
+}
+
+/// Check whether a pull request was opened by a known coding agent.
+///
+/// `login` is the PR author's GitHub login.  Accepts both bare logins
+/// (`"copilot"`) and the `[bot]` suffixed form (`"copilot[bot]"`).
+pub fn is_trusted_pr_author(login: Option<&str>) -> bool {
+    login.is_some_and(is_known_agent_login)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- KNOWN_AGENT_LOGINS ----
+
+    #[test]
+    fn known_agent_logins_contains_expected_entries() {
+        assert!(KNOWN_AGENT_LOGINS.contains(&"copilot-swe-agent"));
+        assert!(KNOWN_AGENT_LOGINS.contains(&"copilot"));
+        assert!(KNOWN_AGENT_LOGINS.contains(&"claude"));
+        assert!(KNOWN_AGENT_LOGINS.contains(&"codex"));
+    }
+
+    // ---- is_known_agent_login ----
+
+    #[test]
+    fn known_agent_bare_login() {
+        assert!(is_known_agent_login("copilot"));
+        assert!(is_known_agent_login("copilot-swe-agent"));
+        assert!(is_known_agent_login("claude"));
+        assert!(is_known_agent_login("codex"));
+    }
+
+    #[test]
+    fn known_agent_bot_suffix() {
+        assert!(is_known_agent_login("copilot[bot]"));
+        assert!(is_known_agent_login("copilot-swe-agent[bot]"));
+        assert!(is_known_agent_login("claude[bot]"));
+        assert!(is_known_agent_login("codex[bot]"));
+    }
+
+    #[test]
+    fn unknown_agent_login() {
+        assert!(!is_known_agent_login("attacker"));
+        assert!(!is_known_agent_login("evil-bot[bot]"));
+        assert!(!is_known_agent_login(""));
+    }
+
+    // ---- is_trusted_issue_author ----
+
+    #[test]
+    fn trusted_issue_author_bot() {
+        assert!(is_trusted_issue_author(Some("Bot")));
+    }
+
+    #[test]
+    fn untrusted_issue_author_user() {
+        assert!(!is_trusted_issue_author(Some("User")));
+    }
+
+    #[test]
+    fn untrusted_issue_author_none() {
+        assert!(!is_trusted_issue_author(None));
+    }
+
+    #[test]
+    fn untrusted_issue_author_organization() {
+        assert!(!is_trusted_issue_author(Some("Organization")));
+    }
+
+    // ---- is_trusted_pr_author ----
+
+    #[test]
+    fn trusted_pr_author_copilot() {
+        assert!(is_trusted_pr_author(Some("copilot")));
+    }
+
+    #[test]
+    fn trusted_pr_author_copilot_swe_agent_bot() {
+        assert!(is_trusted_pr_author(Some("copilot-swe-agent[bot]")));
+    }
+
+    #[test]
+    fn trusted_pr_author_claude() {
+        assert!(is_trusted_pr_author(Some("claude")));
+    }
+
+    #[test]
+    fn trusted_pr_author_codex_bot() {
+        assert!(is_trusted_pr_author(Some("codex[bot]")));
+    }
+
+    #[test]
+    fn untrusted_pr_author_random_user() {
+        assert!(!is_trusted_pr_author(Some("attacker")));
+    }
+
+    #[test]
+    fn untrusted_pr_author_unknown_bot() {
+        assert!(!is_trusted_pr_author(Some("evil-bot[bot]")));
+    }
+
+    #[test]
+    fn untrusted_pr_author_none() {
+        assert!(!is_trusted_pr_author(None));
+    }
+}

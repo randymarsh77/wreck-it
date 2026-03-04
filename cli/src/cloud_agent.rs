@@ -1,9 +1,8 @@
 use anyhow::{bail, Context, Result};
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
-/// Known coding agent logins to search for via the `suggestedActors` GraphQL
-/// query. Agents are tried in order; the first match wins.
-const KNOWN_AGENT_LOGINS: &[&str] = &["copilot-swe-agent", "copilot", "claude", "codex"];
+/// Known coding agent logins — re-exported from `wreck-it-core` for local use.
+const KNOWN_AGENT_LOGINS: &[&str] = wreck_it_core::types::KNOWN_AGENT_LOGINS;
 
 /// Status of a cloud agent session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -774,6 +773,18 @@ impl CloudAgentClient {
                                 let issue_obj = source.get("issue");
                                 let is_pr = issue_obj.and_then(|i| i.get("pull_request")).is_some();
                                 if is_pr {
+                                    // Supply-chain protection: only accept PRs
+                                    // opened by a known coding agent.
+                                    let pr_author = issue_obj
+                                        .and_then(|i| i.pointer("/user/login"))
+                                        .and_then(|v| v.as_str());
+                                    if !wreck_it_core::types::is_trusted_pr_author(pr_author) {
+                                        tracing::warn!(
+                                            "Ignoring cross-referenced PR by {:?} (not a known agent)",
+                                            pr_author.unwrap_or("<unknown>"),
+                                        );
+                                        continue;
+                                    }
                                     if let Some(pr_number) =
                                         issue_obj.and_then(|i| i["number"].as_u64())
                                     {
@@ -892,12 +903,23 @@ impl CloudAgentClient {
         let mergeable = mergeable_raw.as_bool().unwrap_or(false);
         let merged = pr["merged"].as_bool().unwrap_or(false);
         let mergeable_state = pr["mergeable_state"].as_str().unwrap_or("unknown");
+        let pr_author = pr.pointer("/user/login").and_then(|v| v.as_str());
 
         println!(
             "[wreck-it] PR #{} details: title={:?}, state={}, draft={}, \
-             mergeable(raw)={}, mergeable_state={}, merged={}",
-            pr_number, title, state, draft, mergeable_raw, mergeable_state, merged,
+             mergeable(raw)={}, mergeable_state={}, merged={}, author={:?}",
+            pr_number, title, state, draft, mergeable_raw, mergeable_state, merged, pr_author,
         );
+
+        // Supply-chain protection: reject PRs not opened by a known agent.
+        if !wreck_it_core::types::is_trusted_pr_author(pr_author) {
+            println!(
+                "[wreck-it] PR #{} was opened by {:?}, not a known agent — refusing to process",
+                pr_number,
+                pr_author.unwrap_or("<unknown>"),
+            );
+            return Ok(PrMergeStatus::NotMergeable);
+        }
 
         if merged {
             return Ok(PrMergeStatus::AlreadyMerged);
