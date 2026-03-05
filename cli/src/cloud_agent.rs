@@ -602,53 +602,31 @@ impl CloudAgentClient {
         // When a branch is specified, include `agentAssignment.baseRef` so
         // the coding agent starts from (and targets PRs to) that branch.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
-        let query = if let Some(base_ref) = branch {
-            serde_json::json!({
-                "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!, $agentAssignment: CopilotAgentAssignmentInput!) {
-                    addAssigneesToAssignable(input: {
-                        assignableId: $assignableId,
-                        assigneeIds: $assigneeIds,
-                        agentAssignment: $agentAssignment
-                    }) {
-                        assignable {
-                            ... on Issue {
-                                assignees(first: 10) {
-                                    nodes { login }
-                                }
+        let mut variables = serde_json::json!({
+            "assignableId": assignable_id,
+            "assigneeIds": [agent_id],
+        });
+        if let Some(base_ref) = branch {
+            variables["agentAssignment"] = serde_json::json!({ "baseRef": base_ref });
+        }
+        let query = serde_json::json!({
+            "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!, $agentAssignment: CopilotAgentAssignmentInput) {
+                addAssigneesToAssignable(input: {
+                    assignableId: $assignableId,
+                    assigneeIds: $assigneeIds,
+                    agentAssignment: $agentAssignment
+                }) {
+                    assignable {
+                        ... on Issue {
+                            assignees(first: 10) {
+                                nodes { login }
                             }
                         }
                     }
-                }"#,
-                "variables": {
-                    "assignableId": assignable_id,
-                    "assigneeIds": [agent_id],
-                    "agentAssignment": {
-                        "baseRef": base_ref,
-                    },
-                },
-            })
-        } else {
-            serde_json::json!({
-                "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!) {
-                    addAssigneesToAssignable(input: {
-                        assignableId: $assignableId,
-                        assigneeIds: $assigneeIds
-                    }) {
-                        assignable {
-                            ... on Issue {
-                                assignees(first: 10) {
-                                    nodes { login }
-                                }
-                            }
-                        }
-                    }
-                }"#,
-                "variables": {
-                    "assignableId": assignable_id,
-                    "assigneeIds": [agent_id],
-                },
-            })
-        };
+                }
+            }"#,
+            "variables": variables,
+        });
 
         match self
             .http
