@@ -14,6 +14,7 @@ pub const DEFAULT_GITHUB_MODELS_ENDPOINT: &str =
     "https://models.github.ai/inference/chat/completions";
 pub const DEFAULT_LLAMA_MODEL: &str = "llama3.2";
 pub const DEFAULT_GITHUB_MODELS_MODEL: &str = "anthropic/claude-opus-4.6";
+pub const DEFAULT_GITHUB_MODELS_NAMING_MODEL: &str = "openai/gpt-4o-mini";
 pub const LLAMA_PROVIDER_TYPE: &str = "openai";
 pub const DEFAULT_COMPLETION_MARKER: &str = ".task-complete";
 pub const DEFAULT_PRECONDITION_MARKER: &str = ".task-precondition-met";
