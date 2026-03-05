@@ -5,6 +5,7 @@ mod cli;
 mod cloud_agent;
 mod config_manager;
 mod gastown_client;
+mod github_auth;
 mod headless;
 mod headless_config;
 mod headless_state;
@@ -253,6 +254,7 @@ async fn main() -> Result<()> {
             api_endpoint,
             api_token,
             model_provider,
+            cloud,
         } => {
             // Resolve goal: read from file or use raw string; exactly one must be set.
             let goal = match (goal, goal_file) {
@@ -275,94 +277,178 @@ async fn main() -> Result<()> {
             let mut repo_cfg = load_repo_config(&work_dir)?
                 .context("No wreck-it config found. Run `wreck-it init` first.")?;
 
-            // Ensure the state worktree exists.
-            let state_dir =
-                state_worktree::ensure_state_worktree(&work_dir, &repo_cfg.state_branch)?;
+            if cloud {
+                // ── Cloud plan path ─────────────────────────────────────
+                // Resolve a GitHub token (env → config → OAuth device flow).
+                let mut config = load_user_config().unwrap_or_default();
+                let github_token = github_auth::resolve_github_token(
+                    config.github_token.as_deref(),
+                )
+                .await?;
 
-            // Build planner config.
-            let mut config = load_user_config().unwrap_or_default();
-
-            if let Some(api_endpoint) = api_endpoint {
-                config.api_endpoint = api_endpoint;
-            }
-            if let Some(model_provider) = model_provider {
-                config.model_provider = model_provider;
-            }
-            if config.model_provider == ModelProvider::Llama
-                && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
-            {
-                config.api_endpoint = DEFAULT_LLAMA_ENDPOINT.to_string();
-            }
-            if config.model_provider == ModelProvider::GithubModels
-                && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
-            {
-                config.api_endpoint = DEFAULT_GITHUB_MODELS_ENDPOINT.to_string();
-            }
-            config.api_token = api_token
-                .or(config.api_token)
-                .or_else(|| env::var("COPILOT_API_TOKEN").ok())
-                .or_else(|| env::var("GITHUB_TOKEN").ok());
-
-            let task_planner = planner::TaskPlanner::new(
-                config.model_provider.clone(),
-                config.api_endpoint.clone(),
-                config.api_token.clone(),
-            );
-
-            // Derive a ralph name from the explicit flag, or ask the LLM,
-            // falling back to a simple slug of the goal.
-            let ralph_name = if let Some(r) = ralph {
-                r
-            } else {
-                match task_planner.generate_plan_name(&goal).await {
-                    Ok(name) => {
-                        println!("LLM suggested plan name: {}", name);
-                        name
-                    }
-                    Err(e) => {
-                        tracing::warn!("LLM naming failed, falling back to slug: {}", e);
-                        slugify_for_ralph(&goal)
-                    }
+                // Persist the token for future runs.
+                if config.github_token.as_deref() != Some(&github_token) {
+                    config.github_token = Some(github_token.clone());
+                    save_user_config(&config)?;
                 }
-            };
 
-            // Derive the task filename (explicit --output wins, else
-            // `<ralph>-tasks.json`).
-            let task_filename = output
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| format!("{}-tasks.json", ralph_name));
+                // Derive ralph name from flag or slugify the goal.
+                let ralph_name = ralph.unwrap_or_else(|| slugify_for_ralph(&goal));
 
-            let task_path = state_dir.join(&task_filename);
+                // Derive the target task filename.
+                let task_filename = output
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| format!("{}-tasks.json", ralph_name));
 
-            println!("Generating task plan for goal: {}", goal);
-            let tasks = task_planner.generate_task_plan(&goal).await?;
-            println!("Generated {} task(s)", tasks.len());
+                // Plan file in .wreck-it/plans/ uses the targeted routing
+                // convention so the headless runner merges it into the right
+                // task file.
+                let plan_filename = format!("{}--cloud-plan.json", task_filename);
 
-            task_manager::save_tasks(&task_path, &tasks)?;
-            println!("Task plan written to {}", task_path.display());
+                // Resolve repo owner/name from the git remote.
+                let (repo_owner, repo_name) =
+                    cloud_agent::resolve_repo_info(None, None, &work_dir)?;
 
-            // Upsert the ralph entry in the repo config.
-            let state_filename = format!(".{}-state.json", ralph_name);
-            if let Some(existing) = repo_cfg.ralphs.iter_mut().find(|r| r.name == ralph_name) {
-                existing.task_file = task_filename.clone();
-                existing.state_file = state_filename.clone();
-                println!("Updated ralph '{}' in config", ralph_name);
+                // Build the issue.
+                let issue_title = format!("[wreck-it] plan: {}", truncate_title(&goal, 60));
+                let issue_body =
+                    github_auth::build_plan_issue_body(&goal, &plan_filename);
+
+                // Create the issue and assign a cloud agent.
+                let client = cloud_agent::CloudAgentClient::new(
+                    github_token,
+                    repo_owner,
+                    repo_name,
+                );
+                let result = client
+                    .create_plan_issue(&issue_title, &issue_body)
+                    .await?;
+
+                println!("Created issue #{}: {}", result.issue_number, result.issue_url);
+
+                // Upsert the ralph entry in repo config so the headless
+                // runner knows where to route the migrated plan.
+                let state_filename = format!(".{}-state.json", ralph_name);
+                if let Some(existing) =
+                    repo_cfg.ralphs.iter_mut().find(|r| r.name == ralph_name)
+                {
+                    existing.task_file = task_filename.clone();
+                    existing.state_file = state_filename.clone();
+                    println!("Updated ralph '{}' in config", ralph_name);
+                } else {
+                    repo_cfg.ralphs.push(repo_config::RalphConfig {
+                        name: ralph_name.clone(),
+                        task_file: task_filename.clone(),
+                        state_file: state_filename.clone(),
+                    });
+                    println!("Added ralph '{}' to config", ralph_name);
+                }
+                save_repo_config(&work_dir, &repo_cfg)?;
+
+                println!(
+                    "Cloud agent will generate the plan and write it to .wreck-it/plans/{}",
+                    plan_filename,
+                );
+                println!(
+                    "Run `wreck-it run --headless --ralph {}` to migrate and execute the plan.",
+                    ralph_name,
+                );
             } else {
-                repo_cfg.ralphs.push(repo_config::RalphConfig {
-                    name: ralph_name.clone(),
-                    task_file: task_filename.clone(),
-                    state_file: state_filename.clone(),
-                });
-                println!("Added ralph '{}' to config", ralph_name);
-            }
-            save_repo_config(&work_dir, &repo_cfg)?;
+                // ── Local LLM plan path (existing behaviour) ────────────
+                // Ensure the state worktree exists.
+                let state_dir =
+                    state_worktree::ensure_state_worktree(&work_dir, &repo_cfg.state_branch)?;
 
-            // Commit changes to the state branch.
-            if let Ok(true) = state_worktree::commit_state_worktree(
-                &work_dir,
-                &format!("wreck-it: plan '{}' → ralph '{}'", goal, ralph_name),
-            ) {
-                println!("Committed plan to state branch '{}'", repo_cfg.state_branch,);
+                // Build planner config.
+                let mut config = load_user_config().unwrap_or_default();
+
+                if let Some(api_endpoint) = api_endpoint {
+                    config.api_endpoint = api_endpoint;
+                }
+                if let Some(model_provider) = model_provider {
+                    config.model_provider = model_provider;
+                }
+                if config.model_provider == ModelProvider::Llama
+                    && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
+                {
+                    config.api_endpoint = DEFAULT_LLAMA_ENDPOINT.to_string();
+                }
+                if config.model_provider == ModelProvider::GithubModels
+                    && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
+                {
+                    config.api_endpoint = DEFAULT_GITHUB_MODELS_ENDPOINT.to_string();
+                }
+                config.api_token = api_token
+                    .or(config.api_token)
+                    .or_else(|| env::var("COPILOT_API_TOKEN").ok())
+                    .or_else(|| env::var("GITHUB_TOKEN").ok());
+
+                let task_planner = planner::TaskPlanner::new(
+                    config.model_provider.clone(),
+                    config.api_endpoint.clone(),
+                    config.api_token.clone(),
+                );
+
+                // Derive a ralph name from the explicit flag, or ask the LLM,
+                // falling back to a simple slug of the goal.
+                let ralph_name = if let Some(r) = ralph {
+                    r
+                } else {
+                    match task_planner.generate_plan_name(&goal).await {
+                        Ok(name) => {
+                            println!("LLM suggested plan name: {}", name);
+                            name
+                        }
+                        Err(e) => {
+                            tracing::warn!("LLM naming failed, falling back to slug: {}", e);
+                            slugify_for_ralph(&goal)
+                        }
+                    }
+                };
+
+                // Derive the task filename (explicit --output wins, else
+                // `<ralph>-tasks.json`).
+                let task_filename = output
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| format!("{}-tasks.json", ralph_name));
+
+                let task_path = state_dir.join(&task_filename);
+
+                println!("Generating task plan for goal: {}", goal);
+                let tasks = task_planner.generate_task_plan(&goal).await?;
+                println!("Generated {} task(s)", tasks.len());
+
+                task_manager::save_tasks(&task_path, &tasks)?;
+                println!("Task plan written to {}", task_path.display());
+
+                // Upsert the ralph entry in the repo config.
+                let state_filename = format!(".{}-state.json", ralph_name);
+                if let Some(existing) =
+                    repo_cfg.ralphs.iter_mut().find(|r| r.name == ralph_name)
+                {
+                    existing.task_file = task_filename.clone();
+                    existing.state_file = state_filename.clone();
+                    println!("Updated ralph '{}' in config", ralph_name);
+                } else {
+                    repo_cfg.ralphs.push(repo_config::RalphConfig {
+                        name: ralph_name.clone(),
+                        task_file: task_filename.clone(),
+                        state_file: state_filename.clone(),
+                    });
+                    println!("Added ralph '{}' to config", ralph_name);
+                }
+                save_repo_config(&work_dir, &repo_cfg)?;
+
+                // Commit changes to the state branch.
+                if let Ok(true) = state_worktree::commit_state_worktree(
+                    &work_dir,
+                    &format!("wreck-it: plan '{}' → ralph '{}'", goal, ralph_name),
+                ) {
+                    println!(
+                        "Committed plan to state branch '{}'",
+                        repo_cfg.state_branch,
+                    );
+                }
             }
         }
 
@@ -693,6 +779,19 @@ fn slugify_for_ralph(goal: &str) -> String {
     }
 }
 
+/// Truncate a string to at most `max_len` characters, appending an ellipsis
+/// when truncation occurs.  Breaks at the last whitespace before `max_len` to
+/// avoid cutting words in half.
+fn truncate_title(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        return s.to_string();
+    }
+    match s[..max_len].rfind(char::is_whitespace) {
+        Some(pos) => format!("{}…", &s[..pos]),
+        None => format!("{}…", &s[..max_len]),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -731,5 +830,29 @@ mod tests {
         std::fs::write(&path, "  Build a pipeline  \n").unwrap();
         let contents = std::fs::read_to_string(&path).unwrap();
         assert_eq!(contents.trim(), "Build a pipeline");
+    }
+
+    // ---- truncate_title tests ----
+
+    #[test]
+    fn truncate_short_title_unchanged() {
+        assert_eq!(truncate_title("short goal", 60), "short goal");
+    }
+
+    #[test]
+    fn truncate_long_title_at_word_boundary() {
+        let long = "Build a comprehensive REST API for user management and authentication";
+        let result = truncate_title(long, 40);
+        assert!(result.len() <= 42); // 40 + ellipsis
+        assert!(result.ends_with('…'));
+        // Should break at a word boundary
+        assert!(!result.contains("auth"));
+    }
+
+    #[test]
+    fn truncate_exact_length_unchanged() {
+        let s = "exactly sixty characters long string that is exactly sixty!!";
+        let result = truncate_title(s, 60);
+        assert_eq!(result, s);
     }
 }

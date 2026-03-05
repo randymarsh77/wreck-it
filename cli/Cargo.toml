@@ -43,6 +43,9 @@ walkdir = "2.4"
 # PATH lookup for copilot binary
 which = "7"
 
+# Open URLs in the system browser (GitHub OAuth device flow)
+open = "5"
+
 [dev-dependencies]
 tempfile = "3.10"
 

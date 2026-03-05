@@ -119,6 +119,12 @@ pub enum Commands {
         /// Model provider
         #[arg(long, value_enum)]
         model_provider: Option<ModelProvider>,
+
+        /// Use a cloud agent to build the plan instead of the local LLM.
+        /// Creates a GitHub issue with the goal and assigns Copilot to
+        /// generate the plan as a file in `.wreck-it/plans/`.
+        #[arg(long)]
+        cloud: bool,
     },
 
     /// Initialize a new task file

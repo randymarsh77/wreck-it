@@ -116,6 +116,12 @@ pub struct Config {
     /// gastown integration is disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gastown_token: Option<String>,
+
+    /// GitHub personal access token or OAuth token used for cloud plan
+    /// generation (creating issues, assigning agents).  Can also be set via
+    /// the `GITHUB_TOKEN` environment variable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_token: Option<String>,
 }
 
 fn default_max_iterations() -> usize {
@@ -167,6 +173,7 @@ impl Default for Config {
             replan_threshold: default_replan_threshold(),
             gastown_endpoint: None,
             gastown_token: None,
+            github_token: None,
         }
     }
 }
