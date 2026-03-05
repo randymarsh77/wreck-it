@@ -1,6 +1,6 @@
 use crate::types::{
     AgentRole, ModelProvider, Task, TaskKind, TaskStatus, DEFAULT_GITHUB_MODELS_MODEL,
-    DEFAULT_LLAMA_MODEL,
+    DEFAULT_GITHUB_MODELS_NAMING_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -50,27 +50,45 @@ impl TaskPlanner {
     /// against the [`Task`] schema before being returned.
     pub async fn generate_task_plan(&self, goal: &str) -> Result<Vec<Task>> {
         let prompt = build_planner_prompt(goal);
-        let raw = self.call_llm(&prompt).await?;
+        let raw = self.call_llm(&prompt, None).await?;
         parse_and_validate_plan(&raw)
     }
 
-    async fn call_llm(&self, prompt: &str) -> Result<String> {
+    /// Ask the LLM to produce a short, descriptive plan name from a goal.
+    ///
+    /// Uses a low-cost model when available. The returned name is slugified so
+    /// it is safe for use as a ralph name and in filenames.
+    pub async fn generate_plan_name(&self, goal: &str) -> Result<String> {
+        let prompt = build_naming_prompt(goal);
+
+        let model_override = match self.model_provider {
+            ModelProvider::GithubModels => Some(DEFAULT_GITHUB_MODELS_NAMING_MODEL),
+            _ => None, // Llama uses same local model; Copilot SDK doesn't accept model choice
+        };
+
+        let raw = self.call_llm(&prompt, model_override).await?;
+        Ok(slugify_plan_name(&raw))
+    }
+
+    async fn call_llm(&self, prompt: &str, model_override: Option<&str>) -> Result<String> {
         match self.model_provider {
-            ModelProvider::GithubModels | ModelProvider::Llama => self.call_via_http(prompt).await,
+            ModelProvider::GithubModels | ModelProvider::Llama => {
+                self.call_via_http(prompt, model_override).await
+            }
             ModelProvider::Copilot => self.call_via_copilot_sdk(prompt).await,
         }
     }
 
-    async fn call_via_http(&self, prompt: &str) -> Result<String> {
+    async fn call_via_http(&self, prompt: &str, model_override: Option<&str>) -> Result<String> {
         let token = self
             .api_token
             .as_deref()
             .context("API token is required for this model provider")?;
 
-        let model = match self.model_provider {
+        let model = model_override.unwrap_or(match self.model_provider {
             ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
             _ => DEFAULT_GITHUB_MODELS_MODEL,
-        };
+        });
 
         let body = serde_json::json!({
             "model": model,
@@ -163,6 +181,52 @@ fn build_planner_prompt(goal: &str) -> String {
          Output the JSON array now:",
         goal = goal,
     )
+}
+
+/// Build a prompt that asks the LLM for a short, descriptive plan name.
+fn build_naming_prompt(goal: &str) -> String {
+    format!(
+        "Given the following project goal, produce a short identifier name (2-4 words, \
+         lowercase, separated by hyphens) that captures the essence of the goal. \
+         The name will be used as a filename-safe label.\n\n\
+         Goal: {goal}\n\n\
+         Reply with ONLY the hyphenated name and nothing else. \
+         Do not include quotes, punctuation, or explanation.\n\n\
+         Examples:\n\
+         - Goal: \"Build a REST API for user management\" → rest-api-users\n\
+         - Goal: \"Add CI/CD pipeline with GitHub Actions\" → ci-cd-pipeline\n\
+         - Goal: \"Migrate database from MySQL to PostgreSQL\" → mysql-to-postgres\n\n\
+         Name:",
+        goal = goal,
+    )
+}
+
+/// Sanitise raw LLM output into a filesystem-safe slug suitable as a ralph name.
+///
+/// Strips surrounding whitespace, lowercases, replaces non-alphanumeric
+/// characters with hyphens, collapses runs of hyphens, and caps length.
+pub fn slugify_plan_name(raw: &str) -> String {
+    let slug: String = raw
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+
+    let collapsed: String = slug
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+
+    let max_len = 40;
+    if collapsed.len() > max_len {
+        collapsed[..max_len].trim_end_matches('-').to_string()
+    } else if collapsed.is_empty() {
+        "plan".to_string()
+    } else {
+        collapsed
+    }
 }
 
 /// Parse the raw LLM output and validate it against the [`Task`] schema.
@@ -402,5 +466,72 @@ mod tests {
         assert!(prompt.contains("\"description\""));
         assert!(prompt.contains("\"phase\""));
         assert!(prompt.contains("\"depends_on\""));
+    }
+
+    // ---- build_naming_prompt tests ----
+
+    #[test]
+    fn naming_prompt_contains_goal() {
+        let prompt = build_naming_prompt("Build a REST API");
+        assert!(prompt.contains("Build a REST API"));
+    }
+
+    #[test]
+    fn naming_prompt_asks_for_hyphenated_name() {
+        let prompt = build_naming_prompt("anything");
+        assert!(prompt.contains("hyphen"));
+    }
+
+    // ---- slugify_plan_name tests ----
+
+    #[test]
+    fn slugify_clean_llm_response() {
+        assert_eq!(slugify_plan_name("rest-api-users"), "rest-api-users");
+    }
+
+    #[test]
+    fn slugify_strips_whitespace_and_newlines() {
+        assert_eq!(slugify_plan_name("  rest-api-users\n"), "rest-api-users");
+    }
+
+    #[test]
+    fn slugify_lowercases_response() {
+        assert_eq!(slugify_plan_name("REST-API-Users"), "rest-api-users");
+    }
+
+    #[test]
+    fn slugify_handles_quotes_and_punctuation() {
+        assert_eq!(slugify_plan_name("\"rest-api-users\""), "rest-api-users");
+    }
+
+    #[test]
+    fn slugify_collapses_special_chars() {
+        assert_eq!(
+            slugify_plan_name("rest--api...users"),
+            "rest-api-users"
+        );
+    }
+
+    #[test]
+    fn slugify_truncates_long_name() {
+        let long = "a-very-long-plan-name-that-exceeds-the-maximum-allowed-length-limit";
+        let result = slugify_plan_name(long);
+        assert!(result.len() <= 40);
+        assert!(!result.ends_with('-'));
+    }
+
+    #[test]
+    fn slugify_empty_response_returns_plan() {
+        assert_eq!(slugify_plan_name(""), "plan");
+        assert_eq!(slugify_plan_name("   "), "plan");
+    }
+
+    #[test]
+    fn slugify_handles_verbose_llm_response() {
+        // LLM might include extra text despite instructions
+        assert_eq!(
+            slugify_plan_name("ci-cd-pipeline\n\nThis name captures..."),
+            "ci-cd-pipeline-this-name-captures"
+        );
     }
 }

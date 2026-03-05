@@ -279,17 +279,6 @@ async fn main() -> Result<()> {
             let state_dir =
                 state_worktree::ensure_state_worktree(&work_dir, &repo_cfg.state_branch)?;
 
-            // Derive a ralph name from the explicit flag or slugify the goal.
-            let ralph_name = ralph.unwrap_or_else(|| slugify_for_ralph(&goal));
-
-            // Derive the task filename (explicit --output wins, else
-            // `<ralph>-tasks.json`).
-            let task_filename = output
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| format!("{}-tasks.json", ralph_name));
-
-            let task_path = state_dir.join(&task_filename);
-
             // Build planner config.
             let mut config = load_user_config().unwrap_or_default();
 
@@ -314,12 +303,38 @@ async fn main() -> Result<()> {
                 .or_else(|| env::var("COPILOT_API_TOKEN").ok())
                 .or_else(|| env::var("GITHUB_TOKEN").ok());
 
-            println!("Generating task plan for goal: {}", goal);
             let task_planner = planner::TaskPlanner::new(
                 config.model_provider.clone(),
                 config.api_endpoint.clone(),
                 config.api_token.clone(),
             );
+
+            // Derive a ralph name from the explicit flag, or ask the LLM,
+            // falling back to a simple slug of the goal.
+            let ralph_name = if let Some(r) = ralph {
+                r
+            } else {
+                match task_planner.generate_plan_name(&goal).await {
+                    Ok(name) => {
+                        println!("LLM suggested plan name: {}", name);
+                        name
+                    }
+                    Err(e) => {
+                        tracing::warn!("LLM naming failed, falling back to slug: {}", e);
+                        slugify_for_ralph(&goal)
+                    }
+                }
+            };
+
+            // Derive the task filename (explicit --output wins, else
+            // `<ralph>-tasks.json`).
+            let task_filename = output
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| format!("{}-tasks.json", ralph_name));
+
+            let task_path = state_dir.join(&task_filename);
+
+            println!("Generating task plan for goal: {}", goal);
             let tasks = task_planner.generate_task_plan(&goal).await?;
             println!("Generated {} task(s)", tasks.len());
 
