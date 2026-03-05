@@ -13,6 +13,7 @@ mod headless_state;
 mod integration_eval;
 mod openclaw;
 mod plan_migration;
+mod plan_wizard;
 mod planner;
 mod provenance;
 mod ralph_loop;
@@ -256,13 +257,25 @@ async fn main() -> Result<()> {
             model_provider,
             cloud,
         } => {
-            // Resolve goal: read from file or use raw string; exactly one must be set.
-            let goal = match (goal, goal_file) {
-                (Some(g), None) => g,
-                (None, Some(path)) => std::fs::read_to_string(&path)
-                    .with_context(|| format!("Failed to read goal file '{}'", path.display()))?,
+            // Resolve goal: read from file, use raw string, or run wizard.
+            let (goal, cloud, ralph) = match (goal, goal_file) {
+                (Some(g), None) => (g, cloud, ralph),
+                (None, Some(path)) => {
+                    let g = std::fs::read_to_string(&path)
+                        .with_context(|| {
+                            format!("Failed to read goal file '{}'", path.display())
+                        })?;
+                    (g, cloud, ralph)
+                }
                 (None, None) => {
-                    anyhow::bail!("Either --goal or --goal-file must be provided");
+                    if is_interactive() {
+                        match plan_wizard::run_plan_wizard()? {
+                            Some(w) => (w.goal, w.cloud, w.ralph),
+                            None => return Ok(()),
+                        }
+                    } else {
+                        anyhow::bail!("Either --goal or --goal-file must be provided");
+                    }
                 }
                 (Some(_), Some(_)) => {
                     // clap `conflicts_with` prevents this, but be defensive.

@@ -29,6 +29,7 @@ mod headless_state;
 mod integration_eval;
 mod openclaw;
 mod plan_migration;
+mod plan_wizard;
 mod planner;
 mod provenance;
 mod ralph_loop;
