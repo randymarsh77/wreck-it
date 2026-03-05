@@ -322,7 +322,7 @@ impl CloudAgentClient {
 
         // Assign Copilot to the issue to trigger the coding agent.
         if !self
-            .assign_copilot(issue_number, issue_node_id.as_deref())
+            .assign_copilot(issue_number, issue_node_id.as_deref(), branch)
             .await
         {
             tracing::warn!(
@@ -389,7 +389,7 @@ impl CloudAgentClient {
 
         // Assign a cloud agent to the issue.
         if !self
-            .assign_copilot(issue_number, issue_node_id.as_deref())
+            .assign_copilot(issue_number, issue_node_id.as_deref(), None)
             .await
         {
             tracing::warn!(
@@ -406,9 +406,20 @@ impl CloudAgentClient {
     }
 
     /// Assign the Copilot bot to an issue, triggering the coding agent.
+    ///
+    /// When `branch` is provided it is passed as `agentAssignment.baseRef` in
+    /// the GraphQL mutation so the coding agent starts from (and targets PRs
+    /// to) that branch instead of the repository default.
+    ///
     /// Returns `true` if the assignment succeeded.
-    async fn assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
-        self.try_assign_copilot(issue_number, issue_node_id).await
+    async fn assign_copilot(
+        &self,
+        issue_number: u64,
+        issue_node_id: Option<&str>,
+        branch: Option<&str>,
+    ) -> bool {
+        self.try_assign_copilot(issue_number, issue_node_id, branch)
+            .await
     }
 
     /// Find an available coding agent via the `suggestedActors` GraphQL query.
@@ -551,8 +562,19 @@ impl CloudAgentClient {
     /// Attempt to assign a coding agent using the GraphQL
     /// `addAssigneesToAssignable` mutation. Discovers the agent via
     /// `suggestedActors` and falls back to fetching the issue node ID if it was
-    /// not provided. Returns `true` when the mutation succeeds.
-    async fn try_assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
+    /// not provided.
+    ///
+    /// When `branch` is `Some`, the mutation includes an `agentAssignment`
+    /// input with `baseRef` set to the given branch name so the coding agent
+    /// starts from that branch and targets PRs to it.
+    ///
+    /// Returns `true` when the mutation succeeds.
+    async fn try_assign_copilot(
+        &self,
+        issue_number: u64,
+        issue_node_id: Option<&str>,
+        branch: Option<&str>,
+    ) -> bool {
         // Resolve the issue's GraphQL node ID.
         let owned_node_id;
         let assignable_id = match issue_node_id {
@@ -576,27 +598,57 @@ impl CloudAgentClient {
         };
 
         // Use the GraphQL addAssigneesToAssignable mutation.
+        //
+        // When a branch is specified, include `agentAssignment.baseRef` so
+        // the coding agent starts from (and targets PRs to) that branch.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
-        let query = serde_json::json!({
-            "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!) {
-                addAssigneesToAssignable(input: {
-                    assignableId: $assignableId,
-                    assigneeIds: $assigneeIds
-                }) {
-                    assignable {
-                        ... on Issue {
-                            assignees(first: 10) {
-                                nodes { login }
+        let query = if let Some(base_ref) = branch {
+            serde_json::json!({
+                "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!, $agentAssignment: CopilotAgentAssignmentInput!) {
+                    addAssigneesToAssignable(input: {
+                        assignableId: $assignableId,
+                        assigneeIds: $assigneeIds,
+                        agentAssignment: $agentAssignment
+                    }) {
+                        assignable {
+                            ... on Issue {
+                                assignees(first: 10) {
+                                    nodes { login }
+                                }
                             }
                         }
                     }
-                }
-            }"#,
-            "variables": {
-                "assignableId": assignable_id,
-                "assigneeIds": [agent_id],
-            },
-        });
+                }"#,
+                "variables": {
+                    "assignableId": assignable_id,
+                    "assigneeIds": [agent_id],
+                    "agentAssignment": {
+                        "baseRef": base_ref,
+                    },
+                },
+            })
+        } else {
+            serde_json::json!({
+                "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!) {
+                    addAssigneesToAssignable(input: {
+                        assignableId: $assignableId,
+                        assigneeIds: $assigneeIds
+                    }) {
+                        assignable {
+                            ... on Issue {
+                                assignees(first: 10) {
+                                    nodes { login }
+                                }
+                            }
+                        }
+                    }
+                }"#,
+                "variables": {
+                    "assignableId": assignable_id,
+                    "assigneeIds": [agent_id],
+                },
+            })
+        };
 
         match self
             .http
@@ -813,7 +865,7 @@ impl CloudAgentClient {
                     "Copilot is not assigned to issue #{}; attempting to reassign",
                     issue_number,
                 );
-                if self.assign_copilot(issue_number, None).await {
+                if self.assign_copilot(issue_number, None, None).await {
                     tracing::info!("Successfully reassigned Copilot to issue #{}", issue_number,);
                 } else {
                     tracing::warn!(
