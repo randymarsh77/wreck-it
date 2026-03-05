@@ -319,6 +319,73 @@ impl CloudAgentClient {
         })
     }
 
+    /// Create a GitHub issue for cloud-based plan generation and assign a
+    /// coding agent to it.
+    ///
+    /// This is used by `wreck-it plan --cloud` to delegate plan creation to a
+    /// cloud agent (e.g. Copilot).  The issue body should contain instructions
+    /// for the agent to write a task plan file to `.wreck-it/plans/`.
+    pub async fn create_plan_issue(
+        &self,
+        title: &str,
+        body: &str,
+    ) -> Result<TriggerResult> {
+        let create_body = serde_json::json!({
+            "title": title,
+            "body": body,
+            "labels": ["wreck-it", "copilot"],
+        });
+
+        let url = format!(
+            "{}/repos/{}/{}/issues",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name,
+        );
+
+        let resp = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&create_body)
+            .send()
+            .await
+            .context("Failed to create GitHub issue for cloud plan")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Failed to create plan issue ({}): {}", status, body);
+        }
+
+        let issue: serde_json::Value = resp.json().await?;
+        let issue_number = issue["number"]
+            .as_u64()
+            .context("Missing issue number in response")?;
+        let issue_url = issue["html_url"]
+            .as_str()
+            .context("Missing issue URL in response")?
+            .to_string();
+        let issue_node_id = issue["node_id"].as_str().map(|s| s.to_string());
+
+        // Assign a cloud agent to the issue.
+        if !self
+            .assign_copilot(issue_number, issue_node_id.as_deref())
+            .await
+        {
+            tracing::warn!(
+                "Agent assignment failed for plan issue #{}; the issue was created but \
+                 the agent may need to be assigned manually",
+                issue_number,
+            );
+        }
+
+        Ok(TriggerResult {
+            issue_number,
+            issue_url,
+        })
+    }
+
     /// Assign the Copilot bot to an issue, triggering the coding agent.
     /// Returns `true` if the assignment succeeded.
     async fn assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
