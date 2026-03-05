@@ -177,7 +177,7 @@ async fn process_ralph(
 
             // Trigger the cloud agent: create an issue and assign Copilot.
             let issue_body = build_issue_body(&task_id, &task_description, &state.memory);
-            let title = format!("[wreck-it] {}", task_id);
+            let title = format!("[wreck-it] {} {}", ctx.name, task_id);
 
             match client
                 .create_issue(&title, &issue_body, &["wreck-it", "copilot"])

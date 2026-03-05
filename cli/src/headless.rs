@@ -114,6 +114,8 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
         );
     }
 
+    let ralph_name = ralph.map(|r| r.name.as_str()).unwrap_or("default");
+
     let state_path = state_dir.join(&headless_cfg.state_file);
     let mut state = load_headless_state(&state_path).context("Failed to load headless state")?;
 
@@ -165,7 +167,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
 
             let outcome = match state.phase {
                 AgentPhase::NeedsTrigger => {
-                    run_needs_trigger(&config, &headless_cfg, &mut state, &work_dir, &state_dir)
+                    run_needs_trigger(&config, &headless_cfg, ralph_name, &mut state, &work_dir, &state_dir)
                         .await?
                 }
                 AgentPhase::AgentWorking => {
@@ -568,14 +570,25 @@ async fn advance_tracked_prs(
 /// Try to infer a task ID from a PR title.
 ///
 /// Agent-created PRs often reference the triggering issue whose title is
-/// `[wreck-it] <task_id>`.  PR titles may contain the issue number (e.g.
-/// "Fixes #42") or quote the task ID directly.  This is a best-effort
-/// extraction; returns [`UNKNOWN_TASK_ID`] when no ID can be inferred.
+/// `[wreck-it] <ralph_name> <task_id>` (current format) or the legacy
+/// `[wreck-it] <task_id>` (without a ralph name).  PR titles may contain
+/// the issue number (e.g. "Fixes #42") or quote the task ID directly.
+/// This is a best-effort extraction; returns [`UNKNOWN_TASK_ID`] when no
+/// ID can be inferred.
 #[cfg(test)]
 fn infer_task_id_from_title(title: &str) -> String {
-    // Look for "[wreck-it] <task_id>" pattern.
+    // Look for "[wreck-it] <ralph_name> <task_id>" or "[wreck-it] <task_id>" pattern.
     if let Some(rest) = title.strip_prefix("[wreck-it] ") {
-        return rest.trim().to_string();
+        let trimmed = rest.trim();
+        // Task IDs are single-token identifiers (e.g. "impl-3", "1"),
+        // so the task ID is the last space-separated token.  This handles
+        // both the current "[wreck-it] my-ralph task-1" and the legacy
+        // "[wreck-it] task-1" formats.
+        return trimmed
+            .rsplit_once(' ')
+            .map(|(_, id)| id)
+            .unwrap_or(trimmed)
+            .to_string();
     }
     // Check if the title itself is a known wreck-it task ID pattern.
     let trimmed = title.trim();
@@ -617,6 +630,7 @@ fn mark_task_complete_by_id(task_id: &str, task_file: &Path) -> Result<()> {
 async fn run_needs_trigger(
     config: &Config,
     headless_cfg: &HeadlessConfig,
+    ralph_name: &str,
     state: &mut HeadlessState,
     work_dir: &Path,
     state_dir: &Path,
@@ -694,7 +708,7 @@ async fn run_needs_trigger(
     );
 
     let result = client
-        .trigger_agent(&pending_task.id, &pending_task.description, &state.memory)
+        .trigger_agent(ralph_name, &pending_task.id, &pending_task.description, &state.memory)
         .await?;
 
     state.issue_number = Some(result.issue_number);
@@ -1169,6 +1183,22 @@ mod tests {
         assert_eq!(
             infer_task_id_from_title("Fix some random bug"),
             UNKNOWN_TASK_ID
+        );
+    }
+
+    #[test]
+    fn infer_task_id_with_ralph_name() {
+        assert_eq!(
+            infer_task_id_from_title("[wreck-it] back-to-roots 1"),
+            "1"
+        );
+        assert_eq!(
+            infer_task_id_from_title("[wreck-it] docs impl-3"),
+            "impl-3"
+        );
+        assert_eq!(
+            infer_task_id_from_title("[wreck-it] feature-dev eval-2"),
+            "eval-2"
         );
     }
 
