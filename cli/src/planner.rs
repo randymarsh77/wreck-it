@@ -85,10 +85,13 @@ impl TaskPlanner {
             .as_deref()
             .context("API token is required for this model provider")?;
 
-        let model = model_override.unwrap_or(match self.model_provider {
-            ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
-            _ => DEFAULT_GITHUB_MODELS_MODEL,
-        });
+        let model = match model_override {
+            Some(m) => m,
+            None => match self.model_provider {
+                ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
+                _ => DEFAULT_GITHUB_MODELS_MODEL,
+            },
+        };
 
         let body = serde_json::json!({
             "model": model,
@@ -203,11 +206,18 @@ fn build_naming_prompt(goal: &str) -> String {
 
 /// Sanitise raw LLM output into a filesystem-safe slug suitable as a ralph name.
 ///
-/// Strips surrounding whitespace, lowercases, replaces non-alphanumeric
-/// characters with hyphens, collapses runs of hyphens, and caps length.
+/// Takes only the first line (to discard any extra commentary the LLM may
+/// append), lowercases, replaces non-alphanumeric characters with hyphens,
+/// collapses runs of hyphens, and caps length.
 pub fn slugify_plan_name(raw: &str) -> String {
-    let slug: String = raw
-        .trim()
+    // Take only the first non-empty line to ignore any trailing explanation.
+    let first_line = raw
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+
+    let slug: String = first_line
         .to_lowercase()
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
@@ -528,10 +538,10 @@ mod tests {
 
     #[test]
     fn slugify_handles_verbose_llm_response() {
-        // LLM might include extra text despite instructions
+        // LLM might include extra text despite instructions; only first line is used.
         assert_eq!(
             slugify_plan_name("ci-cd-pipeline\n\nThis name captures..."),
-            "ci-cd-pipeline-this-name-captures"
+            "ci-cd-pipeline"
         );
     }
 }
