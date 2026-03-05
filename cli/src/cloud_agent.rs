@@ -63,7 +63,22 @@ pub struct TriggerResult {
 /// the coding agent has visibility into earlier iterations.  Each memory
 /// entry is formatted as a bullet point and should be a complete, self-
 /// contained description (e.g. "iteration 3: merged PR #7 for task setup").
-pub(crate) fn build_issue_body(task_id: &str, task_description: &str, memory: &[String]) -> String {
+///
+/// When `branch` is provided the body includes explicit instructions for the
+/// agent to base its work on that branch and target PRs to it.
+pub(crate) fn build_issue_body(
+    task_id: &str,
+    task_description: &str,
+    memory: &[String],
+    branch: Option<&str>,
+) -> String {
+    let branch_section = match branch {
+        Some(b) => format!(
+            "\n\n## Branch\n\nBase your work on the `{}` branch and target your pull request to `{}`.",
+            b, b,
+        ),
+        None => String::new(),
+    };
     let memory_section = if memory.is_empty() {
         String::new()
     } else {
@@ -75,8 +90,8 @@ pub(crate) fn build_issue_body(task_id: &str, task_description: &str, memory: &[
         format!("\n\n## Previous Context\n\n{}", bullets)
     };
     format!(
-        "{}{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
-        task_description, memory_section, task_id,
+        "{}{}{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
+        task_description, branch_section, memory_section, task_id,
     )
 }
 
@@ -247,14 +262,18 @@ impl CloudAgentClient {
     ///
     /// `memory_context` is a slice of freeform notes from previous iterations
     /// that is appended to the issue body so the agent has historical context.
+    ///
+    /// When `branch` is provided the issue body instructs the agent to base its
+    /// work on that branch and target PRs to it.
     pub async fn trigger_agent(
         &self,
         ralph_name: &str,
         task_id: &str,
         task_description: &str,
         memory_context: &[String],
+        branch: Option<&str>,
     ) -> Result<TriggerResult> {
-        let issue_body = build_issue_body(task_id, task_description, memory_context);
+        let issue_body = build_issue_body(task_id, task_description, memory_context, branch);
 
         let create_body = serde_json::json!({
             "title": format!("[wreck-it] {} {}", ralph_name, task_id),
@@ -2069,10 +2088,11 @@ mod tests {
 
     #[test]
     fn build_issue_body_without_memory() {
-        let body = build_issue_body("task-1", "Implement feature X", &[]);
+        let body = build_issue_body("task-1", "Implement feature X", &[], None);
         assert!(body.contains("Implement feature X"));
         assert!(body.contains("task `task-1`"));
         assert!(!body.contains("Previous Context"));
+        assert!(!body.contains("## Branch"));
     }
 
     #[test]
@@ -2081,7 +2101,7 @@ mod tests {
             "iteration 1: triggered cloud agent for task setup (issue #10)".to_string(),
             "iteration 2: agent created PR #5 for task setup".to_string(),
         ];
-        let body = build_issue_body("task-2", "Add test coverage", &memory);
+        let body = build_issue_body("task-2", "Add test coverage", &memory, None);
         assert!(body.contains("Add test coverage"));
         assert!(body.contains("task `task-2`"));
         assert!(body.contains("Previous Context"));
@@ -2092,13 +2112,34 @@ mod tests {
     #[test]
     fn build_issue_body_memory_placed_before_footer() {
         let memory = vec!["some context".to_string()];
-        let body = build_issue_body("t", "desc", &memory);
+        let body = build_issue_body("t", "desc", &memory, None);
         let context_pos = body.find("Previous Context").unwrap();
         let footer_pos = body.find("Triggered by wreck-it").unwrap();
         assert!(
             context_pos < footer_pos,
             "memory context should appear before the footer"
         );
+    }
+
+    #[test]
+    fn build_issue_body_with_branch() {
+        let body = build_issue_body("task-1", "Implement feature X", &[], Some("feature/my-branch"));
+        assert!(body.contains("Implement feature X"));
+        assert!(body.contains("## Branch"));
+        assert!(body.contains("Base your work on the `feature/my-branch` branch"));
+        assert!(body.contains("target your pull request to `feature/my-branch`"));
+    }
+
+    #[test]
+    fn build_issue_body_with_branch_and_memory() {
+        let memory = vec!["iteration 1: something".to_string()];
+        let body = build_issue_body("task-1", "desc", &memory, Some("dev"));
+        // Branch section should come before memory section
+        let branch_pos = body.find("## Branch").unwrap();
+        let memory_pos = body.find("Previous Context").unwrap();
+        let footer_pos = body.find("Triggered by wreck-it").unwrap();
+        assert!(branch_pos < memory_pos);
+        assert!(memory_pos < footer_pos);
     }
 
     #[test]

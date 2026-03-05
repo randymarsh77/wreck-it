@@ -58,6 +58,16 @@ pub struct RalphConfig {
     /// Path to the persistent state file, relative to the state root.
     #[serde(default = "default_state_file")]
     pub state_file: String,
+
+    /// Optional feature branch for the target repository.
+    ///
+    /// When set, the headless runner ensures this branch exists before
+    /// triggering a cloud agent and instructs the agent to base its work
+    /// on this branch.  PRs created by the agent will target this branch
+    /// instead of the repository default.  If the branch does not exist it
+    /// is created from the repository's default branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
 }
 
 fn default_state_branch() -> String {

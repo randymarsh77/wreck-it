@@ -178,11 +178,13 @@ mod tests {
                     name: "docs".to_string(),
                     task_file: "docs-tasks.json".to_string(),
                     state_file: ".docs-state.json".to_string(),
+                    branch: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
                     task_file: "coverage-tasks.json".to_string(),
                     state_file: ".coverage-state.json".to_string(),
+                    branch: None,
                 },
             ],
         };
@@ -225,11 +227,13 @@ name = "docs"
                     name: "docs".to_string(),
                     task_file: "docs-tasks.json".to_string(),
                     state_file: ".docs-state.json".to_string(),
+                    branch: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
                     task_file: "coverage-tasks.json".to_string(),
                     state_file: ".coverage-state.json".to_string(),
+                    branch: None,
                 },
             ],
             ..RepoConfig::default()
@@ -254,11 +258,66 @@ name = "docs"
                 name: "docs".to_string(),
                 task_file: "docs-tasks.json".to_string(),
                 state_file: ".docs-state.json".to_string(),
+                branch: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
         let loaded = load_repo_config(dir.path()).unwrap().unwrap();
         assert_eq!(loaded.ralphs.len(), 1);
         assert_eq!(loaded.ralphs[0].name, "docs");
+    }
+
+    #[test]
+    fn test_ralph_config_branch_defaults_to_none() {
+        let toml_str = r#"
+[[ralphs]]
+name = "docs"
+task_file = "docs-tasks.json"
+state_file = ".docs-state.json"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.ralphs.len(), 1);
+        assert!(cfg.ralphs[0].branch.is_none());
+    }
+
+    #[test]
+    fn test_ralph_config_with_branch_roundtrip() {
+        let dir = tempdir().unwrap();
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![RalphConfig {
+                name: "feature-work".to_string(),
+                task_file: "feature-tasks.json".to_string(),
+                state_file: ".feature-state.json".to_string(),
+                branch: Some("feature/my-branch".to_string()),
+            }],
+        };
+        save_repo_config(dir.path(), &cfg).unwrap();
+        let loaded = load_repo_config(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ralphs.len(), 1);
+        assert_eq!(
+            loaded.ralphs[0].branch.as_deref(),
+            Some("feature/my-branch"),
+        );
+    }
+
+    #[test]
+    fn test_ralph_config_branch_omitted_when_none() {
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![RalphConfig {
+                name: "docs".to_string(),
+                task_file: "docs-tasks.json".to_string(),
+                state_file: ".docs-state.json".to_string(),
+                branch: None,
+            }],
+        };
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        // The ralph section should not contain a "branch" key.
+        // (state_branch at the top level is unrelated.)
+        let ralph_section = toml_str.split("[[ralphs]]").nth(1).unwrap();
+        assert!(!ralph_section.contains("branch"));
     }
 }

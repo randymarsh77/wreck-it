@@ -133,6 +133,77 @@ pub fn push_state_branch(repo_root: &Path, branch: &str) -> Result<()> {
     Ok(())
 }
 
+/// Ensure a feature branch exists locally and on the remote.
+///
+/// If the branch does not exist locally or on the remote, it is created from
+/// the repository's default branch and pushed.  This is used by the headless
+/// runner to prepare a per-ralph feature branch before triggering a cloud
+/// agent.
+///
+/// Does nothing when the branch already exists on the remote.
+pub fn ensure_feature_branch(repo_root: &Path, branch: &str) -> Result<()> {
+    // Fetch latest remote state for the branch.
+    let _ = git_cmd(repo_root, &["fetch", "origin", branch]);
+
+    let remote_ref = format!("origin/{}", branch);
+    if git_cmd(repo_root, &["rev-parse", "--verify", &remote_ref]).is_ok() {
+        // Branch already exists on remote — nothing to do.
+        return Ok(());
+    }
+
+    // Branch does not exist on remote.  Determine the default branch.
+    let default_branch = detect_default_branch(repo_root)?;
+
+    // Ensure we have the latest default branch.
+    let _ = git_cmd(repo_root, &["fetch", "origin", &default_branch]);
+
+    let default_remote_ref = format!("origin/{}", default_branch);
+    let base_sha = git_cmd(repo_root, &["rev-parse", "--verify", &default_remote_ref])
+        .or_else(|_| git_cmd(repo_root, &["rev-parse", "--verify", &format!("refs/heads/{}", default_branch)]))
+        .with_context(|| format!("Could not resolve default branch '{}' to create '{}'", default_branch, branch))?;
+
+    // Create the local branch ref pointing at the base SHA.
+    let local_ref = format!("refs/heads/{}", branch);
+    if git_cmd(repo_root, &["rev-parse", "--verify", &local_ref]).is_err() {
+        git_cmd(repo_root, &["branch", branch, &base_sha])
+            .with_context(|| format!("Failed to create local branch '{}'", branch))?;
+        println!(
+            "[wreck-it] created branch '{}' from '{}' ({})",
+            branch, default_branch, &base_sha[..8.min(base_sha.len())],
+        );
+    }
+
+    // Push the new branch to the remote.
+    git_cmd(repo_root, &["push", "-u", "origin", branch])
+        .with_context(|| format!("Failed to push branch '{}' to origin", branch))?;
+    println!("[wreck-it] pushed branch '{}' to origin", branch);
+
+    Ok(())
+}
+
+/// Detect the default branch of the repository.
+///
+/// Tries `origin/HEAD` first, then falls back to common names.
+fn detect_default_branch(repo_root: &Path) -> Result<String> {
+    // Try to read the symbolic ref of origin/HEAD.
+    if let Ok(symbolic) = git_cmd(repo_root, &["symbolic-ref", "refs/remotes/origin/HEAD"]) {
+        // e.g. "refs/remotes/origin/main" → "main"
+        if let Some(name) = symbolic.strip_prefix("refs/remotes/origin/") {
+            return Ok(name.to_string());
+        }
+    }
+
+    // Fallback: check common default branch names.
+    for candidate in &["main", "master"] {
+        let remote_ref = format!("origin/{}", candidate);
+        if git_cmd(repo_root, &["rev-parse", "--verify", &remote_ref]).is_ok() {
+            return Ok(candidate.to_string());
+        }
+    }
+
+    anyhow::bail!("Could not determine default branch; set origin/HEAD or use 'main'/'master'")
+}
+
 /// Commit pending state-worktree changes and push the branch to the remote.
 ///
 /// Returns `Ok(true)` if a commit was made (and a push was attempted),
@@ -372,5 +443,72 @@ mod tests {
             state_worktree_path(root),
             PathBuf::from("/some/repo/.wreck-it/state")
         );
+    }
+
+    #[test]
+    fn test_detect_default_branch_fallback() {
+        // In a local repo without origin/HEAD, detect_default_branch should
+        // still work if a 'main' or 'master' branch exists on origin.
+        let dir = init_test_repo();
+
+        // Create a bare remote to simulate origin.
+        let remote_dir = tempdir().unwrap();
+        Command::new("git")
+            .args(["clone", "--bare", dir.path().to_str().unwrap(), "."])
+            .current_dir(remote_dir.path())
+            .output()
+            .unwrap();
+        git_cmd(dir.path(), &["remote", "add", "origin", remote_dir.path().to_str().unwrap()]).unwrap();
+        git_cmd(dir.path(), &["fetch", "origin"]).unwrap();
+
+        // Should detect the default branch (usually 'master' in test repos).
+        let result = detect_default_branch(dir.path());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ensure_feature_branch_creates_from_default() {
+        let dir = init_test_repo();
+
+        // Create a bare remote to simulate origin.
+        let remote_dir = tempdir().unwrap();
+        Command::new("git")
+            .args(["clone", "--bare", dir.path().to_str().unwrap(), "."])
+            .current_dir(remote_dir.path())
+            .output()
+            .unwrap();
+        git_cmd(dir.path(), &["remote", "add", "origin", remote_dir.path().to_str().unwrap()]).unwrap();
+        git_cmd(dir.path(), &["fetch", "origin"]).unwrap();
+
+        // Branch should not exist yet.
+        let remote_ref = "origin/feature/test-branch";
+        assert!(git_cmd(dir.path(), &["rev-parse", "--verify", remote_ref]).is_err());
+
+        // ensure_feature_branch should create it.
+        ensure_feature_branch(dir.path(), "feature/test-branch").unwrap();
+
+        // After fetching again, the branch should exist on origin.
+        git_cmd(dir.path(), &["fetch", "origin"]).unwrap();
+        assert!(git_cmd(dir.path(), &["rev-parse", "--verify", remote_ref]).is_ok());
+    }
+
+    #[test]
+    fn test_ensure_feature_branch_idempotent() {
+        let dir = init_test_repo();
+
+        // Create a bare remote.
+        let remote_dir = tempdir().unwrap();
+        Command::new("git")
+            .args(["clone", "--bare", dir.path().to_str().unwrap(), "."])
+            .current_dir(remote_dir.path())
+            .output()
+            .unwrap();
+        git_cmd(dir.path(), &["remote", "add", "origin", remote_dir.path().to_str().unwrap()]).unwrap();
+        git_cmd(dir.path(), &["fetch", "origin"]).unwrap();
+
+        // Create the branch.
+        ensure_feature_branch(dir.path(), "feature/test-branch").unwrap();
+        // Second call should be a no-op.
+        ensure_feature_branch(dir.path(), "feature/test-branch").unwrap();
     }
 }

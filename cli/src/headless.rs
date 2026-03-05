@@ -5,7 +5,7 @@ use crate::headless_state::{
 };
 use crate::plan_migration::migrate_pending_plans;
 use crate::repo_config::{load_repo_config, RalphConfig};
-use crate::state_worktree::{commit_and_push_state, ensure_state_worktree};
+use crate::state_worktree::{commit_and_push_state, ensure_feature_branch, ensure_state_worktree};
 use crate::task_manager::{load_tasks, reset_recurring_tasks, save_tasks};
 use crate::types::Config;
 use anyhow::{Context, Result};
@@ -115,6 +115,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
     }
 
     let ralph_name = ralph.map(|r| r.name.as_str()).unwrap_or("default");
+    let ralph_branch = ralph.and_then(|r| r.branch.as_deref());
 
     let state_path = state_dir.join(&headless_cfg.state_file);
     let mut state = load_headless_state(&state_path).context("Failed to load headless state")?;
@@ -167,7 +168,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
 
             let outcome = match state.phase {
                 AgentPhase::NeedsTrigger => {
-                    run_needs_trigger(&config, &headless_cfg, ralph_name, &mut state, &work_dir, &state_dir)
+                    run_needs_trigger(&config, &headless_cfg, ralph_name, ralph_branch, &mut state, &work_dir, &state_dir)
                         .await?
                 }
                 AgentPhase::AgentWorking => {
@@ -631,6 +632,7 @@ async fn run_needs_trigger(
     config: &Config,
     headless_cfg: &HeadlessConfig,
     ralph_name: &str,
+    ralph_branch: Option<&str>,
     state: &mut HeadlessState,
     work_dir: &Path,
     state_dir: &Path,
@@ -702,13 +704,25 @@ async fn run_needs_trigger(
     let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
     client.resolve_authenticated_login().await;
 
+    // If a per-ralph feature branch is configured, ensure it exists on the
+    // remote before triggering the cloud agent.  This creates the branch from
+    // the repository default when it does not exist yet.
+    if let Some(branch) = ralph_branch {
+        if let Err(e) = ensure_feature_branch(work_dir, branch) {
+            println!(
+                "[wreck-it] warning: failed to ensure branch '{}': {}",
+                branch, e,
+            );
+        }
+    }
+
     println!(
         "[wreck-it] triggering cloud agent for task {}: {}",
         pending_task.id, pending_task.description
     );
 
     let result = client
-        .trigger_agent(ralph_name, &pending_task.id, &pending_task.description, &state.memory)
+        .trigger_agent(ralph_name, &pending_task.id, &pending_task.description, &state.memory, ralph_branch)
         .await?;
 
     state.issue_number = Some(result.issue_number);
