@@ -167,9 +167,10 @@ pub fn ensure_feature_branch(repo_root: &Path, branch: &str) -> Result<()> {
     if git_cmd(repo_root, &["rev-parse", "--verify", &local_ref]).is_err() {
         git_cmd(repo_root, &["branch", branch, &base_sha])
             .with_context(|| format!("Failed to create local branch '{}'", branch))?;
+        let short_sha = &base_sha[..8.min(base_sha.len())];
         println!(
             "[wreck-it] created branch '{}' from '{}' ({})",
-            branch, default_branch, &base_sha[..8.min(base_sha.len())],
+            branch, default_branch, short_sha,
         );
     }
 

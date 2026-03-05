@@ -317,7 +317,10 @@ state_file = ".docs-state.json"
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
         // The ralph section should not contain a "branch" key.
         // (state_branch at the top level is unrelated.)
-        let ralph_section = toml_str.split("[[ralphs]]").nth(1).unwrap();
+        let ralph_section = toml_str
+            .split("[[ralphs]]")
+            .nth(1)
+            .expect("TOML should contain a [[ralphs]] section");
         assert!(!ralph_section.contains("branch"));
     }
 }
