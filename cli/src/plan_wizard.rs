@@ -1,5 +1,5 @@
-use crossterm::style::{Attribute, Color, Print, SetAttribute, SetForegroundColor, ResetColor};
 use crossterm::execute;
+use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use std::io::{self, Write};
 
 /// Options collected by the interactive plan wizard.
@@ -109,10 +109,7 @@ pub fn run_plan_wizard() -> io::Result<Option<PlanWizardResult>> {
         "  Mode  : {}",
         if cloud { "cloud agent" } else { "local LLM" }
     );
-    println!(
-        "  Ralph : {}",
-        ralph.as_deref().unwrap_or("(auto)")
-    );
+    println!("  Ralph : {}", ralph.as_deref().unwrap_or("(auto)"));
     println!();
 
     Ok(Some(PlanWizardResult { goal, cloud, ralph }))

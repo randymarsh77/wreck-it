@@ -73,7 +73,9 @@ pub async fn resolve_github_token(config_token: Option<&str>) -> Result<String> 
 /// 2. Display the verification URL and user code; open the browser.
 /// 3. Poll for the access token until the user completes authorisation.
 async fn device_flow_auth() -> Result<String> {
-    let client_id = std::env::var("WRECK_IT_OAUTH_CLIENT_ID").ok().filter(|s| !s.is_empty());
+    let client_id = std::env::var("WRECK_IT_OAUTH_CLIENT_ID")
+        .ok()
+        .filter(|s| !s.is_empty());
 
     let client_id = match client_id {
         Some(id) => id,
@@ -272,7 +274,10 @@ mod tests {
         let result = resolve_github_token(None).await;
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("GITHUB_TOKEN"), "error should mention GITHUB_TOKEN: {msg}");
+        assert!(
+            msg.contains("GITHUB_TOKEN"),
+            "error should mention GITHUB_TOKEN: {msg}"
+        );
 
         if let Some(v) = had_env {
             std::env::set_var("GITHUB_TOKEN", v);
@@ -286,14 +291,14 @@ mod tests {
 
     #[test]
     fn plan_issue_body_contains_goal() {
-        let body = build_plan_issue_body("Build a REST API", "rest-api-tasks.json--cloud-plan.json");
+        let body =
+            build_plan_issue_body("Build a REST API", "rest-api-tasks.json--cloud-plan.json");
         assert!(body.contains("Build a REST API"));
     }
 
     #[test]
     fn plan_issue_body_contains_filename() {
-        let body =
-            build_plan_issue_body("anything", "feature-tasks.json--cloud-plan.json");
+        let body = build_plan_issue_body("anything", "feature-tasks.json--cloud-plan.json");
         assert!(body.contains("feature-tasks.json--cloud-plan.json"));
     }
 

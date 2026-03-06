@@ -516,10 +516,7 @@ mod tests {
 
     #[test]
     fn slugify_collapses_special_chars() {
-        assert_eq!(
-            slugify_plan_name("rest--api...users"),
-            "rest-api-users"
-        );
+        assert_eq!(slugify_plan_name("rest--api...users"), "rest-api-users");
     }
 
     #[test]

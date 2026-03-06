@@ -167,8 +167,15 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
 
             let outcome = match state.phase {
                 AgentPhase::NeedsTrigger => {
-                    run_needs_trigger(&config, &headless_cfg, ralph_name, &mut state, &work_dir, &state_dir)
-                        .await?
+                    run_needs_trigger(
+                        &config,
+                        &headless_cfg,
+                        ralph_name,
+                        &mut state,
+                        &work_dir,
+                        &state_dir,
+                    )
+                    .await?
                 }
                 AgentPhase::AgentWorking => {
                     run_agent_working(&config, &headless_cfg, &mut state, &work_dir).await?
@@ -708,7 +715,12 @@ async fn run_needs_trigger(
     );
 
     let result = client
-        .trigger_agent(ralph_name, &pending_task.id, &pending_task.description, &state.memory)
+        .trigger_agent(
+            ralph_name,
+            &pending_task.id,
+            &pending_task.description,
+            &state.memory,
+        )
         .await?;
 
     state.issue_number = Some(result.issue_number);
@@ -1188,14 +1200,8 @@ mod tests {
 
     #[test]
     fn infer_task_id_with_ralph_name() {
-        assert_eq!(
-            infer_task_id_from_title("[wreck-it] back-to-roots 1"),
-            "1"
-        );
-        assert_eq!(
-            infer_task_id_from_title("[wreck-it] docs impl-3"),
-            "impl-3"
-        );
+        assert_eq!(infer_task_id_from_title("[wreck-it] back-to-roots 1"), "1");
+        assert_eq!(infer_task_id_from_title("[wreck-it] docs impl-3"), "impl-3");
         assert_eq!(
             infer_task_id_from_title("[wreck-it] feature-dev eval-2"),
             "eval-2"

@@ -261,10 +261,9 @@ async fn main() -> Result<()> {
             let (goal, cloud, ralph) = match (goal, goal_file) {
                 (Some(g), None) => (g, cloud, ralph),
                 (None, Some(path)) => {
-                    let g = std::fs::read_to_string(&path)
-                        .with_context(|| {
-                            format!("Failed to read goal file '{}'", path.display())
-                        })?;
+                    let g = std::fs::read_to_string(&path).with_context(|| {
+                        format!("Failed to read goal file '{}'", path.display())
+                    })?;
                     (g, cloud, ralph)
                 }
                 (None, None) => {
@@ -294,10 +293,8 @@ async fn main() -> Result<()> {
                 // ── Cloud plan path ─────────────────────────────────────
                 // Resolve a GitHub token (env → config → OAuth device flow).
                 let mut config = load_user_config().unwrap_or_default();
-                let github_token = github_auth::resolve_github_token(
-                    config.github_token.as_deref(),
-                )
-                .await?;
+                let github_token =
+                    github_auth::resolve_github_token(config.github_token.as_deref()).await?;
 
                 // Persist the token for future runs.
                 if config.github_token.as_deref() != Some(&github_token) {
@@ -324,27 +321,22 @@ async fn main() -> Result<()> {
 
                 // Build the issue.
                 let issue_title = format!("[wreck-it] plan: {}", truncate_title(&goal, 60));
-                let issue_body =
-                    github_auth::build_plan_issue_body(&goal, &plan_filename);
+                let issue_body = github_auth::build_plan_issue_body(&goal, &plan_filename);
 
                 // Create the issue and assign a cloud agent.
-                let client = cloud_agent::CloudAgentClient::new(
-                    github_token,
-                    repo_owner,
-                    repo_name,
-                );
-                let result = client
-                    .create_plan_issue(&issue_title, &issue_body)
-                    .await?;
+                let client =
+                    cloud_agent::CloudAgentClient::new(github_token, repo_owner, repo_name);
+                let result = client.create_plan_issue(&issue_title, &issue_body).await?;
 
-                println!("Created issue #{}: {}", result.issue_number, result.issue_url);
+                println!(
+                    "Created issue #{}: {}",
+                    result.issue_number, result.issue_url
+                );
 
                 // Upsert the ralph entry in repo config so the headless
                 // runner knows where to route the migrated plan.
                 let state_filename = format!(".{}-state.json", ralph_name);
-                if let Some(existing) =
-                    repo_cfg.ralphs.iter_mut().find(|r| r.name == ralph_name)
-                {
+                if let Some(existing) = repo_cfg.ralphs.iter_mut().find(|r| r.name == ralph_name) {
                     existing.task_file = task_filename.clone();
                     existing.state_file = state_filename.clone();
                     println!("Updated ralph '{}' in config", ralph_name);
@@ -436,9 +428,7 @@ async fn main() -> Result<()> {
 
                 // Upsert the ralph entry in the repo config.
                 let state_filename = format!(".{}-state.json", ralph_name);
-                if let Some(existing) =
-                    repo_cfg.ralphs.iter_mut().find(|r| r.name == ralph_name)
-                {
+                if let Some(existing) = repo_cfg.ralphs.iter_mut().find(|r| r.name == ralph_name) {
                     existing.task_file = task_filename.clone();
                     existing.state_file = state_filename.clone();
                     println!("Updated ralph '{}' in config", ralph_name);
@@ -457,10 +447,7 @@ async fn main() -> Result<()> {
                     &work_dir,
                     &format!("wreck-it: plan '{}' → ralph '{}'", goal, ralph_name),
                 ) {
-                    println!(
-                        "Committed plan to state branch '{}'",
-                        repo_cfg.state_branch,
-                    );
+                    println!("Committed plan to state branch '{}'", repo_cfg.state_branch,);
                 }
             }
         }
