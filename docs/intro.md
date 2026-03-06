@@ -7,7 +7,7 @@ slug: /
 
 **wreck-it** is an autonomous AI agent orchestrator powered by GitHub Models (or the Copilot SDK). It runs Ralph Wiggum loops — continuous, external bash-style loops that execute AI agent tasks to completion — either **headless in CI** (GitHub Actions, cron schedules) or **interactively via a terminal UI**.
 
-## Ralph Wiggum. Cloud Scale.
+## Ralph Wiggum. Web Scale.
 
 wreck-it brings autonomous AI agent orchestration to your CI pipeline and your terminal. Define tasks, let the agents work, and watch your codebase evolve — on a schedule, in the cloud, or right from your laptop.
 
