@@ -344,11 +344,7 @@ impl CloudAgentClient {
     /// This is used by `wreck-it plan --cloud` to delegate plan creation to a
     /// cloud agent (e.g. Copilot).  The issue body should contain instructions
     /// for the agent to write a task plan file to `.wreck-it/plans/`.
-    pub async fn create_plan_issue(
-        &self,
-        title: &str,
-        body: &str,
-    ) -> Result<TriggerResult> {
+    pub async fn create_plan_issue(&self, title: &str, body: &str) -> Result<TriggerResult> {
         let create_body = serde_json::json!({
             "title": title,
             "body": body,

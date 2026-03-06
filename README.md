@@ -1,6 +1,6 @@
 # wreck-it 🔧
 
-**Ralph Wiggum. Cloud Scale.**
+**Ralph Wiggum. Web Scale.**
 
 Autonomous AI agent orchestration for your codebase. Run headless in GitHub Actions on a cron schedule, or interactively via the terminal UI — powered by GitHub Models or the Copilot SDK.
 
