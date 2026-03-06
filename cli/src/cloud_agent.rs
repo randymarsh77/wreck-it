@@ -63,7 +63,22 @@ pub struct TriggerResult {
 /// the coding agent has visibility into earlier iterations.  Each memory
 /// entry is formatted as a bullet point and should be a complete, self-
 /// contained description (e.g. "iteration 3: merged PR #7 for task setup").
-pub(crate) fn build_issue_body(task_id: &str, task_description: &str, memory: &[String]) -> String {
+///
+/// When `branch` is provided the body includes explicit instructions for the
+/// agent to base its work on that branch and target PRs to it.
+pub(crate) fn build_issue_body(
+    task_id: &str,
+    task_description: &str,
+    memory: &[String],
+    branch: Option<&str>,
+) -> String {
+    let branch_section = match branch {
+        Some(b) => format!(
+            "\n\n## Branch\n\nBase your work on the `{}` branch and target your pull request to `{}`.",
+            b, b,
+        ),
+        None => String::new(),
+    };
     let memory_section = if memory.is_empty() {
         String::new()
     } else {
@@ -75,8 +90,8 @@ pub(crate) fn build_issue_body(task_id: &str, task_description: &str, memory: &[
         format!("\n\n## Previous Context\n\n{}", bullets)
     };
     format!(
-        "{}{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
-        task_description, memory_section, task_id,
+        "{}{}{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
+        task_description, branch_section, memory_section, task_id,
     )
 }
 
@@ -247,14 +262,18 @@ impl CloudAgentClient {
     ///
     /// `memory_context` is a slice of freeform notes from previous iterations
     /// that is appended to the issue body so the agent has historical context.
+    ///
+    /// When `branch` is provided the issue body instructs the agent to base its
+    /// work on that branch and target PRs to it.
     pub async fn trigger_agent(
         &self,
         ralph_name: &str,
         task_id: &str,
         task_description: &str,
         memory_context: &[String],
+        branch: Option<&str>,
     ) -> Result<TriggerResult> {
-        let issue_body = build_issue_body(task_id, task_description, memory_context);
+        let issue_body = build_issue_body(task_id, task_description, memory_context, branch);
 
         let create_body = serde_json::json!({
             "title": format!("[wreck-it] {} {}", ralph_name, task_id),
@@ -303,7 +322,7 @@ impl CloudAgentClient {
 
         // Assign Copilot to the issue to trigger the coding agent.
         if !self
-            .assign_copilot(issue_number, issue_node_id.as_deref())
+            .assign_copilot(issue_number, issue_node_id.as_deref(), branch)
             .await
         {
             tracing::warn!(
@@ -366,7 +385,7 @@ impl CloudAgentClient {
 
         // Assign a cloud agent to the issue.
         if !self
-            .assign_copilot(issue_number, issue_node_id.as_deref())
+            .assign_copilot(issue_number, issue_node_id.as_deref(), None)
             .await
         {
             tracing::warn!(
@@ -383,9 +402,20 @@ impl CloudAgentClient {
     }
 
     /// Assign the Copilot bot to an issue, triggering the coding agent.
+    ///
+    /// When `branch` is provided it is passed as `agentAssignment.baseRef` in
+    /// the GraphQL mutation so the coding agent starts from (and targets PRs
+    /// to) that branch instead of the repository default.
+    ///
     /// Returns `true` if the assignment succeeded.
-    async fn assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
-        self.try_assign_copilot(issue_number, issue_node_id).await
+    async fn assign_copilot(
+        &self,
+        issue_number: u64,
+        issue_node_id: Option<&str>,
+        branch: Option<&str>,
+    ) -> bool {
+        self.try_assign_copilot(issue_number, issue_node_id, branch)
+            .await
     }
 
     /// Find an available coding agent via the `suggestedActors` GraphQL query.
@@ -528,8 +558,19 @@ impl CloudAgentClient {
     /// Attempt to assign a coding agent using the GraphQL
     /// `addAssigneesToAssignable` mutation. Discovers the agent via
     /// `suggestedActors` and falls back to fetching the issue node ID if it was
-    /// not provided. Returns `true` when the mutation succeeds.
-    async fn try_assign_copilot(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
+    /// not provided.
+    ///
+    /// When `branch` is `Some`, the mutation includes an `agentAssignment`
+    /// input with `baseRef` set to the given branch name so the coding agent
+    /// starts from that branch and targets PRs to it.
+    ///
+    /// Returns `true` when the mutation succeeds.
+    async fn try_assign_copilot(
+        &self,
+        issue_number: u64,
+        issue_node_id: Option<&str>,
+        branch: Option<&str>,
+    ) -> bool {
         // Resolve the issue's GraphQL node ID.
         let owned_node_id;
         let assignable_id = match issue_node_id {
@@ -553,12 +594,23 @@ impl CloudAgentClient {
         };
 
         // Use the GraphQL addAssigneesToAssignable mutation.
+        //
+        // When a branch is specified, include `agentAssignment.baseRef` so
+        // the coding agent starts from (and targets PRs to) that branch.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let mut variables = serde_json::json!({
+            "assignableId": assignable_id,
+            "assigneeIds": [agent_id],
+        });
+        if let Some(base_ref) = branch {
+            variables["agentAssignment"] = serde_json::json!({ "baseRef": base_ref });
+        }
         let query = serde_json::json!({
-            "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!) {
+            "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!, $agentAssignment: CopilotAgentAssignmentInput) {
                 addAssigneesToAssignable(input: {
                     assignableId: $assignableId,
-                    assigneeIds: $assigneeIds
+                    assigneeIds: $assigneeIds,
+                    agentAssignment: $agentAssignment
                 }) {
                     assignable {
                         ... on Issue {
@@ -569,10 +621,7 @@ impl CloudAgentClient {
                     }
                 }
             }"#,
-            "variables": {
-                "assignableId": assignable_id,
-                "assigneeIds": [agent_id],
-            },
+            "variables": variables,
         });
 
         match self
@@ -790,7 +839,7 @@ impl CloudAgentClient {
                     "Copilot is not assigned to issue #{}; attempting to reassign",
                     issue_number,
                 );
-                if self.assign_copilot(issue_number, None).await {
+                if self.assign_copilot(issue_number, None, None).await {
                     tracing::info!("Successfully reassigned Copilot to issue #{}", issue_number,);
                 } else {
                     tracing::warn!(
@@ -2065,10 +2114,11 @@ mod tests {
 
     #[test]
     fn build_issue_body_without_memory() {
-        let body = build_issue_body("task-1", "Implement feature X", &[]);
+        let body = build_issue_body("task-1", "Implement feature X", &[], None);
         assert!(body.contains("Implement feature X"));
         assert!(body.contains("task `task-1`"));
         assert!(!body.contains("Previous Context"));
+        assert!(!body.contains("## Branch"));
     }
 
     #[test]
@@ -2077,7 +2127,7 @@ mod tests {
             "iteration 1: triggered cloud agent for task setup (issue #10)".to_string(),
             "iteration 2: agent created PR #5 for task setup".to_string(),
         ];
-        let body = build_issue_body("task-2", "Add test coverage", &memory);
+        let body = build_issue_body("task-2", "Add test coverage", &memory, None);
         assert!(body.contains("Add test coverage"));
         assert!(body.contains("task `task-2`"));
         assert!(body.contains("Previous Context"));
@@ -2088,13 +2138,34 @@ mod tests {
     #[test]
     fn build_issue_body_memory_placed_before_footer() {
         let memory = vec!["some context".to_string()];
-        let body = build_issue_body("t", "desc", &memory);
+        let body = build_issue_body("t", "desc", &memory, None);
         let context_pos = body.find("Previous Context").unwrap();
         let footer_pos = body.find("Triggered by wreck-it").unwrap();
         assert!(
             context_pos < footer_pos,
             "memory context should appear before the footer"
         );
+    }
+
+    #[test]
+    fn build_issue_body_with_branch() {
+        let body = build_issue_body("task-1", "Implement feature X", &[], Some("feature/my-branch"));
+        assert!(body.contains("Implement feature X"));
+        assert!(body.contains("## Branch"));
+        assert!(body.contains("Base your work on the `feature/my-branch` branch"));
+        assert!(body.contains("target your pull request to `feature/my-branch`"));
+    }
+
+    #[test]
+    fn build_issue_body_with_branch_and_memory() {
+        let memory = vec!["iteration 1: something".to_string()];
+        let body = build_issue_body("task-1", "desc", &memory, Some("dev"));
+        // Branch section should come before memory section
+        let branch_pos = body.find("## Branch").unwrap();
+        let memory_pos = body.find("Previous Context").unwrap();
+        let footer_pos = body.find("Triggered by wreck-it").unwrap();
+        assert!(branch_pos < memory_pos);
+        assert!(memory_pos < footer_pos);
     }
 
     #[test]

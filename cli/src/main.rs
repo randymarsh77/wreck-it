@@ -345,6 +345,7 @@ async fn main() -> Result<()> {
                         name: ralph_name.clone(),
                         task_file: task_filename.clone(),
                         state_file: state_filename.clone(),
+                        branch: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -437,6 +438,7 @@ async fn main() -> Result<()> {
                         name: ralph_name.clone(),
                         task_file: task_filename.clone(),
                         state_file: state_filename.clone(),
+                        branch: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }

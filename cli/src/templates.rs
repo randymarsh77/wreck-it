@@ -220,6 +220,7 @@ mod tests {
                 name: "docs".to_string(),
                 task_file: "custom-docs.json".to_string(),
                 state_file: ".custom-docs-state.json".to_string(),
+                branch: None,
             }],
             ..RepoConfig::default()
         };
