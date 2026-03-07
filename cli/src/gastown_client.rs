@@ -250,6 +250,8 @@ mod tests {
             depends_on: depends_on.into_iter().map(String::from).collect(),
             priority: 0,
             complexity: 1,
+            timeout_seconds: None,
+            max_retries: None,
             failed_attempts: 0,
             last_attempt_at: None,
             inputs: vec![],

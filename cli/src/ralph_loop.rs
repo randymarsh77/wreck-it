@@ -267,11 +267,29 @@ impl RalphLoop {
         let task = self.state.tasks[task_idx].clone();
         let reflection_rounds = self.config.reflection_rounds;
         let mut task_error = String::new();
-        match self
-            .agent
-            .execute_task_with_reflection(&task, reflection_rounds)
+
+        // Wrap execution in a per-task timeout when `timeout_seconds` is set.
+        let execution_result = if let Some(timeout_secs) = task.timeout_seconds {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(timeout_secs),
+                self.agent
+                    .execute_task_with_reflection(&task, reflection_rounds),
+            )
             .await
-        {
+            {
+                Ok(result) => result,
+                Err(_) => Err(anyhow::anyhow!(
+                    "Task timed out after {} seconds",
+                    timeout_secs
+                )),
+            }
+        } else {
+            self.agent
+                .execute_task_with_reflection(&task, reflection_rounds)
+                .await
+        };
+
+        match execution_result {
             Ok(()) => {
                 self.state.add_log("Task completed".to_string());
                 self.state.tasks[task_idx].status = TaskStatus::Completed;
@@ -413,6 +431,27 @@ impl RalphLoop {
             self.state.consecutive_failures = 0;
         }
 
+        // Auto-retry: if the task is still Failed and has remaining retries,
+        // reset it to Pending so it is picked up again on the next iteration.
+        // The `failed_attempts` field acts as the retry counter – no extra
+        // state is needed.  With `max_retries = N` the task may run at most
+        // N + 1 times (one initial attempt plus up to N retries).
+        if self.state.tasks[task_idx].status == TaskStatus::Failed {
+            let failed = self.state.tasks[task_idx].failed_attempts;
+            if let Some(max_retries) = self.state.tasks[task_idx].max_retries {
+                if failed <= max_retries {
+                    self.state.add_log(format!(
+                        "Task failed (attempt {}/{}) – resetting to pending for retry",
+                        failed,
+                        max_retries + 1,
+                    ));
+                    self.state.tasks[task_idx].status = TaskStatus::Pending;
+                    save_tasks(&self.config.task_file, &self.state.tasks)
+                        .context("Failed to save tasks after retry reset")?;
+                }
+            }
+        }
+
         Ok(true)
     }
 
@@ -516,7 +555,23 @@ impl RalphLoop {
                     .to_string(),
             );
             let handle = tokio::spawn(async move {
-                let result = agent.execute_task(&task).await;
+                // Wrap execution in a per-task timeout when `timeout_seconds` is set.
+                let result = if let Some(timeout_secs) = task.timeout_seconds {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(timeout_secs),
+                        agent.execute_task(&task),
+                    )
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(_) => Err(anyhow::anyhow!(
+                            "Task timed out after {} seconds",
+                            timeout_secs
+                        )),
+                    }
+                } else {
+                    agent.execute_task(&task).await
+                };
                 (idx, task, ts, result)
             });
             handles.push(handle);
@@ -617,6 +672,30 @@ impl RalphLoop {
 
         save_tasks(&self.config.task_file, &self.state.tasks).context("Failed to save tasks")?;
 
+        // Auto-retry failed tasks in this batch that still have remaining retries.
+        let mut retried = false;
+        for &idx in &eligible_indices {
+            if self.state.tasks[idx].status == TaskStatus::Failed {
+                let failed = self.state.tasks[idx].failed_attempts;
+                if let Some(max_retries) = self.state.tasks[idx].max_retries {
+                    if failed <= max_retries {
+                        self.state.add_log(format!(
+                            "Task [{}] failed (attempt {}/{}) – resetting to pending for retry",
+                            self.state.tasks[idx].id,
+                            failed,
+                            max_retries + 1,
+                        ));
+                        self.state.tasks[idx].status = TaskStatus::Pending;
+                        retried = true;
+                    }
+                }
+            }
+        }
+        if retried {
+            save_tasks(&self.config.task_file, &self.state.tasks)
+                .context("Failed to save tasks after retry reset")?;
+        }
+
         // Notify webhooks with the final task statuses after evaluation.
         for &idx in &eligible_indices {
             let t = &self.state.tasks[idx];
@@ -703,6 +782,8 @@ mod tests {
             depends_on: depends_on.into_iter().map(String::from).collect(),
             priority,
             complexity,
+            timeout_seconds: None,
+            max_retries: None,
             failed_attempts,
             last_attempt_at: None,
             inputs: vec![],
@@ -815,6 +896,8 @@ mod tests {
                 depends_on: vec![],
                 priority: 0,
                 complexity: 1,
+                timeout_seconds: None,
+                max_retries: None,
                 failed_attempts: 0,
                 last_attempt_at: Some(recent_ts),
                 inputs: vec![],
@@ -835,6 +918,8 @@ mod tests {
                 depends_on: vec![],
                 priority: 0,
                 complexity: 1,
+                timeout_seconds: None,
+                max_retries: None,
                 failed_attempts: 0,
                 last_attempt_at: Some(old_ts),
                 inputs: vec![],
@@ -873,6 +958,8 @@ mod tests {
                 depends_on: vec![],
                 priority: 0,
                 complexity: 1,
+                timeout_seconds: None,
+                max_retries: None,
                 failed_attempts: 0,
                 last_attempt_at: Some(old_ts),
                 inputs: vec![],
@@ -900,5 +987,64 @@ mod tests {
             make_task("b", TaskStatus::Failed, 0, 1, 3, vec![]),
         ];
         assert!(TaskScheduler::schedule(&tasks).is_empty());
+    }
+
+    // ---- timeout_seconds / max_retries field tests ----
+
+    #[test]
+    fn task_timeout_seconds_defaults_to_none() {
+        let t = make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert!(t.timeout_seconds.is_none());
+    }
+
+    #[test]
+    fn task_max_retries_defaults_to_none() {
+        let t = make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert!(t.max_retries.is_none());
+    }
+
+    #[test]
+    fn task_timeout_and_retries_roundtrip_via_serde() {
+        let mut t = make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]);
+        t.timeout_seconds = Some(30);
+        t.max_retries = Some(3);
+
+        let json = serde_json::to_string(&t).expect("serialise");
+        let back: Task = serde_json::from_str(&json).expect("deserialise");
+        assert_eq!(back.timeout_seconds, Some(30));
+        assert_eq!(back.max_retries, Some(3));
+    }
+
+    /// When `max_retries` is absent the fields are omitted from the serialised
+    /// JSON (skip_serializing_if = "Option::is_none").
+    #[test]
+    fn task_absent_timeout_and_retries_omitted_from_json() {
+        let t = make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]);
+        let json = serde_json::to_string(&t).expect("serialise");
+        assert!(!json.contains("timeout_seconds"), "unexpected key in {json}");
+        assert!(!json.contains("max_retries"), "unexpected key in {json}");
+    }
+
+    /// Verify the retry guard logic: a failed task with `failed_attempts <= max_retries`
+    /// should be considered retriable; once `failed_attempts > max_retries` it is not.
+    #[test]
+    fn retry_guard_logic() {
+        let mut t = make_task("a", TaskStatus::Failed, 0, 1, 0, vec![]);
+        t.max_retries = Some(2);
+
+        // Simulate first failure: failed_attempts = 1, max_retries = 2 → retry
+        t.failed_attempts = 1;
+        let should_retry = t.max_retries.is_some_and(|m| t.failed_attempts <= m);
+        assert!(should_retry, "attempt 1 of 3 should trigger retry");
+
+        // Simulate second failure: failed_attempts = 2, max_retries = 2 → retry
+        t.failed_attempts = 2;
+        let should_retry = t.max_retries.is_some_and(|m| t.failed_attempts <= m);
+        assert!(should_retry, "attempt 2 of 3 should trigger retry");
+
+        // Simulate third failure: failed_attempts = 3, max_retries = 2 → no retry
+        t.failed_attempts = 3;
+        let should_retry = t.max_retries.is_some_and(|m| t.failed_attempts <= m);
+        assert!(!should_retry, "attempt 3 of 3 should NOT trigger retry");
     }
 }
