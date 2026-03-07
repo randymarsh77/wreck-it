@@ -317,4 +317,77 @@ mod tests {
         assert_eq!(dot_escape("a\"b"), "a\\\"b");
         assert_eq!(dot_escape("a\\b"), "a\\\\b");
     }
+
+    // ---- 3-task chain (A → B → C) ----
+
+    #[test]
+    fn mermaid_three_task_chain_has_flowchart_header_and_arrows() {
+        let tasks = vec![
+            make_task("a", TaskStatus::Pending, AgentRole::Implementer, vec![]),
+            make_task("b", TaskStatus::Pending, AgentRole::Implementer, vec!["a"]),
+            make_task("c", TaskStatus::Pending, AgentRole::Implementer, vec!["b"]),
+        ];
+        let out = generate_mermaid(&tasks);
+        // Correct flowchart header
+        assert!(out.starts_with("flowchart TD\n"), "flowchart header missing");
+        // Arrow from A to B
+        assert!(out.contains("a --> b"), "edge 'a --> b' missing from:\n{out}");
+        // Arrow from B to C
+        assert!(out.contains("b --> c"), "edge 'b --> c' missing from:\n{out}");
+        // All three nodes declared
+        assert!(out.contains("a["), "node 'a' missing");
+        assert!(out.contains("b["), "node 'b' missing");
+        assert!(out.contains("c["), "node 'c' missing");
+    }
+
+    #[test]
+    fn dot_three_task_chain_has_digraph_header_nodes_and_edges() {
+        let tasks = vec![
+            make_task("a", TaskStatus::Pending, AgentRole::Implementer, vec![]),
+            make_task("b", TaskStatus::Pending, AgentRole::Implementer, vec!["a"]),
+            make_task("c", TaskStatus::Pending, AgentRole::Implementer, vec!["b"]),
+        ];
+        let out = generate_dot(&tasks);
+        // Digraph header
+        assert!(out.starts_with("digraph tasks {"), "digraph header missing");
+        // Closing brace
+        assert!(out.trim_end().ends_with('}'), "closing brace missing");
+        // Node definitions
+        assert!(out.contains("\"a\""), "node 'a' missing");
+        assert!(out.contains("\"b\""), "node 'b' missing");
+        assert!(out.contains("\"c\""), "node 'c' missing");
+        // Edge declarations
+        assert!(out.contains("\"a\" -> \"b\""), "edge a->b missing from:\n{out}");
+        assert!(out.contains("\"b\" -> \"c\""), "edge b->c missing from:\n{out}");
+    }
+
+    // ---- isolated nodes (no dependencies) ----
+
+    #[test]
+    fn mermaid_isolated_nodes_have_no_edges() {
+        let tasks = vec![
+            make_task("x", TaskStatus::Pending, AgentRole::Implementer, vec![]),
+            make_task("y", TaskStatus::Pending, AgentRole::Implementer, vec![]),
+        ];
+        let out = generate_mermaid(&tasks);
+        // Both nodes declared
+        assert!(out.contains("x["), "node 'x' missing");
+        assert!(out.contains("y["), "node 'y' missing");
+        // No arrow/edge between them
+        assert!(!out.contains("-->"), "unexpected edges in isolated-node graph:\n{out}");
+    }
+
+    #[test]
+    fn dot_isolated_nodes_have_no_edges() {
+        let tasks = vec![
+            make_task("x", TaskStatus::Pending, AgentRole::Implementer, vec![]),
+            make_task("y", TaskStatus::Pending, AgentRole::Implementer, vec![]),
+        ];
+        let out = generate_dot(&tasks);
+        // Both node declarations present
+        assert!(out.contains("\"x\""), "node 'x' missing");
+        assert!(out.contains("\"y\""), "node 'y' missing");
+        // No directed edges (edge syntax is `"x" -> "y"`)
+        assert!(!out.contains("\" -> \""), "unexpected edges in isolated-node graph:\n{out}");
+    }
 }
