@@ -74,6 +74,9 @@ async fn main() -> Result<()> {
             reflection_rounds,
             replan_threshold,
             notify_webhooks,
+            github_issues,
+            github_repo,
+            github_token,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -189,6 +192,16 @@ async fn main() -> Result<()> {
                     .or_else(|| env::var("GITHUB_TOKEN").ok());
 
                 config.notify_webhooks.extend(notify_webhooks.iter().cloned());
+
+                if github_issues {
+                    config.github_issues_enabled = true;
+                }
+                if let Some(repo) = &github_repo {
+                    config.github_repo = Some(repo.clone());
+                }
+                if let Some(token) = &github_token {
+                    config.github_token = Some(token.clone());
+                }
 
                 config
             };
