@@ -179,12 +179,16 @@ mod tests {
                     task_file: "docs-tasks.json".to_string(),
                     state_file: ".docs-state.json".to_string(),
                     branch: None,
+                    agent: None,
+                    reviewers: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
                     task_file: "coverage-tasks.json".to_string(),
                     state_file: ".coverage-state.json".to_string(),
                     branch: None,
+                    agent: None,
+                    reviewers: None,
                 },
             ],
         };
@@ -228,12 +232,16 @@ name = "docs"
                     task_file: "docs-tasks.json".to_string(),
                     state_file: ".docs-state.json".to_string(),
                     branch: None,
+                    agent: None,
+                    reviewers: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
                     task_file: "coverage-tasks.json".to_string(),
                     state_file: ".coverage-state.json".to_string(),
                     branch: None,
+                    agent: None,
+                    reviewers: None,
                 },
             ],
             ..RepoConfig::default()
@@ -259,6 +267,8 @@ name = "docs"
                 task_file: "docs-tasks.json".to_string(),
                 state_file: ".docs-state.json".to_string(),
                 branch: None,
+                agent: None,
+                reviewers: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -291,6 +301,8 @@ state_file = ".docs-state.json"
                 task_file: "feature-tasks.json".to_string(),
                 state_file: ".feature-state.json".to_string(),
                 branch: Some("feature/my-branch".to_string()),
+                agent: None,
+                reviewers: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -312,6 +324,8 @@ state_file = ".docs-state.json"
                 task_file: "docs-tasks.json".to_string(),
                 state_file: ".docs-state.json".to_string(),
                 branch: None,
+                agent: None,
+                reviewers: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();

@@ -145,7 +145,9 @@ mod tests {
                 pr_number: 20,
                 task_id: "t1".into(),
                 issue_number: Some(10),
+                review_requested: None,
             }],
+            review_requested: None,
         };
         let json = serde_json::to_string_pretty(&state).unwrap();
         let loaded: HeadlessState = serde_json::from_str(&json).unwrap();

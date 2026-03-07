@@ -59,7 +59,9 @@ mod tests {
                 pr_number: 42,
                 task_id: "task-1".to_string(),
                 issue_number: Some(99),
+                review_requested: None,
             }],
+            review_requested: None,
         };
 
         save_headless_state(&state_file, &state).unwrap();
@@ -114,6 +116,7 @@ mod tests {
             pr_number: 99,
             task_id: "impl-3".to_string(),
             issue_number: Some(42),
+            review_requested: None,
         };
         let json = serde_json::to_string(&pr).unwrap();
         let loaded: TrackedPr = serde_json::from_str(&json).unwrap();
@@ -137,6 +140,7 @@ mod tests {
             pr_number: 5,
             task_id: "eval-1".to_string(),
             issue_number: None,
+            review_requested: None,
         };
         let json = serde_json::to_string(&pr).unwrap();
         assert!(!json.contains("issue_number"));
@@ -148,6 +152,7 @@ mod tests {
             pr_number: 50,
             task_id: "ideas-2".to_string(),
             issue_number: Some(100),
+            review_requested: None,
         };
         let json = serde_json::to_string(&pr).unwrap();
         assert!(json.contains("\"issue_number\":100"));
