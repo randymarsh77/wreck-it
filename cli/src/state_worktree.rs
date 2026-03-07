@@ -159,8 +159,22 @@ pub fn ensure_feature_branch(repo_root: &Path, branch: &str) -> Result<()> {
 
     let default_remote_ref = format!("origin/{}", default_branch);
     let base_sha = git_cmd(repo_root, &["rev-parse", "--verify", &default_remote_ref])
-        .or_else(|_| git_cmd(repo_root, &["rev-parse", "--verify", &format!("refs/heads/{}", default_branch)]))
-        .with_context(|| format!("Could not resolve default branch '{}' to create '{}'", default_branch, branch))?;
+        .or_else(|_| {
+            git_cmd(
+                repo_root,
+                &[
+                    "rev-parse",
+                    "--verify",
+                    &format!("refs/heads/{}", default_branch),
+                ],
+            )
+        })
+        .with_context(|| {
+            format!(
+                "Could not resolve default branch '{}' to create '{}'",
+                default_branch, branch
+            )
+        })?;
 
     // Create the local branch ref pointing at the base SHA.
     let local_ref = format!("refs/heads/{}", branch);
@@ -459,7 +473,16 @@ mod tests {
             .current_dir(remote_dir.path())
             .output()
             .unwrap();
-        git_cmd(dir.path(), &["remote", "add", "origin", remote_dir.path().to_str().unwrap()]).unwrap();
+        git_cmd(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().unwrap(),
+            ],
+        )
+        .unwrap();
         git_cmd(dir.path(), &["fetch", "origin"]).unwrap();
 
         // Should detect the default branch (usually 'master' in test repos).
@@ -478,7 +501,16 @@ mod tests {
             .current_dir(remote_dir.path())
             .output()
             .unwrap();
-        git_cmd(dir.path(), &["remote", "add", "origin", remote_dir.path().to_str().unwrap()]).unwrap();
+        git_cmd(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().unwrap(),
+            ],
+        )
+        .unwrap();
         git_cmd(dir.path(), &["fetch", "origin"]).unwrap();
 
         // Branch should not exist yet.
@@ -504,7 +536,16 @@ mod tests {
             .current_dir(remote_dir.path())
             .output()
             .unwrap();
-        git_cmd(dir.path(), &["remote", "add", "origin", remote_dir.path().to_str().unwrap()]).unwrap();
+        git_cmd(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                remote_dir.path().to_str().unwrap(),
+            ],
+        )
+        .unwrap();
         git_cmd(dir.path(), &["fetch", "origin"]).unwrap();
 
         // Create the branch.

@@ -2149,7 +2149,12 @@ mod tests {
 
     #[test]
     fn build_issue_body_with_branch() {
-        let body = build_issue_body("task-1", "Implement feature X", &[], Some("feature/my-branch"));
+        let body = build_issue_body(
+            "task-1",
+            "Implement feature X",
+            &[],
+            Some("feature/my-branch"),
+        );
         assert!(body.contains("Implement feature X"));
         assert!(body.contains("## Branch"));
         assert!(body.contains("Base your work on the `feature/my-branch` branch"));
