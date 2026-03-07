@@ -27,6 +27,7 @@ mod headless_config;
 mod headless_state;
 #[cfg(test)]
 mod integration_eval;
+mod notifier;
 mod openclaw;
 mod plan_migration;
 mod plan_wizard;

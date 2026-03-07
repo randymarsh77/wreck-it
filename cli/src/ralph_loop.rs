@@ -1,5 +1,6 @@
 use crate::agent::AgentClient;
 use crate::artefact_store;
+use crate::notifier;
 use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
@@ -248,8 +249,18 @@ impl RalphLoop {
         let invocation_timestamp = provenance::now_timestamp();
         self.state.tasks[task_idx].last_attempt_at = Some(invocation_timestamp);
 
+        let task_id = self.state.tasks[task_idx].id.clone();
         let task_desc = self.state.tasks[task_idx].description.clone();
         self.state.add_log(format!("Starting task: {}", task_desc));
+
+        notifier::notify(
+            &self.config.notify_webhooks,
+            &task_id,
+            TaskStatus::InProgress,
+            invocation_timestamp,
+            &task_desc,
+        )
+        .await;
 
         // Execute the task with reflection rounds; capture any error text for
         // potential use by the re-planner.
@@ -350,6 +361,18 @@ impl RalphLoop {
 
         // Save task state to filesystem
         save_tasks(&self.config.task_file, &self.state.tasks).context("Failed to save tasks")?;
+
+        // Notify webhooks with the final task status.
+        let final_status = self.state.tasks[task_idx].status;
+        let notify_ts = provenance::now_timestamp();
+        notifier::notify(
+            &self.config.notify_webhooks,
+            &task_id,
+            final_status,
+            notify_ts,
+            &task_desc,
+        )
+        .await;
 
         // Update consecutive failure counter and optionally invoke re-planner.
         if self.state.tasks[task_idx].status == TaskStatus::Failed {
@@ -461,6 +484,19 @@ impl RalphLoop {
             self.state.tasks[idx].status = TaskStatus::InProgress;
             self.state.tasks[idx].last_attempt_at = Some(ts);
             task_data.push((idx, self.state.tasks[idx].clone(), ts));
+        }
+
+        // Notify webhooks that tasks are now in progress.
+        for &idx in &eligible_indices {
+            let t = &self.state.tasks[idx];
+            notifier::notify(
+                &self.config.notify_webhooks,
+                &t.id,
+                TaskStatus::InProgress,
+                provenance::now_timestamp(),
+                &t.description,
+            )
+            .await;
         }
 
         // Spawn concurrent agent work (include per-task timestamp for provenance).
@@ -580,6 +616,22 @@ impl RalphLoop {
         }
 
         save_tasks(&self.config.task_file, &self.state.tasks).context("Failed to save tasks")?;
+
+        // Notify webhooks with the final task statuses after evaluation.
+        for &idx in &eligible_indices {
+            let t = &self.state.tasks[idx];
+            if t.status == TaskStatus::Completed || t.status == TaskStatus::Failed {
+                notifier::notify(
+                    &self.config.notify_webhooks,
+                    &t.id,
+                    t.status,
+                    provenance::now_timestamp(),
+                    &t.description,
+                )
+                .await;
+            }
+        }
+
         Ok(true)
     }
 

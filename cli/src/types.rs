@@ -122,6 +122,11 @@ pub struct Config {
     /// the `GITHUB_TOKEN` environment variable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
+
+    /// List of URLs to notify via HTTP POST when a task changes status.
+    /// Failures are logged as warnings and do not abort the loop.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notify_webhooks: Vec<String>,
 }
 
 fn default_max_iterations() -> usize {
@@ -174,6 +179,7 @@ impl Default for Config {
             gastown_endpoint: None,
             gastown_token: None,
             github_token: None,
+            notify_webhooks: Vec::new(),
         }
     }
 }

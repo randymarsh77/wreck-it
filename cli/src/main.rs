@@ -11,6 +11,7 @@ mod headless_config;
 mod headless_state;
 #[cfg(test)]
 mod integration_eval;
+mod notifier;
 mod openclaw;
 mod plan_migration;
 mod plan_wizard;
@@ -70,6 +71,7 @@ async fn main() -> Result<()> {
             goal,
             reflection_rounds,
             replan_threshold,
+            notify_webhooks,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -183,6 +185,8 @@ async fn main() -> Result<()> {
                     .or(config.api_token)
                     .or_else(|| env::var("COPILOT_API_TOKEN").ok())
                     .or_else(|| env::var("GITHUB_TOKEN").ok());
+
+                config.notify_webhooks.extend(notify_webhooks.iter().cloned());
 
                 config
             };
