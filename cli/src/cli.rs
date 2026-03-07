@@ -175,6 +175,15 @@ pub enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+
+    /// Install wreck-it into a project: creates .wreck-it config directory
+    /// with the engineering-team template and adds ralph.yml and plan.yml
+    /// GitHub Actions workflows.
+    Install {
+        /// Target directory to install into (default: current directory)
+        #[arg(short, long)]
+        work_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]

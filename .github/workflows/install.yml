@@ -1,0 +1,75 @@
+# Install wreck-it into another repository via a pull request.
+#
+# This workflow checks out the target repository, runs the wreck-it install
+# command to scaffold the .wreck-it config directory and workflows, then
+# opens a pull request with the changes.
+#
+# Required secrets:
+#   PAT_TOKEN – Personal Access Token with repo scope on the target repository.
+name: Install Wreckit
+
+on:
+  workflow_dispatch:
+    inputs:
+      owner:
+        description: 'Target repository owner (e.g. "octocat")'
+        required: true
+        type: string
+      repo:
+        description: 'Target repository name (e.g. "hello-world")'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout wreck-it
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build wreck-it
+        run: cargo build --release
+
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.owner }}/${{ inputs.repo }}
+          token: ${{ secrets.PAT_TOKEN }}
+          path: target-repo
+
+      - name: Run install
+        run: ./target/release/wreck-it install --work-dir target-repo
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          path: target-repo
+          branch: wreck-it/install
+          title: 'Install Wreckit'
+          body: |
+            This PR installs [wreck-it](https://github.com/randymarsh77/wreck-it) into this repository.
+
+            ## What's included
+
+            - `.wreck-it/config.toml` — Engineering-team template with four ralph contexts (docs, features, planner, feature-dev)
+            - `.wreck-it/plans/` — Directory for generated task plans
+            - `.github/workflows/ralph.yml` — Scheduled workflow that runs the wreck-it agent loop
+            - `.github/workflows/plan.yml` — Dispatch workflow for generating task plans
+
+            ## Next steps
+
+            1. Merge this PR
+            2. Add a `PAT_TOKEN` repository secret with a Personal Access Token that has `repo` and `models:read` scopes
+            3. Enable the Ralph workflow (or trigger it manually)
+          commit-message: 'Install wreck-it'
+          delete-branch: true

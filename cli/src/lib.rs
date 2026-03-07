@@ -25,6 +25,7 @@ mod github_auth;
 mod headless;
 mod headless_config;
 mod headless_state;
+mod install;
 #[cfg(test)]
 mod integration_eval;
 mod notifier;
