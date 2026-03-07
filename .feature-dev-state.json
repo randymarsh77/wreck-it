@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 13,
-  "current_task_id": "ideas-github-issues-integration",
-  "issue_number": 159,
-  "last_prompt": "Research and design GitHub Issues integration for wreck-it. The feature should optionally create a GitHub Issue when a task starts (InProgress) and close it when the task completes or fails. Review the existing CLI config (cli/src/types.rs Config struct), the project_api.rs and agent_memory.rs files, and the GitHub REST API for issue creation/closure. Design: (1) new Config fields `github_issues_enabled: bool`, `github_repo: Option<String>` (owner/repo), `github_token: Option<String>` (falls back to GITHUB_TOKEN env var), (2) a minimal GitHub API client in cli/src/github_client.rs using reqwest, (3) the label strategy (add a `wreck-it` label, use task id as issue title prefix). Document the design.",
+  "iteration": 14,
+  "current_task_id": "impl-github-issues-integration",
+  "issue_number": 161,
+  "last_prompt": "Implement GitHub Issues integration. Create cli/src/github_client.rs with async functions `create_issue(token, repo, title, body) -> Result<u64>` and `close_issue(token, repo, issue_number) -> Result<()>` using reqwest and the GitHub REST API (POST /repos/{owner}/{repo}/issues, PATCH to close). Add Config fields `github_issues_enabled`, `github_repo`, `github_token`. Add CLI flags `--github-issues`, `--github-repo <owner/repo>`, `--github-token <TOKEN>`. Wire into ralph_loop.rs: call create_issue when a task moves to InProgress (store issue number in task metadata or a side-channel map), call close_issue with the appropriate state when it reaches Completed or Failed. Failures should log warnings but not abort the loop.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -52,6 +52,10 @@
     "iteration 12: agent created PR #158 for task Some(\"eval-task-graph-export\")",
     "iteration 12: marked PR #158 as ready for review",
     "iteration 12: merged PR #158 for task Some(\"eval-task-graph-export\")",
-    "iteration 13: triggered cloud agent for task ideas-github-issues-integration (issue #159)"
+    "iteration 13: triggered cloud agent for task ideas-github-issues-integration (issue #159)",
+    "iteration 13: agent created PR #160 for task Some(\"ideas-github-issues-integration\")",
+    "iteration 13: marked PR #160 as ready for review",
+    "iteration 13: merged PR #160 for task Some(\"ideas-github-issues-integration\")",
+    "iteration 14: triggered cloud agent for task impl-github-issues-integration (issue #161)"
   ]
 }
