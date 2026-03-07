@@ -179,6 +179,9 @@ pub struct AgentClient {
     evaluation_mode: EvaluationMode,
     completeness_prompt: Option<String>,
     completion_marker_file: String,
+    /// Maximum number of autonomous continuation steps for autopilot mode.
+    /// `None` means unlimited.  Maps to `--max-autopilot-continues`.
+    max_autopilot_continues: Option<u32>,
 }
 
 impl AgentClient {
@@ -202,6 +205,7 @@ impl AgentClient {
             evaluation_mode: EvaluationMode::default(),
             completeness_prompt: None,
             completion_marker_file: crate::types::DEFAULT_COMPLETION_MARKER.to_string(),
+            max_autopilot_continues: None,
         }
     }
 
@@ -217,6 +221,33 @@ impl AgentClient {
         completeness_prompt: Option<String>,
         completion_marker_file: String,
     ) -> Self {
+        Self::with_evaluation_and_autopilot(
+            model_provider,
+            api_endpoint,
+            api_token,
+            work_dir,
+            verification_command,
+            evaluation_mode,
+            completeness_prompt,
+            completion_marker_file,
+            None,
+        )
+    }
+
+    /// Create a new client with full configuration including evaluation and
+    /// autopilot settings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_evaluation_and_autopilot(
+        model_provider: ModelProvider,
+        api_endpoint: String,
+        api_token: Option<String>,
+        work_dir: String,
+        verification_command: Option<String>,
+        evaluation_mode: EvaluationMode,
+        completeness_prompt: Option<String>,
+        completion_marker_file: String,
+        max_autopilot_continues: Option<u32>,
+    ) -> Self {
         Self {
             copilot_client: None,
             cli_path: resolve_copilot_cli_path(),
@@ -228,6 +259,7 @@ impl AgentClient {
             evaluation_mode,
             completeness_prompt,
             completion_marker_file,
+            max_autopilot_continues,
         }
     }
 
@@ -330,6 +362,11 @@ impl AgentClient {
         // Use direct HTTP for GithubModels provider
         if self.model_provider == ModelProvider::GithubModels {
             return self.execute_task_via_http(task).await;
+        }
+
+        // Use Copilot CLI autopilot subprocess for CopilotAutopilot provider
+        if self.model_provider == ModelProvider::CopilotAutopilot {
+            return self.execute_task_via_autopilot(task).await;
         }
 
         // Get or create the Copilot client
@@ -456,6 +493,109 @@ impl AgentClient {
             .ok();
 
         response
+    }
+
+    /// Execute a task by invoking Copilot CLI in autopilot mode as a subprocess.
+    ///
+    /// This spawns `copilot --autopilot --yolo -p "<prompt>"` which gives the
+    /// Copilot CLI full autonomy to read/write files, run shell commands, and
+    /// iterate through multi-step plans without per-tool approval prompts.
+    async fn execute_task_via_autopilot(&self, task: &Task) -> Result<String> {
+        // Prefer the path cached at construction time; fall back to a fresh
+        // PATH lookup; bail if neither succeeds.
+        let resolved = self
+            .cli_path
+            .clone()
+            .or_else(resolve_copilot_cli_path)
+            .context(
+                "Could not find the 'copilot' binary on PATH. \
+                 Install GitHub Copilot CLI (https://gh.io/copilot-install) \
+                 or ensure it is available in your shell environment.",
+            )?;
+
+        let context = self.read_codebase_context()?;
+        let memory = AgentMemory::new(&self.work_dir);
+        let prior_context = memory.load_context(&task.id).unwrap_or_default();
+        let memory_section = if prior_context.is_empty() {
+            String::new()
+        } else {
+            format!("\nPrior attempts for this task:\n{}\n", prior_context)
+        };
+        let artefact_section = self.build_artefact_context(task);
+        let iteration = memory.attempt_count(&task.id) + 1;
+
+        let prompt = format!(
+            "You are an AI coding agent working on a task in a git repository.\n\
+             Working directory: {work_dir}\n\n\
+             Task: {desc}\n\n\
+             Context:\n{ctx}\n{mem}{art}\
+             Please implement the necessary code changes to complete this task. \
+             Be specific and provide complete, working code.",
+            work_dir = self.work_dir,
+            desc = task.description,
+            ctx = context,
+            mem = memory_section,
+            art = artefact_section,
+        );
+
+        let mut args: Vec<String> = vec![
+            "--autopilot".to_string(),
+            "--yolo".to_string(),
+            "-p".to_string(),
+            prompt.clone(),
+            "--silent".to_string(),
+        ];
+
+        if let Some(max_continues) = self.max_autopilot_continues {
+            args.push("--max-autopilot-continues".to_string());
+            args.push(max_continues.to_string());
+        }
+
+        tracing::info!(
+            "Launching Copilot CLI autopilot (binary={}, max_continues={:?})",
+            resolved,
+            self.max_autopilot_continues,
+        );
+
+        let output = tokio::process::Command::new(&resolved)
+            .args(&args)
+            .current_dir(&self.work_dir)
+            .output()
+            .await
+            .context("Failed to launch Copilot CLI in autopilot mode")?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        if !output.status.success() {
+            let summary = format!(
+                "Copilot autopilot exited with status {:?}\nstdout:\n{}\nstderr:\n{}",
+                output.status.code(),
+                stdout,
+                stderr
+            );
+            memory
+                .record_attempt(&task.id, iteration, "Failure", &summary)
+                .ok();
+            bail!(
+                "Copilot CLI autopilot failed (exit {}): {}",
+                output.status.code().unwrap_or(-1),
+                stderr.lines().last().unwrap_or(&stderr)
+            );
+        }
+
+        let summary = if stdout.is_empty() {
+            "Copilot autopilot completed (no output)".to_string()
+        } else {
+            stdout.clone()
+        };
+
+        memory
+            .record_attempt(&task.id, iteration, "Success", &summary)
+            .ok();
+
+        tracing::info!("Copilot autopilot completed successfully");
+        Ok(summary)
     }
 
     /// Evaluate task completeness via direct HTTP to the GitHub Models API.
@@ -680,8 +820,10 @@ impl AgentClient {
     pub async fn evaluate_completeness(&mut self, task: &Task) -> Result<bool> {
         self.validate_work_dir()?;
 
-        // Use direct HTTP for GithubModels provider
-        if self.model_provider == ModelProvider::GithubModels {
+        // Use direct HTTP for GithubModels and CopilotAutopilot providers
+        if self.model_provider == ModelProvider::GithubModels
+            || self.model_provider == ModelProvider::CopilotAutopilot
+        {
             return self.evaluate_completeness_via_http(task).await;
         }
 
@@ -782,8 +924,10 @@ impl AgentClient {
 
         self.validate_work_dir()?;
 
-        // Use direct HTTP for GithubModels provider
-        if self.model_provider == ModelProvider::GithubModels {
+        // Use direct HTTP for GithubModels and CopilotAutopilot providers
+        if self.model_provider == ModelProvider::GithubModels
+            || self.model_provider == ModelProvider::CopilotAutopilot
+        {
             return self.evaluate_precondition_via_http(task, &prompt).await;
         }
 
@@ -973,7 +1117,9 @@ impl AgentClient {
             diff = diff,
         );
 
-        let response = if self.model_provider == ModelProvider::GithubModels {
+        let response = if self.model_provider == ModelProvider::GithubModels
+            || self.model_provider == ModelProvider::CopilotAutopilot
+        {
             self.chat_via_http(&prompt).await?
         } else {
             self.critique_via_copilot(&prompt).await?
@@ -1534,5 +1680,93 @@ mod tests {
         // (Err), which is expected in a unit test environment.
         let result = client.evaluate_precondition(&task).await;
         assert!(result.is_err() || !result.unwrap());
+    }
+
+    // ---- CopilotAutopilot tests ----
+
+    #[test]
+    fn copilot_autopilot_provider_creates_client() {
+        let client = AgentClient::with_evaluation(
+            ModelProvider::CopilotAutopilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            ".".to_string(),
+            None,
+            EvaluationMode::Command,
+            None,
+            ".task-complete".to_string(),
+        );
+        // CopilotAutopilot does not initialise the SDK client
+        assert!(client.copilot_client.is_none());
+        assert_eq!(client.model_provider, ModelProvider::CopilotAutopilot);
+        assert!(client.max_autopilot_continues.is_none());
+    }
+
+    #[test]
+    fn copilot_autopilot_with_max_continues() {
+        let client = AgentClient::with_evaluation_and_autopilot(
+            ModelProvider::CopilotAutopilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            ".".to_string(),
+            None,
+            EvaluationMode::Command,
+            None,
+            ".task-complete".to_string(),
+            Some(10),
+        );
+        assert_eq!(client.model_provider, ModelProvider::CopilotAutopilot);
+        assert_eq!(client.max_autopilot_continues, Some(10));
+    }
+
+    #[tokio::test]
+    async fn copilot_autopilot_execute_task_fails_when_binary_missing() {
+        let dir = tempdir().unwrap();
+        init_git_repo(dir.path());
+        // Point the CLI path to a non-existent binary so the subprocess launch
+        // fails immediately.
+        let mut client = AgentClient::with_evaluation_and_autopilot(
+            ModelProvider::CopilotAutopilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            dir.path().to_string_lossy().to_string(),
+            None,
+            EvaluationMode::Command,
+            None,
+            ".task-complete".to_string(),
+            Some(5),
+        );
+        // Force an invalid cli_path so the subprocess cannot start.
+        client.cli_path = Some("/nonexistent/copilot".to_string());
+
+        let task = Task {
+            id: "autopilot-1".to_string(),
+            description: "test autopilot fallback".to_string(),
+            status: crate::types::TaskStatus::Pending,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
+        };
+
+        let result = client.execute_task(&task).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("autopilot") || err_msg.contains("No such file"),
+            "Expected autopilot-related error, got: {}",
+            err_msg
+        );
     }
 }

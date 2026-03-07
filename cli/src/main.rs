@@ -70,6 +70,7 @@ async fn main() -> Result<()> {
             goal,
             reflection_rounds,
             replan_threshold,
+            max_autopilot_continues,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -167,6 +168,9 @@ async fn main() -> Result<()> {
                 }
                 if let Some(replan_threshold) = replan_threshold {
                     config.replan_threshold = replan_threshold;
+                }
+                if let Some(max_autopilot_continues) = max_autopilot_continues {
+                    config.max_autopilot_continues = Some(max_autopilot_continues);
                 }
                 if config.model_provider == ModelProvider::Llama
                     && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
