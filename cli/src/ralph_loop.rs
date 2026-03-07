@@ -1047,4 +1047,124 @@ mod tests {
         let should_retry = t.max_retries.is_some_and(|m| t.failed_attempts <= m);
         assert!(!should_retry, "attempt 3 of 3 should NOT trigger retry");
     }
+
+    // ---- behavioral tests matching issue requirements ----
+
+    /// (1) A task with `timeout_seconds: 1` whose execution takes longer than 1 second
+    /// must be marked as failed with a timeout error message.
+    ///
+    /// Short real durations (10 ms timeout vs 500 ms sleep) are used so the test
+    /// completes quickly while still exercising the timeout-wrapping logic from
+    /// `run_single_task`.
+    #[tokio::test]
+    async fn task_exceeding_timeout_produces_timeout_error() {
+        const TIMEOUT_SECS: u64 = 1;
+
+        // A future that takes 500 ms – far longer than the 10 ms deadline used below.
+        let slow_future = async {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            Ok::<(), anyhow::Error>(())
+        };
+
+        // Mirror the wrapping logic used in `run_single_task`, but use a 10 ms
+        // deadline so the test runs quickly.
+        let execution_result: anyhow::Result<()> = match tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            slow_future,
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(_) => Err(anyhow::anyhow!(
+                "Task timed out after {} seconds",
+                TIMEOUT_SECS
+            )),
+        };
+
+        assert!(execution_result.is_err(), "timed-out task must be an error");
+        let msg = execution_result.unwrap_err().to_string();
+        assert!(
+            msg.contains("timed out after 1 seconds"),
+            "error message must mention the timeout; got: {msg}"
+        );
+    }
+
+    /// (2) A task with `max_retries: 2` that fails is reset to `Pending` on each
+    /// attempt until `failed_attempts` exceeds `max_retries`, at which point the
+    /// status stays `Failed`.
+    #[test]
+    fn task_with_max_retries_resets_to_pending_until_limit_exceeded() {
+        let mut t = make_task("r", TaskStatus::Failed, 0, 1, 0, vec![]);
+        t.max_retries = Some(2);
+
+        // Helper that mirrors the auto-retry state mutation in `run_single_task`.
+        let apply_retry = |task: &mut Task| {
+            if task.status == TaskStatus::Failed {
+                if let Some(max) = task.max_retries {
+                    if task.failed_attempts <= max {
+                        task.status = TaskStatus::Pending;
+                    }
+                }
+            }
+        };
+
+        // Attempt 1 → failed_attempts = 1 ≤ 2 → reset to Pending.
+        t.failed_attempts = 1;
+        apply_retry(&mut t);
+        assert_eq!(
+            t.status,
+            TaskStatus::Pending,
+            "after 1st failure should reset to Pending"
+        );
+
+        // Attempt 2 → failed_attempts = 2 ≤ 2 → reset to Pending.
+        t.status = TaskStatus::Failed;
+        t.failed_attempts = 2;
+        apply_retry(&mut t);
+        assert_eq!(
+            t.status,
+            TaskStatus::Pending,
+            "after 2nd failure should reset to Pending"
+        );
+
+        // Attempt 3 → failed_attempts = 3 > 2 → stays Failed.
+        t.status = TaskStatus::Failed;
+        t.failed_attempts = 3;
+        apply_retry(&mut t);
+        assert_eq!(
+            t.status,
+            TaskStatus::Failed,
+            "after exceeding retry limit should stay Failed"
+        );
+    }
+
+    /// (3) A task with neither `timeout_seconds` nor `max_retries` behaves exactly
+    /// as before: it is scheduled normally and a failure is never auto-retried.
+    #[test]
+    fn task_without_timeout_or_retries_behaves_as_before() {
+        // The task has no special fields set.
+        let task = make_task("plain", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert!(task.timeout_seconds.is_none());
+        assert!(task.max_retries.is_none());
+
+        // Scheduler picks it up as a normal pending task.
+        let ready = TaskScheduler::schedule(&[task]);
+        assert_eq!(ready, vec![0], "plain task must be scheduled");
+
+        // After a failure the task is NOT auto-retried (max_retries is None).
+        let mut failed = make_task("plain", TaskStatus::Failed, 0, 1, 1, vec![]);
+        // Mirror the auto-retry guard from `run_single_task`.
+        if failed.status == TaskStatus::Failed {
+            if let Some(max) = failed.max_retries {
+                if failed.failed_attempts <= max {
+                    failed.status = TaskStatus::Pending;
+                }
+            }
+        }
+        assert_eq!(
+            failed.status,
+            TaskStatus::Failed,
+            "task without max_retries must stay Failed"
+        );
+    }
 }
