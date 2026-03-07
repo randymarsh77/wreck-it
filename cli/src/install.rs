@@ -34,7 +34,7 @@ pub fn install(target_dir: &Path) -> Result<InstallResult> {
     std::fs::create_dir_all(&config_dir).context("Failed to create .wreck-it directory")?;
 
     let tmpl = templates::find_template("engineering-team")
-        .expect("engineering-team template must exist");
+        .ok_or_else(|| anyhow::anyhow!("built-in engineering-team template not found"))?;
 
     let config_path = config_dir.join("config.toml");
     let mut repo_cfg = if config_path.exists() {

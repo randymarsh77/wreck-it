@@ -55,14 +55,14 @@ jobs:
 
       - name: Run plan
         run: |
-          ARGS="--goal \"$GOAL\""
+          set -- --goal "$GOAL"
           if [ -n "$RALPH" ]; then
-            ARGS="$ARGS --ralph $RALPH"
+            set -- "$@" --ralph "$RALPH"
           fi
           if [ "$CLOUD" = "true" ]; then
-            ARGS="$ARGS --cloud"
+            set -- "$@" --cloud
           fi
-          eval ./target/release/wreck-it plan $ARGS
+          ./target/release/wreck-it plan "$@"
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           GOAL: ${{ inputs.goal }}
