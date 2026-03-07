@@ -20,6 +20,20 @@ pub enum CloudAgentStatus {
     CompletedNoPr,
 }
 
+/// Review status of a pull request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewStatus {
+    /// Reviews are still pending (not all reviewers have submitted).
+    Pending,
+    /// All submitted reviews are approved (or dismissed).
+    Approved,
+    /// At least one reviewer has requested changes.
+    ChangesRequested {
+        /// Logins of reviewers who requested changes.
+        reviewers: Vec<String>,
+    },
+}
+
 /// Merge readiness of a pull request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrMergeStatus {
@@ -110,6 +124,9 @@ pub struct CloudAgentClient {
     /// via [`fetch_authenticated_login`].  When set, trust checks also accept
     /// issues/PRs created by this user (PAT flow).
     authenticated_login: Option<String>,
+    /// When set, this agent login is preferred over the default
+    /// [`KNOWN_AGENT_LOGINS`] list when assigning an agent to an issue.
+    preferred_agent: Option<String>,
 }
 
 /// Check whether any known coding agent appears in an issue's assignees array.
@@ -204,7 +221,16 @@ impl CloudAgentClient {
             repo_name,
             http: reqwest::Client::new(),
             authenticated_login: None,
+            preferred_agent: None,
         }
+    }
+
+    /// Set a preferred agent login for issue assignment.
+    ///
+    /// When set, [`get_agent_from_suggested_actors`] searches for this login
+    /// first before falling back to the default known agent list.
+    pub fn set_preferred_agent(&mut self, agent: Option<String>) {
+        self.preferred_agent = agent;
     }
 
     /// Fetch the login of the user authenticated by our token and cache it.
@@ -489,6 +515,27 @@ impl CloudAgentClient {
                 return None;
             }
         };
+
+        // When a preferred agent is configured, search for it first.
+        if let Some(ref preferred) = self.preferred_agent {
+            for node in nodes {
+                let node_login = node["login"].as_str().unwrap_or_default();
+                if node_login.eq_ignore_ascii_case(preferred) {
+                    if let Some(id) = node["id"].as_str() {
+                        tracing::info!(
+                            "Found preferred agent '{}' (id: {}) via suggestedActors",
+                            node_login,
+                            id,
+                        );
+                        return Some((id.to_string(), node_login.to_string()));
+                    }
+                }
+            }
+            tracing::warn!(
+                "Preferred agent '{}' not found in suggestedActors; falling back to default list",
+                preferred,
+            );
+        }
 
         // Search for the first known agent login in priority order.
         for &known_login in KNOWN_AGENT_LOGINS {
@@ -1695,6 +1742,296 @@ impl CloudAgentClient {
         Ok(())
     }
 
+    /// Fetch the GraphQL node ID of a GitHub user by their login.
+    async fn get_user_node_id(&self, login: &str) -> Option<String> {
+        let url = format!("{}/users/{}", GITHUB_API_BASE, login);
+        match self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v["node_id"].as_str().map(|s| s.to_string())),
+            Ok(resp) => {
+                tracing::warn!(
+                    "Failed to fetch user '{}' for node_id ({})",
+                    login,
+                    resp.status(),
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!("HTTP error fetching user '{}' for node_id: {}", login, e);
+                None
+            }
+        }
+    }
+
+    /// Fetch the GraphQL node ID for a pull request.
+    async fn get_pr_node_id(&self, pr_number: u64) -> Option<String> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+        match self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v["node_id"].as_str().map(|s| s.to_string())),
+            Ok(resp) => {
+                tracing::warn!(
+                    "Failed to fetch PR #{} for node_id ({})",
+                    pr_number,
+                    resp.status(),
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "HTTP error fetching PR #{} for node_id: {}",
+                    pr_number,
+                    e,
+                );
+                None
+            }
+        }
+    }
+
+    /// Request reviews on a pull request from the specified logins.
+    ///
+    /// Uses the GraphQL `requestReviews` mutation to assign reviewers.
+    /// Logins that cannot be resolved to node IDs are skipped with a warning.
+    pub async fn request_reviewers(
+        &self,
+        pr_number: u64,
+        reviewer_logins: &[String],
+    ) -> Result<()> {
+        if reviewer_logins.is_empty() {
+            return Ok(());
+        }
+
+        let pr_node_id = self
+            .get_pr_node_id(pr_number)
+            .await
+            .context("Could not resolve PR node_id for review request")?;
+
+        let mut user_ids: Vec<String> = Vec::new();
+        for login in reviewer_logins {
+            match self.get_user_node_id(login).await {
+                Some(id) => user_ids.push(id),
+                None => {
+                    tracing::warn!(
+                        "Could not resolve node_id for reviewer '{}'; skipping",
+                        login,
+                    );
+                }
+            }
+        }
+
+        if user_ids.is_empty() {
+            bail!(
+                "None of the configured reviewers ({:?}) could be resolved",
+                reviewer_logins,
+            );
+        }
+
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": r#"mutation($prId: ID!, $userIds: [ID!]!) {
+                requestReviews(input: {
+                    pullRequestId: $prId,
+                    userIds: $userIds
+                }) {
+                    pullRequest {
+                        reviewRequests(first: 20) {
+                            nodes {
+                                requestedReviewer {
+                                    ... on User { login }
+                                    ... on Bot { login }
+                                }
+                            }
+                        }
+                    }
+                }
+            }"#,
+            "variables": {
+                "prId": pr_node_id,
+                "userIds": user_ids,
+            },
+        });
+
+        let resp = self
+            .http
+            .post(&graphql_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&query)
+            .send()
+            .await
+            .context("Failed to call GraphQL requestReviews")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "GraphQL request failed for PR #{} requestReviews ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let gql_resp: serde_json::Value = resp.json().await?;
+        if let Some(errors) = gql_resp.get("errors") {
+            bail!(
+                "GraphQL errors requesting reviews for PR #{}: {}",
+                pr_number,
+                errors,
+            );
+        }
+
+        tracing::info!(
+            "Requested reviews on PR #{} from {:?}",
+            pr_number,
+            reviewer_logins,
+        );
+        Ok(())
+    }
+
+    /// Check the review status of a pull request.
+    ///
+    /// Queries the latest review from each expected reviewer and returns an
+    /// aggregate status.  Reviews that are `APPROVED` or `DISMISSED` are
+    /// treated as passing; `CHANGES_REQUESTED` causes the overall status
+    /// to be [`ReviewStatus::ChangesRequested`]; any missing or `COMMENTED`
+    /// reviews leave the status as [`ReviewStatus::Pending`].
+    pub async fn check_reviews_complete(
+        &self,
+        pr_number: u64,
+        expected_reviewers: &[String],
+    ) -> Result<ReviewStatus> {
+        if expected_reviewers.is_empty() {
+            return Ok(ReviewStatus::Approved);
+        }
+
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/reviews",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR reviews")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch reviews for PR #{} ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let reviews: Vec<serde_json::Value> = resp.json().await?;
+
+        // Build a map of the latest review state per reviewer login.
+        let mut latest_states: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for review in &reviews {
+            let login = review
+                .pointer("/user/login")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_lowercase();
+            let state = review["state"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            // Later entries override earlier ones (the list is chronological).
+            latest_states.insert(login, state);
+        }
+
+        let mut changes_requested_by: Vec<String> = Vec::new();
+        let mut all_approved = true;
+
+        for reviewer in expected_reviewers {
+            let key = reviewer.to_lowercase();
+            match latest_states.get(&key).map(|s| s.as_str()) {
+                Some("APPROVED") | Some("DISMISSED") => {}
+                Some("CHANGES_REQUESTED") => {
+                    changes_requested_by.push(reviewer.clone());
+                    all_approved = false;
+                }
+                _ => {
+                    // No review yet or only COMMENTED.
+                    all_approved = false;
+                }
+            }
+        }
+
+        if !changes_requested_by.is_empty() {
+            return Ok(ReviewStatus::ChangesRequested {
+                reviewers: changes_requested_by,
+            });
+        }
+
+        if all_approved {
+            Ok(ReviewStatus::Approved)
+        } else {
+            Ok(ReviewStatus::Pending)
+        }
+    }
+
+    /// Get the login of a pull request's author.
+    pub async fn get_pr_author(&self, pr_number: u64) -> Result<Option<String>> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for author")?;
+
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+
+        let pr: serde_json::Value = resp.json().await?;
+        Ok(pr.pointer("/user/login").and_then(|v| v.as_str()).map(|s| s.to_string()))
+    }
+
     /// List all open pull requests in the repository.
     #[allow(dead_code)]
     pub async fn list_open_prs(&self) -> Result<Vec<OpenPr>> {
@@ -2196,5 +2533,89 @@ mod tests {
         assert_eq!(cloned.number, pr.number);
         assert_eq!(cloned.title, pr.title);
         assert_eq!(cloned.draft, pr.draft);
+    }
+
+    // ---- ReviewStatus tests ----
+
+    #[test]
+    fn review_status_pending() {
+        let status = ReviewStatus::Pending;
+        assert_eq!(status, ReviewStatus::Pending);
+    }
+
+    #[test]
+    fn review_status_approved() {
+        let status = ReviewStatus::Approved;
+        assert_eq!(status, ReviewStatus::Approved);
+        assert_ne!(status, ReviewStatus::Pending);
+    }
+
+    #[test]
+    fn review_status_changes_requested() {
+        let status = ReviewStatus::ChangesRequested {
+            reviewers: vec!["alice".to_string()],
+        };
+        assert!(matches!(
+            status,
+            ReviewStatus::ChangesRequested { ref reviewers } if reviewers == &["alice"]
+        ));
+    }
+
+    #[test]
+    fn review_status_changes_requested_multiple() {
+        let status = ReviewStatus::ChangesRequested {
+            reviewers: vec!["alice".to_string(), "bob".to_string()],
+        };
+        if let ReviewStatus::ChangesRequested { reviewers } = status {
+            assert_eq!(reviewers.len(), 2);
+        } else {
+            panic!("expected ChangesRequested");
+        }
+    }
+
+    #[test]
+    fn review_status_variants_are_distinct() {
+        assert_ne!(ReviewStatus::Pending, ReviewStatus::Approved);
+        assert_ne!(
+            ReviewStatus::Approved,
+            ReviewStatus::ChangesRequested {
+                reviewers: vec![],
+            },
+        );
+    }
+
+    // ---- preferred_agent tests ----
+
+    #[test]
+    fn preferred_agent_defaults_to_none() {
+        let client = CloudAgentClient::new(
+            "token".to_string(),
+            "owner".to_string(),
+            "repo".to_string(),
+        );
+        assert!(client.preferred_agent.is_none());
+    }
+
+    #[test]
+    fn set_preferred_agent_stores_value() {
+        let mut client = CloudAgentClient::new(
+            "token".to_string(),
+            "owner".to_string(),
+            "repo".to_string(),
+        );
+        client.set_preferred_agent(Some("claude".to_string()));
+        assert_eq!(client.preferred_agent.as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn set_preferred_agent_can_clear() {
+        let mut client = CloudAgentClient::new(
+            "token".to_string(),
+            "owner".to_string(),
+            "repo".to_string(),
+        );
+        client.set_preferred_agent(Some("claude".to_string()));
+        client.set_preferred_agent(None);
+        assert!(client.preferred_agent.is_none());
     }
 }

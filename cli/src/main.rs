@@ -346,6 +346,8 @@ async fn main() -> Result<()> {
                         task_file: task_filename.clone(),
                         state_file: state_filename.clone(),
                         branch: None,
+                        agent: None,
+                        reviewers: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -439,6 +441,8 @@ async fn main() -> Result<()> {
                         task_file: task_filename.clone(),
                         state_file: state_filename.clone(),
                         branch: None,
+                        agent: None,
+                        reviewers: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }

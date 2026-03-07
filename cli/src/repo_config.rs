@@ -179,12 +179,16 @@ mod tests {
                     task_file: "docs-tasks.json".to_string(),
                     state_file: ".docs-state.json".to_string(),
                     branch: None,
+                    agent: None,
+                    reviewers: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
                     task_file: "coverage-tasks.json".to_string(),
                     state_file: ".coverage-state.json".to_string(),
                     branch: None,
+                    agent: None,
+                    reviewers: None,
                 },
             ],
         };
@@ -228,12 +232,16 @@ name = "docs"
                     task_file: "docs-tasks.json".to_string(),
                     state_file: ".docs-state.json".to_string(),
                     branch: None,
+                    agent: None,
+                    reviewers: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
                     task_file: "coverage-tasks.json".to_string(),
                     state_file: ".coverage-state.json".to_string(),
                     branch: None,
+                    agent: None,
+                    reviewers: None,
                 },
             ],
             ..RepoConfig::default()
@@ -259,6 +267,8 @@ name = "docs"
                 task_file: "docs-tasks.json".to_string(),
                 state_file: ".docs-state.json".to_string(),
                 branch: None,
+                agent: None,
+                reviewers: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -291,6 +301,8 @@ state_file = ".docs-state.json"
                 task_file: "feature-tasks.json".to_string(),
                 state_file: ".feature-state.json".to_string(),
                 branch: Some("feature/my-branch".to_string()),
+                agent: None,
+                reviewers: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -312,6 +324,8 @@ state_file = ".docs-state.json"
                 task_file: "docs-tasks.json".to_string(),
                 state_file: ".docs-state.json".to_string(),
                 branch: None,
+                agent: None,
+                reviewers: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -322,5 +336,93 @@ state_file = ".docs-state.json"
             .nth(1)
             .expect("TOML should contain a [[ralphs]] section");
         assert!(!ralph_section.contains("branch"));
+    }
+
+    #[test]
+    fn test_ralph_config_agent_defaults_to_none() {
+        let toml_str = r#"
+[[ralphs]]
+name = "docs"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.ralphs[0].agent.is_none());
+    }
+
+    #[test]
+    fn test_ralph_config_with_agent() {
+        let toml_str = r#"
+[[ralphs]]
+name = "docs"
+agent = "copilot"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.ralphs[0].agent.as_deref(), Some("copilot"));
+    }
+
+    #[test]
+    fn test_ralph_config_reviewers_defaults_to_none() {
+        let toml_str = r#"
+[[ralphs]]
+name = "docs"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.ralphs[0].reviewers.is_none());
+    }
+
+    #[test]
+    fn test_ralph_config_with_reviewers() {
+        let toml_str = r#"
+[[ralphs]]
+name = "docs"
+reviewers = ["alice", "bob"]
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        let reviewers = cfg.ralphs[0].reviewers.as_ref().unwrap();
+        assert_eq!(reviewers, &["alice", "bob"]);
+    }
+
+    #[test]
+    fn test_ralph_config_agent_and_reviewers_roundtrip() {
+        let dir = tempdir().unwrap();
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![RalphConfig {
+                name: "feature-work".to_string(),
+                task_file: "feature-tasks.json".to_string(),
+                state_file: ".feature-state.json".to_string(),
+                branch: None,
+                agent: Some("claude".to_string()),
+                reviewers: Some(vec!["reviewer1".to_string(), "reviewer2".to_string()]),
+            }],
+        };
+        save_repo_config(dir.path(), &cfg).unwrap();
+        let loaded = load_repo_config(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ralphs[0].agent.as_deref(), Some("claude"));
+        let reviewers = loaded.ralphs[0].reviewers.as_ref().unwrap();
+        assert_eq!(reviewers, &["reviewer1", "reviewer2"]);
+    }
+
+    #[test]
+    fn test_ralph_config_agent_omitted_when_none() {
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![RalphConfig {
+                name: "docs".to_string(),
+                task_file: "docs-tasks.json".to_string(),
+                state_file: ".docs-state.json".to_string(),
+                branch: None,
+                agent: None,
+                reviewers: None,
+            }],
+        };
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        let ralph_section = toml_str
+            .split("[[ralphs]]")
+            .nth(1)
+            .expect("TOML should contain a [[ralphs]] section");
+        assert!(!ralph_section.contains("agent"));
+        assert!(!ralph_section.contains("reviewers"));
     }
 }

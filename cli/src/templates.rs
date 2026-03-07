@@ -221,6 +221,8 @@ mod tests {
                 task_file: "custom-docs.json".to_string(),
                 state_file: ".custom-docs-state.json".to_string(),
                 branch: None,
+                agent: None,
+                reviewers: None,
             }],
             ..RepoConfig::default()
         };

@@ -15,6 +15,8 @@ pub enum AgentPhase {
     AgentWorking,
     /// The agent finished; its output (e.g. a PR) should be verified.
     NeedsVerification,
+    /// Reviews have been requested; waiting for all reviewers to complete.
+    AwaitingReview,
     /// Verification passed; ready for the next task or done.
     Completed,
 }
@@ -37,6 +39,13 @@ pub struct TrackedPr {
     /// to merge or mark the PR as ready for review.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub issue_number: Option<u64>,
+
+    /// Whether reviews have been requested for this PR.
+    ///
+    /// Set to `true` after the runner calls `request_reviewers` for this PR
+    /// so that it does not re-request on subsequent invocations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_requested: Option<bool>,
 }
 
 /// Persistent state that is committed to the repo between cron invocations.
@@ -77,6 +86,13 @@ pub struct HeadlessState {
     /// invocations.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracked_prs: Vec<TrackedPr>,
+
+    /// Whether reviews have been requested for the current task's PR.
+    ///
+    /// Set to `true` after the runner calls `request_reviewers` for the
+    /// current PR so that it does not re-request on subsequent invocations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_requested: Option<bool>,
 }
 
 impl Default for HeadlessState {
@@ -91,6 +107,7 @@ impl Default for HeadlessState {
             last_prompt: None,
             memory: Vec::new(),
             tracked_prs: Vec::new(),
+            review_requested: None,
         }
     }
 }

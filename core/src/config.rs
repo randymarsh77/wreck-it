@@ -68,6 +68,25 @@ pub struct RalphConfig {
     /// is created from the repository's default branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+
+    /// Optional agent login to assign to issues.
+    ///
+    /// When set, this specific agent login is preferred when assigning a
+    /// coding agent to a triggered issue.  The agent must still appear in the
+    /// repository's `suggestedActors` list.  If omitted, the first known
+    /// agent from the default list is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+
+    /// Optional list of reviewer logins (agents or GitHub users) to request
+    /// reviews from when a PR is created by the coding agent.
+    ///
+    /// When set, the headless runner requests reviews from these users after
+    /// the PR is marked ready for review, waits for all reviews to complete,
+    /// and at-mentions the PR author to address any requested changes.  If
+    /// omitted, the PR proceeds directly to merge without review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewers: Option<Vec<String>>,
 }
 
 fn default_state_branch() -> String {

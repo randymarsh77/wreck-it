@@ -147,7 +147,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
 
         // Advance tracked PRs before entering the main state machine.  Only PRs
         // that are already tracked in state (created by wreck-it) are processed.
-        match advance_tracked_prs(&config, &headless_cfg, &mut state, &work_dir, &state_dir).await {
+        match advance_tracked_prs(&config, &headless_cfg, ralph, &mut state, &work_dir, &state_dir).await {
             Ok(progressed) => {
                 if progressed {
                     made_progress = true;
@@ -173,6 +173,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
                         &headless_cfg,
                         ralph_name,
                         ralph_branch,
+                        ralph,
                         &mut state,
                         &work_dir,
                         &state_dir,
@@ -186,6 +187,18 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
                     run_needs_verification(
                         &config,
                         &headless_cfg,
+                        ralph,
+                        &mut state,
+                        &work_dir,
+                        &state_dir,
+                    )
+                    .await?
+                }
+                AgentPhase::AwaitingReview => {
+                    run_awaiting_review(
+                        &config,
+                        &headless_cfg,
+                        ralph,
                         &mut state,
                         &work_dir,
                         &state_dir,
@@ -200,6 +213,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
                     state.pr_number = None;
                     state.pr_url = None;
                     state.last_prompt = None;
+                    state.review_requested = None;
                     StepOutcome::Continue
                 }
             };
@@ -307,6 +321,7 @@ async fn log_issue_assignees(client: &CloudAgentClient, issue_number: u64, prefi
 async fn advance_tracked_prs(
     config: &Config,
     headless_cfg: &HeadlessConfig,
+    ralph: Option<&RalphConfig>,
     state: &mut HeadlessState,
     work_dir: &Path,
     state_dir: &Path,
@@ -333,6 +348,7 @@ async fn advance_tracked_prs(
                 pr_number: pr_num,
                 task_id,
                 issue_number: state.issue_number,
+                review_requested: None,
             });
         }
     }
@@ -402,6 +418,30 @@ async fn advance_tracked_prs(
                     );
                 } else {
                     made_progress = true;
+                    // Request reviews if configured and not yet requested.
+                    if let Some(reviewers) = ralph.and_then(|r| r.reviewers.as_ref()) {
+                        if !reviewers.is_empty() && tracked.review_requested != Some(true) {
+                            if let Err(e) = client.request_reviewers(pr_number, reviewers).await {
+                                println!(
+                                    "[wreck-it] advance: failed to request reviews on PR #{}: {}",
+                                    pr_number, e,
+                                );
+                            } else {
+                                println!(
+                                    "[wreck-it] advance: requested reviews on PR #{} from {:?}",
+                                    pr_number, reviewers,
+                                );
+                                // Mark review_requested on the tracked PR.
+                                if let Some(tp) = state.tracked_prs.iter_mut().find(|tp| tp.pr_number == pr_number) {
+                                    tp.review_requested = Some(true);
+                                }
+                                if state.pr_number == Some(pr_number) {
+                                    state.review_requested = Some(true);
+                                    state.phase = AgentPhase::AwaitingReview;
+                                }
+                            }
+                        }
+                    }
                 }
                 state.memory.push(format!(
                     "advance: marked PR #{} (task {}) as ready for review",
@@ -488,6 +528,32 @@ async fn advance_tracked_prs(
                 }
             }
             Ok(PrMergeStatus::Mergeable) => {
+                // If reviewers are configured and not yet requested, request them
+                // and skip merge for now.
+                if let Some(reviewers) = ralph.and_then(|r| r.reviewers.as_ref()) {
+                    if !reviewers.is_empty() && tracked.review_requested != Some(true) {
+                        if let Err(e) = client.request_reviewers(pr_number, reviewers).await {
+                            println!(
+                                "[wreck-it] advance: failed to request reviews on PR #{}: {}",
+                                pr_number, e,
+                            );
+                        } else {
+                            println!(
+                                "[wreck-it] advance: requested reviews on PR #{} from {:?}",
+                                pr_number, reviewers,
+                            );
+                            if let Some(tp) = state.tracked_prs.iter_mut().find(|tp| tp.pr_number == pr_number) {
+                                tp.review_requested = Some(true);
+                            }
+                            if state.pr_number == Some(pr_number) {
+                                state.review_requested = Some(true);
+                                state.phase = AgentPhase::AwaitingReview;
+                            }
+                            made_progress = true;
+                        }
+                        continue;
+                    }
+                }
                 // Check whether the base branch requires status checks.
                 let has_checks = match client.has_required_checks_for_pr(pr_number).await {
                     Ok(v) => v,
@@ -636,11 +702,13 @@ fn mark_task_complete_by_id(task_id: &str, task_file: &Path) -> Result<()> {
 ///
 /// Returns [`StepOutcome::Yield`] because triggering the agent is an async
 /// external operation (the agent needs time to work).
+#[allow(clippy::too_many_arguments)]
 async fn run_needs_trigger(
     config: &Config,
     headless_cfg: &HeadlessConfig,
     ralph_name: &str,
     ralph_branch: Option<&str>,
+    ralph: Option<&RalphConfig>,
     state: &mut HeadlessState,
     work_dir: &Path,
     state_dir: &Path,
@@ -711,6 +779,12 @@ async fn run_needs_trigger(
 
     let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
     client.resolve_authenticated_login().await;
+
+    // If a preferred agent is configured in the ralph config, set it on the
+    // client so the assignment mutation targets that specific agent.
+    if let Some(rc) = ralph {
+        client.set_preferred_agent(rc.agent.clone());
+    }
 
     // If a per-ralph feature branch is configured, ensure it exists on the
     // remote before triggering the cloud agent.  This creates the branch from
@@ -832,6 +906,7 @@ async fn run_agent_working(
                         pr_number,
                         task_id,
                         issue_number: Some(issue_number),
+                        review_requested: None,
                     });
                 }
             }
@@ -853,6 +928,7 @@ async fn run_agent_working(
                         pr_number,
                         task_id,
                         issue_number: Some(issue_number),
+                        review_requested: None,
                     });
                 }
             }
@@ -885,6 +961,7 @@ async fn run_agent_working(
 async fn run_needs_verification(
     config: &Config,
     headless_cfg: &HeadlessConfig,
+    ralph: Option<&RalphConfig>,
     state: &mut HeadlessState,
     work_dir: &Path,
     state_dir: &Path,
@@ -938,6 +1015,26 @@ async fn run_needs_verification(
                 "iteration {}: marked PR #{} as ready for review",
                 state.iteration, pr_number,
             ));
+            // If reviewers are configured and not yet requested, request them
+            // now and transition to AwaitingReview.
+            if let Some(reviewers) = ralph.and_then(|r| r.reviewers.as_ref()) {
+                if !reviewers.is_empty() && state.review_requested != Some(true) {
+                    if let Err(e) = client.request_reviewers(pr_number, reviewers).await {
+                        println!(
+                            "[wreck-it] failed to request reviews on PR #{}: {}",
+                            pr_number, e,
+                        );
+                    } else {
+                        println!(
+                            "[wreck-it] requested reviews on PR #{} from {:?}",
+                            pr_number, reviewers,
+                        );
+                        state.review_requested = Some(true);
+                        state.phase = AgentPhase::AwaitingReview;
+                        return Ok(StepOutcome::Yield);
+                    }
+                }
+            }
             // We made progress — loop again so the PR can be re-checked
             // immediately (it may now be mergeable).
             return Ok(StepOutcome::Continue);
@@ -1054,7 +1151,29 @@ async fn run_needs_verification(
 
             return Ok(StepOutcome::Continue);
         }
-        Ok(PrMergeStatus::Mergeable) => { /* proceed to merge logic below */ }
+        Ok(PrMergeStatus::Mergeable) => {
+            // If reviewers are configured and reviews not yet requested,
+            // request them now and transition to AwaitingReview.
+            if let Some(reviewers) = ralph.and_then(|r| r.reviewers.as_ref()) {
+                if !reviewers.is_empty() && state.review_requested != Some(true) {
+                    if let Err(e) = client.request_reviewers(pr_number, reviewers).await {
+                        println!(
+                            "[wreck-it] failed to request reviews on PR #{}: {}",
+                            pr_number, e,
+                        );
+                    } else {
+                        println!(
+                            "[wreck-it] requested reviews on PR #{} from {:?}",
+                            pr_number, reviewers,
+                        );
+                        state.review_requested = Some(true);
+                        state.phase = AgentPhase::AwaitingReview;
+                        return Ok(StepOutcome::Yield);
+                    }
+                }
+            }
+            /* proceed to merge logic below */
+        }
         Err(e) => {
             println!(
                 "[wreck-it] error checking PR #{} merge status: {}",
@@ -1134,6 +1253,156 @@ async fn run_needs_verification(
     }
 }
 
+/// Phase: AwaitingReview – reviews have been requested on the PR; wait for all
+/// reviewers to submit their reviews.
+///
+/// When all reviews are approved, transitions to [`AgentPhase::NeedsVerification`]
+/// so the PR can proceed to merge.  When at least one reviewer requests changes,
+/// the PR author (the coding agent) is at-mentioned to address the feedback.
+/// While the agent is working, the phase yields.
+async fn run_awaiting_review(
+    config: &Config,
+    headless_cfg: &HeadlessConfig,
+    ralph: Option<&RalphConfig>,
+    state: &mut HeadlessState,
+    work_dir: &Path,
+    _state_dir: &Path,
+) -> Result<StepOutcome> {
+    let pr_number = match state.pr_number {
+        Some(n) => n,
+        None => {
+            println!("[wreck-it] no PR to review, going back to trigger");
+            state.phase = AgentPhase::NeedsTrigger;
+            return Ok(StepOutcome::Continue);
+        }
+    };
+
+    let reviewers = match ralph.and_then(|r| r.reviewers.as_ref()) {
+        Some(r) if !r.is_empty() => r.clone(),
+        _ => {
+            // No reviewers configured; skip review and proceed to merge.
+            println!(
+                "[wreck-it] no reviewers configured, proceeding to verification for PR #{}",
+                pr_number,
+            );
+            state.phase = AgentPhase::NeedsVerification;
+            return Ok(StepOutcome::Continue);
+        }
+    };
+
+    let github_token = config
+        .api_token
+        .clone()
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .context("GitHub token required to check reviews")?;
+
+    let (repo_owner, repo_name) = resolve_repo_info(
+        headless_cfg.repo_owner.as_deref(),
+        headless_cfg.repo_name.as_deref(),
+        work_dir,
+    )?;
+
+    let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    client.resolve_authenticated_login().await;
+
+    // Check if the coding agent is still pushing changes (e.g. addressing
+    // review feedback from a previous round).
+    if let Some(false) = client.check_copilot_session_completed(pr_number).await {
+        println!(
+            "[wreck-it] PR #{} — agent is still working on review feedback, will retry",
+            pr_number,
+        );
+        return Ok(StepOutcome::Yield);
+    }
+
+    println!(
+        "[wreck-it] checking review status for PR #{} (reviewers: {:?})",
+        pr_number, reviewers,
+    );
+
+    use crate::cloud_agent::ReviewStatus;
+    match client.check_reviews_complete(pr_number, &reviewers).await {
+        Ok(ReviewStatus::Approved) => {
+            println!(
+                "[wreck-it] all reviews on PR #{} are approved, proceeding to verification",
+                pr_number,
+            );
+            state.memory.push(format!(
+                "iteration {}: reviews approved on PR #{}",
+                state.iteration, pr_number,
+            ));
+            state.phase = AgentPhase::NeedsVerification;
+            // Clear review_requested so a fresh cycle can be started if needed.
+            state.review_requested = None;
+            Ok(StepOutcome::Continue)
+        }
+        Ok(ReviewStatus::ChangesRequested { reviewers: requested_by }) => {
+            println!(
+                "[wreck-it] PR #{} has changes requested by {:?}, notifying author",
+                pr_number, requested_by,
+            );
+            // At-mention the PR author to address the review feedback.
+            match client.get_pr_author(pr_number).await {
+                Ok(Some(author)) => {
+                    let comment = format!(
+                        "@{} Review feedback has been submitted requesting changes. \
+                         Please address the review comments.",
+                        author,
+                    );
+                    if let Err(e) = client.comment_on_pr(pr_number, &comment).await {
+                        println!(
+                            "[wreck-it] failed to comment on PR #{}: {}",
+                            pr_number, e,
+                        );
+                    } else {
+                        println!(
+                            "[wreck-it] notified @{} on PR #{} to address review feedback",
+                            author, pr_number,
+                        );
+                    }
+                }
+                Ok(None) => {
+                    println!(
+                        "[wreck-it] could not determine PR #{} author; skipping @mention",
+                        pr_number,
+                    );
+                }
+                Err(e) => {
+                    println!(
+                        "[wreck-it] failed to fetch PR #{} author: {}",
+                        pr_number, e,
+                    );
+                }
+            }
+            state.memory.push(format!(
+                "iteration {}: changes requested on PR #{} by {:?}",
+                state.iteration, pr_number, requested_by,
+            ));
+            // Reset review_requested so that after the agent addresses the
+            // feedback, reviews can be re-requested on the next cycle.
+            state.review_requested = None;
+            // Stay in AwaitingReview; on the next invocation, if the agent
+            // pushes new changes, we will detect it and re-request reviews
+            // once it finishes.
+            Ok(StepOutcome::Yield)
+        }
+        Ok(ReviewStatus::Pending) => {
+            println!(
+                "[wreck-it] PR #{} reviews are still pending, will check again",
+                pr_number,
+            );
+            Ok(StepOutcome::Yield)
+        }
+        Err(e) => {
+            println!(
+                "[wreck-it] failed to check review status for PR #{}: {}",
+                pr_number, e,
+            );
+            Ok(StepOutcome::Yield)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1159,6 +1428,7 @@ mod tests {
             last_prompt: Some("do something".to_string()),
             memory: vec![],
             tracked_prs: vec![],
+            review_requested: None,
         };
 
         // Simulate the Completed branch of the loop.
@@ -1372,5 +1642,87 @@ mod tests {
             "recurring task should not reset before cooldown elapses"
         );
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
+    }
+
+    #[test]
+    fn awaiting_review_phase_resets_on_completed() {
+        // The Completed phase handler resets review_requested along with
+        // other state fields.
+        let mut state = HeadlessState {
+            phase: AgentPhase::Completed,
+            iteration: 5,
+            current_task_id: Some("task-1".to_string()),
+            issue_number: Some(42),
+            pr_number: Some(10),
+            pr_url: Some("https://github.com/o/r/pull/10".to_string()),
+            last_prompt: Some("do something".to_string()),
+            memory: vec![],
+            tracked_prs: vec![],
+            review_requested: Some(true),
+        };
+
+        // Simulate the Completed branch of the loop.
+        state.phase = AgentPhase::NeedsTrigger;
+        state.current_task_id = None;
+        state.issue_number = None;
+        state.pr_number = None;
+        state.pr_url = None;
+        state.last_prompt = None;
+        state.review_requested = None;
+
+        assert_eq!(state.phase, AgentPhase::NeedsTrigger);
+        assert!(state.review_requested.is_none());
+    }
+
+    #[test]
+    fn awaiting_review_phase_exists() {
+        // Verify the AwaitingReview variant is properly defined and serializable.
+        let phase = AgentPhase::AwaitingReview;
+        assert_eq!(phase, AgentPhase::AwaitingReview);
+        assert_ne!(phase, AgentPhase::NeedsVerification);
+        assert_ne!(phase, AgentPhase::AgentWorking);
+
+        // Verify serde roundtrip.
+        let json = serde_json::to_string(&phase).unwrap();
+        assert_eq!(json, "\"awaiting_review\"");
+        let loaded: AgentPhase = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, AgentPhase::AwaitingReview);
+    }
+
+    #[test]
+    fn tracked_pr_review_requested_field() {
+        let pr = TrackedPr {
+            pr_number: 42,
+            task_id: "task-1".to_string(),
+            issue_number: Some(10),
+            review_requested: Some(true),
+        };
+        assert_eq!(pr.review_requested, Some(true));
+
+        // Roundtrip.
+        let json = serde_json::to_string(&pr).unwrap();
+        assert!(json.contains("review_requested"));
+        let loaded: TrackedPr = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.review_requested, Some(true));
+    }
+
+    #[test]
+    fn tracked_pr_review_requested_omitted_when_none() {
+        let pr = TrackedPr {
+            pr_number: 42,
+            task_id: "task-1".to_string(),
+            issue_number: None,
+            review_requested: None,
+        };
+        let json = serde_json::to_string(&pr).unwrap();
+        assert!(!json.contains("review_requested"));
+    }
+
+    #[test]
+    fn headless_state_review_requested_backward_compat() {
+        // Existing state JSON without review_requested should load fine.
+        let json = r#"{"phase":"needs_trigger","iteration":3}"#;
+        let state: HeadlessState = serde_json::from_str(json).unwrap();
+        assert!(state.review_requested.is_none());
     }
 }
