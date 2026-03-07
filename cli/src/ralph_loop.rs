@@ -393,6 +393,9 @@ impl RalphLoop {
         .await;
 
         // Update consecutive failure counter and optionally invoke re-planner.
+        // Track whether the re-planner ran and succeeded so that the auto-retry
+        // block below can defer to the re-planner's decision in that case.
+        let mut replan_succeeded = false;
         if self.state.tasks[task_idx].status == TaskStatus::Failed {
             self.state.consecutive_failures += 1;
             let threshold = self.config.replan_threshold;
@@ -420,6 +423,7 @@ impl RalphLoop {
                     Ok(updated) => {
                         self.state.tasks = updated;
                         self.state.consecutive_failures = 0;
+                        replan_succeeded = true;
                         self.state.add_log("Re-planning succeeded".to_string());
                     }
                     Err(e) => {
@@ -436,7 +440,11 @@ impl RalphLoop {
         // The `failed_attempts` field acts as the retry counter – no extra
         // state is needed.  With `max_retries = N` the task may run at most
         // N + 1 times (one initial attempt plus up to N retries).
-        if self.state.tasks[task_idx].status == TaskStatus::Failed {
+        //
+        // When the re-planner succeeded it has already decided how to recover
+        // (by restructuring the task list), so auto-retry is skipped to avoid
+        // conflicting with the re-planner's changes.
+        if !replan_succeeded && self.state.tasks[task_idx].status == TaskStatus::Failed {
             let failed = self.state.tasks[task_idx].failed_attempts;
             if let Some(max_retries) = self.state.tasks[task_idx].max_retries {
                 if failed <= max_retries {
@@ -1165,6 +1173,45 @@ mod tests {
             failed.status,
             TaskStatus::Failed,
             "task without max_retries must stay Failed"
+        );
+    }
+
+    /// (4) When the adaptive re-planner succeeds, auto-retry must be suppressed
+    /// so that the two recovery mechanisms do not conflict with each other.
+    /// This test mirrors the guard added to `run_single_task`: auto-retry is
+    /// skipped whenever `replan_succeeded` is true.
+    #[test]
+    fn replan_success_suppresses_auto_retry() {
+        let apply_retry_with_replan_flag = |task: &mut Task, replan_succeeded: bool| {
+            if !replan_succeeded && task.status == TaskStatus::Failed {
+                if let Some(max) = task.max_retries {
+                    if task.failed_attempts <= max {
+                        task.status = TaskStatus::Pending;
+                    }
+                }
+            }
+        };
+
+        // Task has max_retries = 2, failed_attempts = 1 (would normally retry).
+        let mut t = make_task("retryable", TaskStatus::Failed, 0, 1, 0, vec![]);
+        t.max_retries = Some(2);
+        t.failed_attempts = 1;
+
+        // Without a successful replan the task IS reset to Pending.
+        apply_retry_with_replan_flag(&mut t, false);
+        assert_eq!(
+            t.status,
+            TaskStatus::Pending,
+            "without replan the task should be reset to Pending"
+        );
+
+        // Reset and simulate a successful replan: retry must be suppressed.
+        t.status = TaskStatus::Failed;
+        apply_retry_with_replan_flag(&mut t, true);
+        assert_eq!(
+            t.status,
+            TaskStatus::Failed,
+            "when replan succeeded auto-retry must be skipped"
         );
     }
 }
