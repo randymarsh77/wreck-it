@@ -127,19 +127,20 @@
   {
     "id": "eval-task-graph-export",
     "description": "Evaluate the graph export implementation. Review cli/src/graph.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the `wreck-it graph` command is documented in README.md under Usage, (3) the Mermaid output renders correctly when pasted into mermaid.live, (4) edge cases are handled (tasks with no depends_on, circular deps emitting a warning). Fix any issues found.",
-    "status": "inprogress",
+    "status": "completed",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
       "test-task-graph-export"
     ],
     "priority": 2,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1772878034
   },
   {
     "id": "ideas-github-issues-integration",
     "description": "Research and design GitHub Issues integration for wreck-it. The feature should optionally create a GitHub Issue when a task starts (InProgress) and close it when the task completes or fails. Review the existing CLI config (cli/src/types.rs Config struct), the project_api.rs and agent_memory.rs files, and the GitHub REST API for issue creation/closure. Design: (1) new Config fields `github_issues_enabled: bool`, `github_repo: Option<String>` (owner/repo), `github_token: Option<String>` (falls back to GITHUB_TOKEN env var), (2) a minimal GitHub API client in cli/src/github_client.rs using reqwest, (3) the label strategy (add a `wreck-it` label, use task id as issue title prefix). Document the design.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "ideas",
     "priority": 5,
     "complexity": 3

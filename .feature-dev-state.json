@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 12,
-  "current_task_id": "eval-task-graph-export",
-  "issue_number": 157,
-  "last_prompt": "Evaluate the graph export implementation. Review cli/src/graph.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the `wreck-it graph` command is documented in README.md under Usage, (3) the Mermaid output renders correctly when pasted into mermaid.live, (4) edge cases are handled (tasks with no depends_on, circular deps emitting a warning). Fix any issues found.",
+  "iteration": 13,
+  "current_task_id": "ideas-github-issues-integration",
+  "issue_number": 159,
+  "last_prompt": "Research and design GitHub Issues integration for wreck-it. The feature should optionally create a GitHub Issue when a task starts (InProgress) and close it when the task completes or fails. Review the existing CLI config (cli/src/types.rs Config struct), the project_api.rs and agent_memory.rs files, and the GitHub REST API for issue creation/closure. Design: (1) new Config fields `github_issues_enabled: bool`, `github_repo: Option<String>` (owner/repo), `github_token: Option<String>` (falls back to GITHUB_TOKEN env var), (2) a minimal GitHub API client in cli/src/github_client.rs using reqwest, (3) the label strategy (add a `wreck-it` label, use task id as issue title prefix). Document the design.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -48,6 +48,10 @@
     "iteration 11: agent created PR #156 for task Some(\"test-task-graph-export\")",
     "iteration 11: marked PR #156 as ready for review",
     "iteration 11: merged PR #156 for task Some(\"test-task-graph-export\")",
-    "iteration 12: triggered cloud agent for task eval-task-graph-export (issue #157)"
+    "iteration 12: triggered cloud agent for task eval-task-graph-export (issue #157)",
+    "iteration 12: agent created PR #158 for task Some(\"eval-task-graph-export\")",
+    "iteration 12: marked PR #158 as ready for review",
+    "iteration 12: merged PR #158 for task Some(\"eval-task-graph-export\")",
+    "iteration 13: triggered cloud agent for task ideas-github-issues-integration (issue #159)"
   ]
 }
