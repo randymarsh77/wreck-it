@@ -280,6 +280,8 @@ pub fn parse_and_validate_plan(raw: &str) -> Result<Vec<Task>> {
                 depends_on: e.depends_on,
                 priority: 0,
                 complexity: 1,
+                timeout_seconds: None,
+                max_retries: None,
                 failed_attempts: 0,
                 last_attempt_at: None,
                 inputs: vec![],

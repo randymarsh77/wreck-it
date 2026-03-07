@@ -145,6 +145,24 @@ pub struct Task {
     )]
     pub complexity: u32,
 
+    /// Maximum time in seconds the agent may spend on a single execution
+    /// attempt.  When the timeout elapses the attempt is treated as a failure
+    /// and the task may be retried subject to `max_retries`.  When absent,
+    /// execution is unbounded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
+
+    /// Maximum number of automatic retry attempts after a failure.  The
+    /// existing `failed_attempts` counter tracks how many attempts have been
+    /// made, so no additional state is required.  A value of `0` or absence
+    /// means the task is not retried; the first failure is permanent until
+    /// the operator resets the status manually.
+    ///
+    /// With `max_retries = N` the task may run at most `N + 1` times in
+    /// total (one initial attempt plus up to N retries).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<u32>,
+
     /// Number of previous failed execution attempts.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub failed_attempts: u32,
@@ -479,5 +497,78 @@ mod tests {
         assert!(is_trusted_pr_author(Some("Copilot"), None));
         assert!(is_trusted_pr_author(Some("COPILOT-SWE-AGENT"), None));
         assert!(is_trusted_pr_author(Some("Claude[bot]"), None));
+    }
+
+    // ---- Task: timeout_seconds / max_retries ----
+
+    fn make_minimal_task(id: &str) -> Task {
+        Task {
+            id: id.to_string(),
+            description: "test task".to_string(),
+            status: TaskStatus::Pending,
+            role: AgentRole::default(),
+            kind: TaskKind::default(),
+            cooldown_seconds: None,
+            phase: default_phase(),
+            depends_on: vec![],
+            priority: 0,
+            complexity: default_complexity(),
+            timeout_seconds: None,
+            max_retries: None,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: TaskRuntime::default(),
+            precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
+        }
+    }
+
+    #[test]
+    fn task_new_fields_default_to_none() {
+        let t = make_minimal_task("t1");
+        assert!(t.timeout_seconds.is_none());
+        assert!(t.max_retries.is_none());
+    }
+
+    #[test]
+    fn task_new_fields_serialise_when_set() {
+        let mut t = make_minimal_task("t1");
+        t.timeout_seconds = Some(60);
+        t.max_retries = Some(2);
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(json.contains("\"timeout_seconds\":60"));
+        assert!(json.contains("\"max_retries\":2"));
+    }
+
+    #[test]
+    fn task_new_fields_omitted_from_json_when_none() {
+        let t = make_minimal_task("t1");
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(!json.contains("timeout_seconds"), "key should be absent: {json}");
+        assert!(!json.contains("max_retries"), "key should be absent: {json}");
+    }
+
+    #[test]
+    fn task_new_fields_roundtrip_via_serde() {
+        let mut t = make_minimal_task("t1");
+        t.timeout_seconds = Some(120);
+        t.max_retries = Some(5);
+        let json = serde_json::to_string(&t).unwrap();
+        let back: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.timeout_seconds, Some(120));
+        assert_eq!(back.max_retries, Some(5));
+    }
+
+    /// A JSON task file without the new fields should deserialise cleanly
+    /// (backward compatibility).
+    #[test]
+    fn task_new_fields_backward_compatible() {
+        let json = r#"{"id":"t1","description":"d","status":"pending"}"#;
+        let t: Task = serde_json::from_str(json).unwrap();
+        assert!(t.timeout_seconds.is_none());
+        assert!(t.max_retries.is_none());
     }
 }
