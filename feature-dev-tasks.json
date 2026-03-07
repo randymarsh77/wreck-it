@@ -115,18 +115,19 @@
   {
     "id": "test-task-graph-export",
     "description": "Add tests for the graph export feature. In cli/src/graph.rs or a test module, add unit tests that: (1) verify `generate_mermaid` produces valid Mermaid syntax for a simple 3-task chain (A → B → C), including the correct flowchart header and arrow syntax, (2) verify `generate_dot` produces valid DOT syntax with digraph header, node definitions, and edge declarations, (3) verify tasks with no dependencies appear as isolated nodes. Run `cargo test` to confirm all tests pass.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-task-graph-export"
     ],
     "priority": 2,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1772877071
   },
   {
     "id": "eval-task-graph-export",
     "description": "Evaluate the graph export implementation. Review cli/src/graph.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the `wreck-it graph` command is documented in README.md under Usage, (3) the Mermaid output renders correctly when pasted into mermaid.live, (4) edge cases are handled (tasks with no depends_on, circular deps emitting a warning). Fix any issues found.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [

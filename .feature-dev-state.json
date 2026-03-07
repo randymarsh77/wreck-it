@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 11,
-  "current_task_id": "test-task-graph-export",
-  "issue_number": 155,
-  "last_prompt": "Add tests for the graph export feature. In cli/src/graph.rs or a test module, add unit tests that: (1) verify `generate_mermaid` produces valid Mermaid syntax for a simple 3-task chain (A → B → C), including the correct flowchart header and arrow syntax, (2) verify `generate_dot` produces valid DOT syntax with digraph header, node definitions, and edge declarations, (3) verify tasks with no dependencies appear as isolated nodes. Run `cargo test` to confirm all tests pass.",
+  "iteration": 12,
+  "current_task_id": "eval-task-graph-export",
+  "issue_number": 157,
+  "last_prompt": "Evaluate the graph export implementation. Review cli/src/graph.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the `wreck-it graph` command is documented in README.md under Usage, (3) the Mermaid output renders correctly when pasted into mermaid.live, (4) edge cases are handled (tasks with no depends_on, circular deps emitting a warning). Fix any issues found.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -44,6 +44,10 @@
     "iteration 10: agent created PR #154 for task Some(\"impl-task-graph-export\")",
     "iteration 10: marked PR #154 as ready for review",
     "iteration 10: merged PR #154 for task Some(\"impl-task-graph-export\")",
-    "iteration 11: triggered cloud agent for task test-task-graph-export (issue #155)"
+    "iteration 11: triggered cloud agent for task test-task-graph-export (issue #155)",
+    "iteration 11: agent created PR #156 for task Some(\"test-task-graph-export\")",
+    "iteration 11: marked PR #156 as ready for review",
+    "iteration 11: merged PR #156 for task Some(\"test-task-graph-export\")",
+    "iteration 12: triggered cloud agent for task eval-task-graph-export (issue #157)"
   ]
 }
