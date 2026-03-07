@@ -1,8 +1,8 @@
 [
   {
     "id": "feature-assessor",
-    "description": "Assess the state of feature implementation tasks in feature-dev-tasks.json. Check if all current feature tasks are completed. If all features are complete, research the codebase, open issues, and project roadmap to identify 3-5 new features to implement. Create new task entries in feature-dev-tasks.json with proper phases, dependencies, and descriptions. New features should include implementation tasks, test tasks, and evaluation tasks following the ideas/implementer/evaluator pattern.",
-    "status": "inprogress",
+    "description": "Assess the state of feature implementation tasks. Read the current feature-dev-tasks.json on the wreck-it state branch (or check if it is empty). If all current feature tasks are completed (or none exist), research the codebase, open issues, and project roadmap to identify 3-5 new features to implement. Write the new tasks as a JSON array to `.wreck-it/plans/feature-dev-tasks.json--assessor.json` on the main branch. Each task must be a valid wreck-it task object with id, description, status (pending), role, phase, depends_on, priority, and complexity fields. New features should include implementation tasks, test tasks, and evaluation tasks following the ideas/implementer/evaluator pattern. The wreck-it headless runner will automatically migrate the plan into the feature-dev-tasks.json task file on the state branch.",
+    "status": "pending",
     "role": "ideas",
     "kind": "recurring",
     "cooldown_seconds": 43200,
