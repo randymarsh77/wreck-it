@@ -53,7 +53,7 @@ impl TaskReplanner {
 
     async fn call_llm(&self, prompt: &str) -> Result<String> {
         match self.model_provider {
-            ModelProvider::GithubModels | ModelProvider::Llama => self.call_via_http(prompt).await,
+            ModelProvider::GithubModels | ModelProvider::Llama | ModelProvider::CopilotAutopilot => self.call_via_http(prompt).await,
             ModelProvider::Copilot => self.call_via_copilot_sdk(prompt).await,
         }
     }

@@ -83,6 +83,12 @@ pub enum Commands {
         /// file (overwriting any existing tasks).
         #[arg(long)]
         goal: Option<String>,
+
+        /// Maximum number of autonomous continuation steps when using
+        /// `--model-provider copilot-autopilot`.  Maps to Copilot CLI's
+        /// `--max-autopilot-continues` flag.  Default is unlimited.
+        #[arg(long)]
+        max_autopilot_continues: Option<u32>,
     },
 
     /// Generate a structured task plan from a natural-language goal using the

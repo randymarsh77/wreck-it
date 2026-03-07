@@ -5,7 +5,7 @@ use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{
     Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus,
-    DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
+    DEFAULT_AUTOPILOT_MODEL, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
 use std::collections::HashSet;
@@ -20,6 +20,7 @@ fn model_name(provider: &ModelProvider) -> String {
         ModelProvider::Copilot => "copilot".to_string(),
         ModelProvider::Llama => DEFAULT_LLAMA_MODEL.to_string(),
         ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL.to_string(),
+        ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL.to_string(),
     }
 }
 
@@ -112,7 +113,7 @@ pub struct RalphLoop {
 impl RalphLoop {
     pub fn new(config: Config) -> Self {
         let max_iterations = config.max_iterations;
-        let agent = AgentClient::with_evaluation(
+        let agent = AgentClient::with_evaluation_and_autopilot(
             config.model_provider.clone(),
             config.api_endpoint.clone(),
             config.api_token.clone(),
@@ -121,6 +122,7 @@ impl RalphLoop {
             config.evaluation_mode,
             config.completeness_prompt.clone(),
             config.completion_marker_file.to_string_lossy().to_string(),
+            config.max_autopilot_continues,
         );
 
         Self {
@@ -466,7 +468,7 @@ impl RalphLoop {
         // Spawn concurrent agent work (include per-task timestamp for provenance).
         let mut handles = Vec::new();
         for (idx, task, ts) in task_data {
-            let mut agent = AgentClient::with_evaluation(
+            let mut agent = AgentClient::with_evaluation_and_autopilot(
                 self.config.model_provider.clone(),
                 self.config.api_endpoint.clone(),
                 self.config.api_token.clone(),
@@ -478,6 +480,7 @@ impl RalphLoop {
                     .completion_marker_file
                     .to_string_lossy()
                     .to_string(),
+                self.config.max_autopilot_continues,
             );
             let handle = tokio::spawn(async move {
                 let result = agent.execute_task(&task).await;
