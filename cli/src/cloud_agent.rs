@@ -1522,7 +1522,7 @@ impl CloudAgentClient {
             .and_then(|v| v.as_str())
             .unwrap_or("main");
 
-        // Check branch protection for required status checks.
+        // Check legacy branch protection for required status checks.
         let protection_url = format!(
             "{}/repos/{}/{}/branches/{}/protection/required_status_checks",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, base_branch,
@@ -1538,17 +1538,106 @@ impl CloudAgentClient {
             .await
             .context("Failed to check branch protection")?;
 
-        // 404 means no branch protection or no required status checks.
-        if resp.status().as_u16() == 404 {
-            return Ok(false);
+        if resp.status().is_success() {
+            // Legacy branch protection has required status checks.
+            return Ok(true);
         }
-        if !resp.status().is_success() {
-            // Treat unexpected errors as "no required checks" to avoid blocking.
+
+        // Legacy branch protection didn't report required checks.  Fall back
+        // to the repository rulesets API which covers the newer GitHub
+        // rulesets that are not reflected by the legacy endpoint.
+        let rules_url = format!(
+            "{}/repos/{}/{}/rules/branches/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, base_branch,
+        );
+
+        let rules_resp = self
+            .http
+            .get(&rules_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to check repository rulesets")?;
+
+        if !rules_resp.status().is_success() {
             return Ok(false);
         }
 
-        // If the endpoint returns successfully, required status checks exist.
-        Ok(true)
+        let rules: serde_json::Value = rules_resp.json().await?;
+        if let Some(arr) = rules.as_array() {
+            for rule in arr {
+                if rule["type"].as_str() == Some("required_status_checks") {
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Check whether the head commit of a pull request has any check runs
+    /// that are still queued or in progress.
+    ///
+    /// Returns `true` when at least one check run is pending (not yet
+    /// completed), `false` otherwise.
+    pub async fn has_pending_checks_for_pr(&self, pr_number: u64) -> Result<bool> {
+        // Fetch the PR to obtain the head SHA.
+        let pr_url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let pr_resp = self
+            .http
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for head SHA")?;
+
+        if !pr_resp.status().is_success() {
+            return Ok(false);
+        }
+
+        let pr: serde_json::Value = pr_resp.json().await?;
+        let head_sha = pr
+            .pointer("/head/sha")
+            .and_then(|v| v.as_str())
+            .context("Missing head SHA in PR response")?;
+
+        // Check for queued check runs.
+        for status in &["queued", "in_progress"] {
+            let checks_url = format!(
+                "{}/repos/{}/{}/commits/{}/check-runs?status={}&per_page=1",
+                GITHUB_API_BASE, self.repo_owner, self.repo_name, head_sha, status,
+            );
+
+            let resp = self
+                .http
+                .get(&checks_url)
+                .header("Authorization", format!("Bearer {}", self.github_token))
+                .header("User-Agent", "wreck-it")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+                .context("Failed to list check runs")?;
+
+            if !resp.status().is_success() {
+                continue;
+            }
+
+            let body: serde_json::Value = resp.json().await?;
+            let count = body["total_count"].as_u64().unwrap_or(0);
+            if count > 0 {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     /// Check whether the head commit of a pull request has any failing
