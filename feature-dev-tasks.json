@@ -35,19 +35,20 @@
   {
     "id": "eval-webhook-notifications",
     "description": "Evaluate the completed webhook notification implementation. Review cli/src/notifier.rs, the Config changes in cli/src/types.rs, the call sites in cli/src/ralph_loop.rs, and the CLI flag in cli/src/cli.rs. Verify: (1) the code compiles with no warnings (`cargo clippy -- -D warnings`), (2) the JSON payload schema is documented clearly, (3) errors are handled gracefully without aborting the loop, (4) the feature is reflected in README.md Features list. Fix any issues found and mark this task complete.",
-    "status": "inprogress",
+    "status": "completed",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
       "test-webhook-notifications"
     ],
     "priority": 3,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1772861853
   },
   {
     "id": "ideas-task-timeout-retry",
     "description": "Research and design per-task timeout and auto-retry support for wreck-it. Review the Task struct in core/src/types.rs (or cli/src/types.rs) and the agent execution flow in cli/src/ralph_loop.rs and cli/src/agent.rs. Propose: (1) new optional Task fields `timeout_seconds: Option<u64>` and `max_retries: Option<u32>`, (2) how tokio::time::timeout wraps the agent call, (3) how the retry counter is tracked in task state without requiring a new state file (reuse or extend the existing failed_attempts field if present). Document the design with inline notes in a scratch section of this task's description or as comments in a new branch of the relevant source files.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "ideas",
     "priority": 4,
     "complexity": 2
