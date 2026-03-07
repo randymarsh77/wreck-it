@@ -653,7 +653,7 @@ impl CloudAgentClient {
             variables["agentAssignment"] = serde_json::json!({ "baseRef": base_ref });
         }
         let query = serde_json::json!({
-            "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!, $agentAssignment: CopilotAgentAssignmentInput) {
+            "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!, $agentAssignment: AgentAssignmentInput) {
                 addAssigneesToAssignable(input: {
                     assignableId: $assignableId,
                     assigneeIds: $assigneeIds,
