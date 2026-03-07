@@ -48,15 +48,16 @@
   {
     "id": "ideas-task-timeout-retry",
     "description": "Research and design per-task timeout and auto-retry support for wreck-it. Review the Task struct in core/src/types.rs (or cli/src/types.rs) and the agent execution flow in cli/src/ralph_loop.rs and cli/src/agent.rs. Propose: (1) new optional Task fields `timeout_seconds: Option<u64>` and `max_retries: Option<u32>`, (2) how tokio::time::timeout wraps the agent call, (3) how the retry counter is tracked in task state without requiring a new state file (reuse or extend the existing failed_attempts field if present). Document the design with inline notes in a scratch section of this task's description or as comments in a new branch of the relevant source files.",
-    "status": "inprogress",
+    "status": "completed",
     "role": "ideas",
     "priority": 4,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1772862919
   },
   {
     "id": "impl-task-timeout-retry",
     "description": "Implement per-task timeout and auto-retry. Add optional fields `timeout_seconds: Option<u64>` and `max_retries: Option<u32>` to the Task struct in core/src/types.rs (with serde defaults of None). In cli/src/ralph_loop.rs, wrap the agent execution call with `tokio::time::timeout` when `timeout_seconds` is set, treating a timeout as a task failure with a clear error message. Add retry logic: if a task fails and its `failed_attempts` count is below `max_retries`, reset its status back to Pending (instead of Failed) so the scheduler picks it up again on the next iteration. Ensure retry counts are persisted to the task file.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 2,
     "depends_on": [
       "ideas-task-timeout-retry"
