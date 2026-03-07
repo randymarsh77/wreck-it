@@ -145,6 +145,33 @@ wreck-it provenance --task impl-1
 wreck-it export-openclaw --task-file tasks.json --output run.openclaw.json
 ```
 
+### Export the Dependency Graph
+
+Visualize task dependencies as a Mermaid flowchart or GraphViz DOT diagram:
+
+```bash
+# Print Mermaid flowchart to stdout (default)
+wreck-it graph
+
+# Write Mermaid output to a file
+wreck-it graph --output graph.mmd
+
+# Generate a GraphViz DOT diagram
+wreck-it graph --format dot --output graph.dot
+
+# Use a non-default task file
+wreck-it graph --task-file .wreck-it/my-tasks.json
+```
+
+Paste the Mermaid output into [mermaid.live](https://mermaid.live) to render it interactively.  
+Nodes are colour-coded by status: **gray** = pending, **blue** = in-progress, **green** = completed, **red** = failed.  
+If circular dependencies are detected, a warning is printed to stderr before the graph is emitted.
+
+Options:
+- `-t, --task-file <PATH>`: Task file to read (default: `tasks.json`)
+- `-f, --format <mermaid|dot>`: Output format (default: `mermaid`)
+- `-o, --output <PATH>`: Write output to file instead of stdout
+
 ### TUI Controls
 
 - **Space**: Pause/Resume the loop
