@@ -1,4 +1,10 @@
 {
-  "phase": "needs_trigger",
-  "iteration": 0
+  "phase": "agent_working",
+  "iteration": 1,
+  "current_task_id": "ideas-webhook-notifications",
+  "issue_number": 131,
+  "last_prompt": "Research and design a webhook notification system for wreck-it. The system should allow users to configure one or more webhook URLs (e.g. Slack, Discord, or generic HTTP endpoints) that receive JSON payloads whenever a task changes status (started, completed, failed). Review the existing Config and Task types in cli/src/types.rs and cli/src/ralph_loop.rs to design the integration points. Propose a Config field (e.g. notify_webhooks: Vec<String>), a minimal JSON payload schema, and identify exactly where in ralph_loop.rs the hook calls should be inserted (after status transitions). Document findings as inline comments in a new cli/src/notifier.rs stub file.",
+  "memory": [
+    "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)"
+  ]
 }
