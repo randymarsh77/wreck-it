@@ -501,15 +501,17 @@ impl AgentClient {
     /// Copilot CLI full autonomy to read/write files, run shell commands, and
     /// iterate through multi-step plans without per-tool approval prompts.
     async fn execute_task_via_autopilot(&self, task: &Task) -> Result<String> {
-        let cli_path = self
+        // Prefer the path cached at construction time; fall back to a fresh
+        // PATH lookup; bail if neither succeeds.
+        let resolved = self
             .cli_path
-            .as_deref()
-            .or_else(|| resolve_copilot_cli_path().as_deref().map(|_| "copilot"))
-            .unwrap_or("copilot");
-
-        // Re-resolve at call time in case PATH changed since construction.
-        let resolved = resolve_copilot_cli_path()
-            .unwrap_or_else(|| cli_path.to_string());
+            .clone()
+            .or_else(resolve_copilot_cli_path)
+            .context(
+                "Could not find the 'copilot' binary on PATH. \
+                 Install GitHub Copilot CLI (https://gh.io/copilot-install) \
+                 or ensure it is available in your shell environment.",
+            )?;
 
         let context = self.read_codebase_context()?;
         let memory = AgentMemory::new(&self.work_dir);
