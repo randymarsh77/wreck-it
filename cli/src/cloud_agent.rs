@@ -1803,11 +1803,7 @@ impl CloudAgentClient {
                 None
             }
             Err(e) => {
-                tracing::warn!(
-                    "HTTP error fetching PR #{} for node_id: {}",
-                    pr_number,
-                    e,
-                );
+                tracing::warn!("HTTP error fetching PR #{} for node_id: {}", pr_number, e,);
                 None
             }
         }
@@ -1968,10 +1964,7 @@ impl CloudAgentClient {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_lowercase();
-            let state = review["state"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
+            let state = review["state"].as_str().unwrap_or_default().to_string();
             // Later entries override earlier ones (the list is chronological).
             latest_states.insert(login, state);
         }
@@ -2029,7 +2022,10 @@ impl CloudAgentClient {
         }
 
         let pr: serde_json::Value = resp.json().await?;
-        Ok(pr.pointer("/user/login").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        Ok(pr
+            .pointer("/user/login")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()))
     }
 
     /// List all open pull requests in the repository.
@@ -2578,9 +2574,7 @@ mod tests {
         assert_ne!(ReviewStatus::Pending, ReviewStatus::Approved);
         assert_ne!(
             ReviewStatus::Approved,
-            ReviewStatus::ChangesRequested {
-                reviewers: vec![],
-            },
+            ReviewStatus::ChangesRequested { reviewers: vec![] },
         );
     }
 
@@ -2588,32 +2582,23 @@ mod tests {
 
     #[test]
     fn preferred_agent_defaults_to_none() {
-        let client = CloudAgentClient::new(
-            "token".to_string(),
-            "owner".to_string(),
-            "repo".to_string(),
-        );
+        let client =
+            CloudAgentClient::new("token".to_string(), "owner".to_string(), "repo".to_string());
         assert!(client.preferred_agent.is_none());
     }
 
     #[test]
     fn set_preferred_agent_stores_value() {
-        let mut client = CloudAgentClient::new(
-            "token".to_string(),
-            "owner".to_string(),
-            "repo".to_string(),
-        );
+        let mut client =
+            CloudAgentClient::new("token".to_string(), "owner".to_string(), "repo".to_string());
         client.set_preferred_agent(Some("claude".to_string()));
         assert_eq!(client.preferred_agent.as_deref(), Some("claude"));
     }
 
     #[test]
     fn set_preferred_agent_can_clear() {
-        let mut client = CloudAgentClient::new(
-            "token".to_string(),
-            "owner".to_string(),
-            "repo".to_string(),
-        );
+        let mut client =
+            CloudAgentClient::new("token".to_string(), "owner".to_string(), "repo".to_string());
         client.set_preferred_agent(Some("claude".to_string()));
         client.set_preferred_agent(None);
         assert!(client.preferred_agent.is_none());

@@ -147,7 +147,16 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
 
         // Advance tracked PRs before entering the main state machine.  Only PRs
         // that are already tracked in state (created by wreck-it) are processed.
-        match advance_tracked_prs(&config, &headless_cfg, ralph, &mut state, &work_dir, &state_dir).await {
+        match advance_tracked_prs(
+            &config,
+            &headless_cfg,
+            ralph,
+            &mut state,
+            &work_dir,
+            &state_dir,
+        )
+        .await
+        {
             Ok(progressed) => {
                 if progressed {
                     made_progress = true;
@@ -432,7 +441,11 @@ async fn advance_tracked_prs(
                                     pr_number, reviewers,
                                 );
                                 // Mark review_requested on the tracked PR.
-                                if let Some(tp) = state.tracked_prs.iter_mut().find(|tp| tp.pr_number == pr_number) {
+                                if let Some(tp) = state
+                                    .tracked_prs
+                                    .iter_mut()
+                                    .find(|tp| tp.pr_number == pr_number)
+                                {
                                     tp.review_requested = Some(true);
                                 }
                                 if state.pr_number == Some(pr_number) {
@@ -542,7 +555,11 @@ async fn advance_tracked_prs(
                                 "[wreck-it] advance: requested reviews on PR #{} from {:?}",
                                 pr_number, reviewers,
                             );
-                            if let Some(tp) = state.tracked_prs.iter_mut().find(|tp| tp.pr_number == pr_number) {
+                            if let Some(tp) = state
+                                .tracked_prs
+                                .iter_mut()
+                                .find(|tp| tp.pr_number == pr_number)
+                            {
                                 tp.review_requested = Some(true);
                             }
                             if state.pr_number == Some(pr_number) {
@@ -1336,7 +1353,9 @@ async fn run_awaiting_review(
             state.review_requested = None;
             Ok(StepOutcome::Continue)
         }
-        Ok(ReviewStatus::ChangesRequested { reviewers: requested_by }) => {
+        Ok(ReviewStatus::ChangesRequested {
+            reviewers: requested_by,
+        }) => {
             println!(
                 "[wreck-it] PR #{} has changes requested by {:?}, notifying author",
                 pr_number, requested_by,
@@ -1350,10 +1369,7 @@ async fn run_awaiting_review(
                         author,
                     );
                     if let Err(e) = client.comment_on_pr(pr_number, &comment).await {
-                        println!(
-                            "[wreck-it] failed to comment on PR #{}: {}",
-                            pr_number, e,
-                        );
+                        println!("[wreck-it] failed to comment on PR #{}: {}", pr_number, e,);
                     } else {
                         println!(
                             "[wreck-it] notified @{} on PR #{} to address review feedback",
@@ -1368,10 +1384,7 @@ async fn run_awaiting_review(
                     );
                 }
                 Err(e) => {
-                    println!(
-                        "[wreck-it] failed to fetch PR #{} author: {}",
-                        pr_number, e,
-                    );
+                    println!("[wreck-it] failed to fetch PR #{} author: {}", pr_number, e,);
                 }
             }
             state.memory.push(format!(
