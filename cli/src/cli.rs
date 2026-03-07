@@ -1,3 +1,4 @@
+use crate::graph::GraphFormat;
 use crate::types::{EvaluationMode, ModelProvider};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -183,6 +184,21 @@ pub enum Commands {
         /// Target directory to install into (default: current directory)
         #[arg(short, long)]
         work_dir: Option<PathBuf>,
+    },
+
+    /// Export the task dependency graph in Mermaid or GraphViz DOT format.
+    Graph {
+        /// Path to the task file to read (default: tasks.json)
+        #[arg(short, long, default_value = "tasks.json")]
+        task_file: PathBuf,
+
+        /// Output format: mermaid (default) or dot
+        #[arg(short, long, value_enum, default_value = "mermaid")]
+        format: GraphFormat,
+
+        /// Path to write the graph output (default: stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 }
 

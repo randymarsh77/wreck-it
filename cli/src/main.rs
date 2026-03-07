@@ -6,6 +6,7 @@ mod cloud_agent;
 mod config_manager;
 mod gastown_client;
 mod github_auth;
+mod graph;
 mod headless;
 mod headless_config;
 mod headless_state;
@@ -788,6 +789,29 @@ async fn main() -> Result<()> {
                 println!("wreck-it is already installed.");
             } else {
                 println!("\nInstallation complete! Configure PAT_TOKEN secret and enable workflows.");
+            }
+        }
+
+        Commands::Graph {
+            task_file,
+            format,
+            output,
+        } => {
+            let tasks = task_manager::load_tasks(&task_file).with_context(|| {
+                format!("Failed to load task file: {}", task_file.display())
+            })?;
+            let content = match format {
+                graph::GraphFormat::Mermaid => graph::generate_mermaid(&tasks),
+                graph::GraphFormat::Dot => graph::generate_dot(&tasks),
+            };
+            match output {
+                Some(path) => {
+                    std::fs::write(&path, &content).with_context(|| {
+                        format!("Failed to write graph to {}", path.display())
+                    })?;
+                    println!("Graph written to {}", path.display());
+                }
+                None => print!("{content}"),
             }
         }
     }
