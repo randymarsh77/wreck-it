@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 9,
-  "current_task_id": "ideas-task-graph-export",
-  "issue_number": 151,
-  "last_prompt": "Research and design a `wreck-it graph` sub-command that reads a task file and exports the dependency graph in Mermaid flowchart and/or GraphViz DOT format. Review the existing CLI structure in cli/src/cli.rs (clap commands) and the Task type. Design: (1) a new `graph` subcommand with flags `--task-file`, `--format <mermaid|dot>`, and `--output <file>` (default stdout), (2) the Mermaid flowchart syntax for representing task nodes (id + role) and directed edges (depends_on relationships), coloured by status (pending=gray, completed=green, failed=red). No new dependencies should be needed since graph generation is pure string formatting.",
+  "iteration": 10,
+  "current_task_id": "impl-task-graph-export",
+  "issue_number": 153,
+  "last_prompt": "Implement the `wreck-it graph` sub-command. Add a `Graph` variant to the Commands enum in cli/src/cli.rs with args `--task-file`, `--format` (mermaid or dot, default mermaid), and `--output`. Create cli/src/graph.rs with a `generate_mermaid` and `generate_dot` function that reads the task list and emits the graph text: nodes labelled with task id and role, edges from each task to its dependents, node style reflecting status (pending/completed/failed/inprogress). Wire the command in cli/src/main.rs. No extra crate dependencies are needed.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -36,6 +36,10 @@
     "iteration 8: agent created PR #150 for task Some(\"eval-task-timeout-retry\")",
     "iteration 8: marked PR #150 as ready for review",
     "iteration 8: merged PR #150 for task Some(\"eval-task-timeout-retry\")",
-    "iteration 9: triggered cloud agent for task ideas-task-graph-export (issue #151)"
+    "iteration 9: triggered cloud agent for task ideas-task-graph-export (issue #151)",
+    "iteration 9: agent created PR #152 for task Some(\"ideas-task-graph-export\")",
+    "iteration 9: marked PR #152 as ready for review",
+    "iteration 9: merged PR #152 for task Some(\"ideas-task-graph-export\")",
+    "iteration 10: triggered cloud agent for task impl-task-graph-export (issue #153)"
   ]
 }
