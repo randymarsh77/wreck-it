@@ -57,18 +57,19 @@
   {
     "id": "impl-task-timeout-retry",
     "description": "Implement per-task timeout and auto-retry. Add optional fields `timeout_seconds: Option<u64>` and `max_retries: Option<u32>` to the Task struct in core/src/types.rs (with serde defaults of None). In cli/src/ralph_loop.rs, wrap the agent execution call with `tokio::time::timeout` when `timeout_seconds` is set, treating a timeout as a task failure with a clear error message. Add retry logic: if a task fails and its `failed_attempts` count is below `max_retries`, reset its status back to Pending (instead of Failed) so the scheduler picks it up again on the next iteration. Ensure retry counts are persisted to the task file.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-task-timeout-retry"
     ],
     "priority": 4,
-    "complexity": 5
+    "complexity": 5,
+    "last_attempt_at": 1772872387
   },
   {
     "id": "test-task-timeout-retry",
     "description": "Add tests for the per-task timeout and auto-retry feature. In core/src/ or cli/src/, add unit tests that verify: (1) a task with `timeout_seconds: 1` that takes longer than 1 second is marked as failed with a timeout error message, (2) a task with `max_retries: 2` that fails is reset to Pending status and only marked Failed after exceeding the retry limit, (3) a task with no timeout_seconds or max_retries behaves exactly as before. Run `cargo test` to confirm all tests pass.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "impl-task-timeout-retry"

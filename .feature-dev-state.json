@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 6,
-  "current_task_id": "impl-task-timeout-retry",
-  "issue_number": 143,
-  "last_prompt": "Implement per-task timeout and auto-retry. Add optional fields `timeout_seconds: Option<u64>` and `max_retries: Option<u32>` to the Task struct in core/src/types.rs (with serde defaults of None). In cli/src/ralph_loop.rs, wrap the agent execution call with `tokio::time::timeout` when `timeout_seconds` is set, treating a timeout as a task failure with a clear error message. Add retry logic: if a task fails and its `failed_attempts` count is below `max_retries`, reset its status back to Pending (instead of Failed) so the scheduler picks it up again on the next iteration. Ensure retry counts are persisted to the task file.",
+  "iteration": 7,
+  "current_task_id": "test-task-timeout-retry",
+  "issue_number": 147,
+  "last_prompt": "Add tests for the per-task timeout and auto-retry feature. In core/src/ or cli/src/, add unit tests that verify: (1) a task with `timeout_seconds: 1` that takes longer than 1 second is marked as failed with a timeout error message, (2) a task with `max_retries: 2` that fails is reset to Pending status and only marked Failed after exceeding the retry limit, (3) a task with no timeout_seconds or max_retries behaves exactly as before. Run `cargo test` to confirm all tests pass.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -24,6 +24,10 @@
     "iteration 5: agent created PR #142 for task Some(\"ideas-task-timeout-retry\")",
     "iteration 5: marked PR #142 as ready for review",
     "iteration 5: merged PR #142 for task Some(\"ideas-task-timeout-retry\")",
-    "iteration 6: triggered cloud agent for task impl-task-timeout-retry (issue #143)"
+    "iteration 6: triggered cloud agent for task impl-task-timeout-retry (issue #143)",
+    "iteration 6: agent created PR #144 for task Some(\"impl-task-timeout-retry\")",
+    "iteration 6: marked PR #144 as ready for review",
+    "iteration 6: merged PR #144 for task Some(\"impl-task-timeout-retry\")",
+    "iteration 7: triggered cloud agent for task test-task-timeout-retry (issue #147)"
   ]
 }
