@@ -69,18 +69,19 @@
   {
     "id": "test-task-timeout-retry",
     "description": "Add tests for the per-task timeout and auto-retry feature. In core/src/ or cli/src/, add unit tests that verify: (1) a task with `timeout_seconds: 1` that takes longer than 1 second is marked as failed with a timeout error message, (2) a task with `max_retries: 2` that fails is reset to Pending status and only marked Failed after exceeding the retry limit, (3) a task with no timeout_seconds or max_retries behaves exactly as before. Run `cargo test` to confirm all tests pass.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-task-timeout-retry"
     ],
     "priority": 4,
-    "complexity": 3
+    "complexity": 3,
+    "last_attempt_at": 1772873450
   },
   {
     "id": "eval-task-timeout-retry",
     "description": "Evaluate the timeout and auto-retry implementation. Review the Task struct changes, ralph_loop.rs modifications, and new tests. Verify: (1) `cargo clippy -- -D warnings` passes cleanly, (2) the task file format documentation in README.md is updated to document the new `timeout_seconds` and `max_retries` fields in the task format table, (3) retry semantics do not conflict with the existing adaptive re-planning feature (replan threshold). Fix any issues found.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
