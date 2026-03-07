@@ -83,6 +83,11 @@ pub enum Commands {
         /// file (overwriting any existing tasks).
         #[arg(long)]
         goal: Option<String>,
+
+        /// Webhook URLs to notify on task status transitions (can be specified
+        /// multiple times).
+        #[arg(long = "notify-webhook", value_name = "URL")]
+        notify_webhooks: Vec<String>,
     },
 
     /// Generate a structured task plan from a natural-language goal using the
