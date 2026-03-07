@@ -10,6 +10,23 @@ fn http_client() -> &'static Client {
     HTTP_CLIENT.get_or_init(Client::new)
 }
 
+/// JSON payload sent to each configured webhook URL via HTTP POST.
+///
+/// ```json
+/// {
+///   "task_id":    "impl-1",
+///   "status":     "completed",
+///   "timestamp":  1700000000,
+///   "description": "Implement the user API endpoint"
+/// }
+/// ```
+///
+/// | Field         | Type   | Description                                              |
+/// |---------------|--------|----------------------------------------------------------|
+/// | `task_id`     | string | Unique identifier of the task that changed status        |
+/// | `status`      | string | New status: `pending`, `in_progress`, `completed`, or `failed` |
+/// | `timestamp`   | u64    | Unix timestamp (seconds) when the notification was sent  |
+/// | `description` | string | Human-readable task description                          |
 #[derive(Debug, Serialize)]
 struct WebhookPayload<'a> {
     task_id: &'a str,
