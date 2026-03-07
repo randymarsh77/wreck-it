@@ -9,6 +9,7 @@ mod github_auth;
 mod headless;
 mod headless_config;
 mod headless_state;
+mod install;
 #[cfg(test)]
 mod integration_eval;
 mod openclaw;
@@ -748,6 +749,35 @@ async fn main() -> Result<()> {
                     println!("Openclaw export written to {}", path.display());
                 }
                 None => println!("{}", json),
+            }
+        }
+
+        Commands::Install { work_dir } => {
+            let target = work_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            let result = install::install(&target)?;
+
+            if !result.written.is_empty() {
+                println!("Created:");
+                for f in &result.written {
+                    println!("  {}", f);
+                }
+            }
+            if !result.skipped.is_empty() {
+                println!("Skipped (already exist):");
+                for f in &result.skipped {
+                    println!("  {}", f);
+                }
+            }
+            if !result.ralphs_added.is_empty() {
+                println!("Added ralph contexts:");
+                for r in &result.ralphs_added {
+                    println!("  {}", r);
+                }
+            }
+            if result.written.is_empty() && result.ralphs_added.is_empty() {
+                println!("wreck-it is already installed.");
+            } else {
+                println!("\nInstallation complete! Configure PAT_TOKEN secret and enable workflows.");
             }
         }
     }
