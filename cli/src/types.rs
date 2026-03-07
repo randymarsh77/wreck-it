@@ -127,6 +127,18 @@ pub struct Config {
     /// Failures are logged as warnings and do not abort the loop.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notify_webhooks: Vec<String>,
+
+    /// When `true`, a GitHub Issue is opened when a task moves to `InProgress`
+    /// and closed when the task reaches `Completed` or `Failed`.
+    /// Requires `github_repo` to be set and either `github_token` or the
+    /// `GITHUB_TOKEN` environment variable to be available.
+    #[serde(default)]
+    pub github_issues_enabled: bool,
+
+    /// GitHub repository in `owner/repo` format.  Used by the GitHub Issues
+    /// integration to determine where issues are created.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub github_repo: Option<String>,
 }
 
 fn default_max_iterations() -> usize {
@@ -180,6 +192,8 @@ impl Default for Config {
             gastown_token: None,
             github_token: None,
             notify_webhooks: Vec::new(),
+            github_issues_enabled: false,
+            github_repo: None,
         }
     }
 }
