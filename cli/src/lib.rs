@@ -22,6 +22,7 @@ mod cloud_agent;
 mod config_manager;
 mod gastown_client;
 mod github_auth;
+mod github_client;
 mod graph;
 mod headless;
 mod headless_config;

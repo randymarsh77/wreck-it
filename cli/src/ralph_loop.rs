@@ -1,5 +1,6 @@
 use crate::agent::AgentClient;
 use crate::artefact_store;
+use crate::github_client;
 use crate::notifier;
 use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
@@ -9,7 +10,7 @@ use crate::types::{
     DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Error message used when evaluation/tests fail without a prior agent error.
@@ -108,6 +109,9 @@ pub struct RalphLoop {
     config: Config,
     state: LoopState,
     agent: AgentClient,
+    /// Maps task_id → GitHub issue number for open wreck-it issues.
+    /// Populated when a task moves to `InProgress` and cleared on closure.
+    github_issue_numbers: HashMap<String, u64>,
 }
 
 impl RalphLoop {
@@ -128,7 +132,18 @@ impl RalphLoop {
             config,
             state: LoopState::new(max_iterations),
             agent,
+            github_issue_numbers: HashMap::new(),
         }
+    }
+
+    /// Build a [`github_client::GitHubIssueClient`] from the current config when
+    /// GitHub Issues integration is enabled, returning `None` otherwise.
+    fn make_github_client(&self) -> Option<github_client::GitHubIssueClient> {
+        github_client::client_from_config(
+            self.config.github_issues_enabled,
+            self.config.github_repo.as_deref(),
+            self.config.github_token.as_deref(),
+        )
     }
 
     /// Initialize the loop by loading tasks
@@ -262,6 +277,23 @@ impl RalphLoop {
         )
         .await;
 
+        // Open a GitHub Issue for this task when the integration is enabled.
+        if let Some(gh_client) = self.make_github_client() {
+            match gh_client.create_issue(&task_id, &task_desc).await {
+                Ok(issue_number) => {
+                    self.github_issue_numbers.insert(task_id.clone(), issue_number);
+                    self.state.add_log(format!(
+                        "GitHub Issue #{issue_number} opened for task {task_id}"
+                    ));
+                }
+                Err(e) => {
+                    self.state.add_log(format!(
+                        "Warning: failed to open GitHub Issue for task {task_id}: {e}"
+                    ));
+                }
+            }
+        }
+
         // Execute the task with reflection rounds; capture any error text for
         // potential use by the re-planner.
         let task = self.state.tasks[task_idx].clone();
@@ -391,6 +423,24 @@ impl RalphLoop {
             &task_desc,
         )
         .await;
+
+        // Close the GitHub Issue when the task has reached a terminal state.
+        if final_status == TaskStatus::Completed || final_status == TaskStatus::Failed {
+            if let Some(issue_number) = self.github_issue_numbers.remove(&task_id) {
+                if let Some(gh_client) = self.make_github_client() {
+                    if let Err(e) = gh_client.close_issue(issue_number).await {
+                        self.state.add_log(format!(
+                            "Warning: failed to close GitHub Issue #{issue_number} \
+                             for task {task_id}: {e}"
+                        ));
+                    } else {
+                        self.state.add_log(format!(
+                            "GitHub Issue #{issue_number} closed for task {task_id}"
+                        ));
+                    }
+                }
+            }
+        }
 
         // Update consecutive failure counter and optionally invoke re-planner.
         // Track whether the re-planner ran and succeeded so that the auto-retry
@@ -544,6 +594,27 @@ impl RalphLoop {
                 &t.description,
             )
             .await;
+        }
+
+        // Open GitHub Issues for each parallel task when the integration is enabled.
+        for &idx in &eligible_indices {
+            let task_id = self.state.tasks[idx].id.clone();
+            let task_desc = self.state.tasks[idx].description.clone();
+            if let Some(gh_client) = self.make_github_client() {
+                match gh_client.create_issue(&task_id, &task_desc).await {
+                    Ok(issue_number) => {
+                        self.github_issue_numbers.insert(task_id.clone(), issue_number);
+                        self.state.add_log(format!(
+                            "GitHub Issue #{issue_number} opened for task {task_id}"
+                        ));
+                    }
+                    Err(e) => {
+                        self.state.add_log(format!(
+                            "Warning: failed to open GitHub Issue for task {task_id}: {e}"
+                        ));
+                    }
+                }
+            }
         }
 
         // Spawn concurrent agent work (include per-task timestamp for provenance).
@@ -716,6 +787,28 @@ impl RalphLoop {
                     &t.description,
                 )
                 .await;
+            }
+        }
+
+        // Close GitHub Issues for tasks that have reached a terminal state.
+        for &idx in &eligible_indices {
+            let task_id = self.state.tasks[idx].id.clone();
+            let final_status = self.state.tasks[idx].status;
+            if final_status == TaskStatus::Completed || final_status == TaskStatus::Failed {
+                if let Some(issue_number) = self.github_issue_numbers.remove(&task_id) {
+                    if let Some(gh_client) = self.make_github_client() {
+                        if let Err(e) = gh_client.close_issue(issue_number).await {
+                            self.state.add_log(format!(
+                                "Warning: failed to close GitHub Issue #{issue_number} \
+                                 for task {task_id}: {e}"
+                            ));
+                        } else {
+                            self.state.add_log(format!(
+                                "GitHub Issue #{issue_number} closed for task {task_id}"
+                            ));
+                        }
+                    }
+                }
             }
         }
 
