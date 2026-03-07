@@ -81,19 +81,20 @@
   {
     "id": "eval-task-timeout-retry",
     "description": "Evaluate the timeout and auto-retry implementation. Review the Task struct changes, ralph_loop.rs modifications, and new tests. Verify: (1) `cargo clippy -- -D warnings` passes cleanly, (2) the task file format documentation in README.md is updated to document the new `timeout_seconds` and `max_retries` fields in the task format table, (3) retry semantics do not conflict with the existing adaptive re-planning feature (replan threshold). Fix any issues found.",
-    "status": "inprogress",
+    "status": "completed",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
       "test-task-timeout-retry"
     ],
     "priority": 4,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1772874154
   },
   {
     "id": "ideas-task-graph-export",
     "description": "Research and design a `wreck-it graph` sub-command that reads a task file and exports the dependency graph in Mermaid flowchart and/or GraphViz DOT format. Review the existing CLI structure in cli/src/cli.rs (clap commands) and the Task type. Design: (1) a new `graph` subcommand with flags `--task-file`, `--format <mermaid|dot>`, and `--output <file>` (default stdout), (2) the Mermaid flowchart syntax for representing task nodes (id + role) and directed edges (depends_on relationships), coloured by status (pending=gray, completed=green, failed=red). No new dependencies should be needed since graph generation is pure string formatting.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "ideas",
     "priority": 2,
     "complexity": 2

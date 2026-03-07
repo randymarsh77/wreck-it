@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 8,
-  "current_task_id": "eval-task-timeout-retry",
-  "issue_number": 149,
-  "last_prompt": "Evaluate the timeout and auto-retry implementation. Review the Task struct changes, ralph_loop.rs modifications, and new tests. Verify: (1) `cargo clippy -- -D warnings` passes cleanly, (2) the task file format documentation in README.md is updated to document the new `timeout_seconds` and `max_retries` fields in the task format table, (3) retry semantics do not conflict with the existing adaptive re-planning feature (replan threshold). Fix any issues found.",
+  "iteration": 9,
+  "current_task_id": "ideas-task-graph-export",
+  "issue_number": 151,
+  "last_prompt": "Research and design a `wreck-it graph` sub-command that reads a task file and exports the dependency graph in Mermaid flowchart and/or GraphViz DOT format. Review the existing CLI structure in cli/src/cli.rs (clap commands) and the Task type. Design: (1) a new `graph` subcommand with flags `--task-file`, `--format <mermaid|dot>`, and `--output <file>` (default stdout), (2) the Mermaid flowchart syntax for representing task nodes (id + role) and directed edges (depends_on relationships), coloured by status (pending=gray, completed=green, failed=red). No new dependencies should be needed since graph generation is pure string formatting.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -32,6 +32,10 @@
     "iteration 7: agent created PR #148 for task Some(\"test-task-timeout-retry\")",
     "iteration 7: marked PR #148 as ready for review",
     "iteration 7: merged PR #148 for task Some(\"test-task-timeout-retry\")",
-    "iteration 8: triggered cloud agent for task eval-task-timeout-retry (issue #149)"
+    "iteration 8: triggered cloud agent for task eval-task-timeout-retry (issue #149)",
+    "iteration 8: agent created PR #150 for task Some(\"eval-task-timeout-retry\")",
+    "iteration 8: marked PR #150 as ready for review",
+    "iteration 8: merged PR #150 for task Some(\"eval-task-timeout-retry\")",
+    "iteration 9: triggered cloud agent for task ideas-task-graph-export (issue #151)"
   ]
 }
