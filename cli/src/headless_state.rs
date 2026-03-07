@@ -159,4 +159,66 @@ mod tests {
         let loaded: TrackedPr = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.issue_number, Some(100));
     }
+
+    #[test]
+    fn test_tracked_pr_review_requested_backward_compat() {
+        // Existing state files without review_requested should load fine.
+        let json = r#"{"pr_number":10,"task_id":"impl-1"}"#;
+        let loaded: TrackedPr = serde_json::from_str(json).unwrap();
+        assert_eq!(loaded.review_requested, None);
+    }
+
+    #[test]
+    fn test_tracked_pr_review_requested_roundtrip() {
+        let pr = TrackedPr {
+            pr_number: 50,
+            task_id: "ideas-2".to_string(),
+            issue_number: None,
+            review_requested: Some(true),
+        };
+        let json = serde_json::to_string(&pr).unwrap();
+        assert!(json.contains("review_requested"));
+        let loaded: TrackedPr = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.review_requested, Some(true));
+    }
+
+    #[test]
+    fn test_headless_state_review_requested_backward_compat() {
+        // Existing state files without review_requested should load fine.
+        let dir = tempdir().unwrap();
+        let state_file = dir.path().join(".wreck-it-state.json");
+        fs::write(
+            &state_file,
+            r#"{"phase":"agent_working","iteration":2,"pr_number":5}"#,
+        )
+        .unwrap();
+
+        let loaded = load_headless_state(&state_file).unwrap();
+        assert_eq!(loaded.phase, AgentPhase::AgentWorking);
+        assert!(loaded.review_requested.is_none());
+    }
+
+    #[test]
+    fn test_awaiting_review_phase_roundtrip() {
+        let dir = tempdir().unwrap();
+        let state_file = dir.path().join(".wreck-it-state.json");
+        let state = HeadlessState {
+            phase: AgentPhase::AwaitingReview,
+            iteration: 4,
+            current_task_id: Some("task-1".to_string()),
+            issue_number: Some(10),
+            pr_number: Some(20),
+            pr_url: None,
+            last_prompt: None,
+            memory: vec![],
+            tracked_prs: vec![],
+            review_requested: Some(true),
+        };
+
+        save_headless_state(&state_file, &state).unwrap();
+        let loaded = load_headless_state(&state_file).unwrap();
+
+        assert_eq!(loaded.phase, AgentPhase::AwaitingReview);
+        assert_eq!(loaded.review_requested, Some(true));
+    }
 }

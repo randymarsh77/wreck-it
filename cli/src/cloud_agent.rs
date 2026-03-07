@@ -2534,4 +2534,88 @@ mod tests {
         assert_eq!(cloned.title, pr.title);
         assert_eq!(cloned.draft, pr.draft);
     }
+
+    // ---- ReviewStatus tests ----
+
+    #[test]
+    fn review_status_pending() {
+        let status = ReviewStatus::Pending;
+        assert_eq!(status, ReviewStatus::Pending);
+    }
+
+    #[test]
+    fn review_status_approved() {
+        let status = ReviewStatus::Approved;
+        assert_eq!(status, ReviewStatus::Approved);
+        assert_ne!(status, ReviewStatus::Pending);
+    }
+
+    #[test]
+    fn review_status_changes_requested() {
+        let status = ReviewStatus::ChangesRequested {
+            reviewers: vec!["alice".to_string()],
+        };
+        assert!(matches!(
+            status,
+            ReviewStatus::ChangesRequested { ref reviewers } if reviewers == &["alice"]
+        ));
+    }
+
+    #[test]
+    fn review_status_changes_requested_multiple() {
+        let status = ReviewStatus::ChangesRequested {
+            reviewers: vec!["alice".to_string(), "bob".to_string()],
+        };
+        if let ReviewStatus::ChangesRequested { reviewers } = status {
+            assert_eq!(reviewers.len(), 2);
+        } else {
+            panic!("expected ChangesRequested");
+        }
+    }
+
+    #[test]
+    fn review_status_variants_are_distinct() {
+        assert_ne!(ReviewStatus::Pending, ReviewStatus::Approved);
+        assert_ne!(
+            ReviewStatus::Approved,
+            ReviewStatus::ChangesRequested {
+                reviewers: vec![],
+            },
+        );
+    }
+
+    // ---- preferred_agent tests ----
+
+    #[test]
+    fn preferred_agent_defaults_to_none() {
+        let client = CloudAgentClient::new(
+            "token".to_string(),
+            "owner".to_string(),
+            "repo".to_string(),
+        );
+        assert!(client.preferred_agent.is_none());
+    }
+
+    #[test]
+    fn set_preferred_agent_stores_value() {
+        let mut client = CloudAgentClient::new(
+            "token".to_string(),
+            "owner".to_string(),
+            "repo".to_string(),
+        );
+        client.set_preferred_agent(Some("claude".to_string()));
+        assert_eq!(client.preferred_agent.as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn set_preferred_agent_can_clear() {
+        let mut client = CloudAgentClient::new(
+            "token".to_string(),
+            "owner".to_string(),
+            "repo".to_string(),
+        );
+        client.set_preferred_agent(Some("claude".to_string()));
+        client.set_preferred_agent(None);
+        assert!(client.preferred_agent.is_none());
+    }
 }

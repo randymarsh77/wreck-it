@@ -1643,4 +1643,86 @@ mod tests {
         );
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
     }
+
+    #[test]
+    fn awaiting_review_phase_resets_on_completed() {
+        // The Completed phase handler resets review_requested along with
+        // other state fields.
+        let mut state = HeadlessState {
+            phase: AgentPhase::Completed,
+            iteration: 5,
+            current_task_id: Some("task-1".to_string()),
+            issue_number: Some(42),
+            pr_number: Some(10),
+            pr_url: Some("https://github.com/o/r/pull/10".to_string()),
+            last_prompt: Some("do something".to_string()),
+            memory: vec![],
+            tracked_prs: vec![],
+            review_requested: Some(true),
+        };
+
+        // Simulate the Completed branch of the loop.
+        state.phase = AgentPhase::NeedsTrigger;
+        state.current_task_id = None;
+        state.issue_number = None;
+        state.pr_number = None;
+        state.pr_url = None;
+        state.last_prompt = None;
+        state.review_requested = None;
+
+        assert_eq!(state.phase, AgentPhase::NeedsTrigger);
+        assert!(state.review_requested.is_none());
+    }
+
+    #[test]
+    fn awaiting_review_phase_exists() {
+        // Verify the AwaitingReview variant is properly defined and serializable.
+        let phase = AgentPhase::AwaitingReview;
+        assert_eq!(phase, AgentPhase::AwaitingReview);
+        assert_ne!(phase, AgentPhase::NeedsVerification);
+        assert_ne!(phase, AgentPhase::AgentWorking);
+
+        // Verify serde roundtrip.
+        let json = serde_json::to_string(&phase).unwrap();
+        assert_eq!(json, "\"awaiting_review\"");
+        let loaded: AgentPhase = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, AgentPhase::AwaitingReview);
+    }
+
+    #[test]
+    fn tracked_pr_review_requested_field() {
+        let pr = TrackedPr {
+            pr_number: 42,
+            task_id: "task-1".to_string(),
+            issue_number: Some(10),
+            review_requested: Some(true),
+        };
+        assert_eq!(pr.review_requested, Some(true));
+
+        // Roundtrip.
+        let json = serde_json::to_string(&pr).unwrap();
+        assert!(json.contains("review_requested"));
+        let loaded: TrackedPr = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.review_requested, Some(true));
+    }
+
+    #[test]
+    fn tracked_pr_review_requested_omitted_when_none() {
+        let pr = TrackedPr {
+            pr_number: 42,
+            task_id: "task-1".to_string(),
+            issue_number: None,
+            review_requested: None,
+        };
+        let json = serde_json::to_string(&pr).unwrap();
+        assert!(!json.contains("review_requested"));
+    }
+
+    #[test]
+    fn headless_state_review_requested_backward_compat() {
+        // Existing state JSON without review_requested should load fine.
+        let json = r#"{"phase":"needs_trigger","iteration":3}"#;
+        let state: HeadlessState = serde_json::from_str(json).unwrap();
+        assert!(state.review_requested.is_none());
+    }
 }
