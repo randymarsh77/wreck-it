@@ -21,6 +21,7 @@
 
 use crate::types::{AgentRole, Task, TaskStatus};
 use clap::ValueEnum;
+use std::collections::{HashMap, HashSet};
 
 // ---------------------------------------------------------------------------
 // GraphFormat
@@ -104,6 +105,72 @@ fn mermaid_id(id: &str) -> String {
     id.chars()
         .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Cycle detection
+// ---------------------------------------------------------------------------
+
+/// Detect cycles in the task dependency graph using iterative DFS.
+///
+/// Returns a list of cycles, each represented as a `Vec<String>` of task IDs
+/// forming the cycle (the first and last element are the same to close the
+/// loop).  An empty return value means the graph is acyclic.
+pub fn detect_cycles(tasks: &[Task]) -> Vec<Vec<String>> {
+    // Build adjacency list: id → list of ids it depends on
+    let adj: HashMap<&str, Vec<&str>> = tasks
+        .iter()
+        .map(|t| (t.id.as_str(), t.depends_on.iter().map(String::as_str).collect()))
+        .collect();
+
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut cycles: Vec<Vec<String>> = Vec::new();
+
+    for start in adj.keys().copied() {
+        if visited.contains(start) {
+            continue;
+        }
+        // DFS with an explicit stack; each entry is (node, iterator over neighbours, current path).
+        let mut path: Vec<&str> = Vec::new();
+        let mut in_path: HashSet<&str> = HashSet::new();
+        let mut stack: Vec<(&str, usize)> = vec![(start, 0)];
+
+        while let Some((node, idx)) = stack.last_mut() {
+            let node = *node;
+            if *idx == 0 {
+                // First visit of this node on this DFS branch.
+                if visited.contains(node) {
+                    stack.pop();
+                    continue;
+                }
+                path.push(node);
+                in_path.insert(node);
+            }
+            let neighbours = adj.get(node).map(Vec::as_slice).unwrap_or(&[]);
+            if *idx < neighbours.len() {
+                let next = neighbours[*idx];
+                *idx += 1;
+                if in_path.contains(next) {
+                    // Found a cycle: collect nodes from `next` to end of path.
+                    let cycle_start = path.iter().position(|&n| n == next).unwrap();
+                    let mut cycle: Vec<String> =
+                        path[cycle_start..].iter().map(|s| s.to_string()).collect();
+                    cycle.push(next.to_string()); // close the loop
+                    cycles.push(cycle);
+                } else if !visited.contains(next) {
+                    stack.push((next, 0));
+                }
+            } else {
+                // All neighbours explored.
+                visited.insert(node);
+                in_path.remove(node);
+                path.pop();
+                stack.pop();
+            }
+        }
+    }
+
+    cycles
 }
 
 // ---------------------------------------------------------------------------
@@ -389,5 +456,69 @@ mod tests {
         assert!(out.contains("\"y\""), "node 'y' missing");
         // No directed edges (edge syntax is `"x" -> "y"`)
         assert!(!out.contains("\" -> \""), "unexpected edges in isolated-node graph:\n{out}");
+    }
+
+    // ---- detect_cycles ----
+
+    #[test]
+    fn detect_cycles_empty_graph_returns_no_cycles() {
+        let cycles = detect_cycles(&[]);
+        assert!(cycles.is_empty(), "empty graph should have no cycles");
+    }
+
+    #[test]
+    fn detect_cycles_acyclic_chain_returns_no_cycles() {
+        let tasks = vec![
+            make_task("a", TaskStatus::Pending, AgentRole::Implementer, vec![]),
+            make_task("b", TaskStatus::Pending, AgentRole::Implementer, vec!["a"]),
+            make_task("c", TaskStatus::Pending, AgentRole::Implementer, vec!["b"]),
+        ];
+        let cycles = detect_cycles(&tasks);
+        assert!(cycles.is_empty(), "acyclic chain should have no cycles: {cycles:?}");
+    }
+
+    #[test]
+    fn detect_cycles_self_loop_is_detected() {
+        // a depends_on a (self-loop)
+        let tasks = vec![make_task("a", TaskStatus::Pending, AgentRole::Implementer, vec!["a"])];
+        let cycles = detect_cycles(&tasks);
+        assert!(!cycles.is_empty(), "self-loop should be detected as a cycle");
+    }
+
+    #[test]
+    fn detect_cycles_two_node_cycle_is_detected() {
+        // a → b → a
+        let tasks = vec![
+            make_task("a", TaskStatus::Pending, AgentRole::Implementer, vec!["b"]),
+            make_task("b", TaskStatus::Pending, AgentRole::Implementer, vec!["a"]),
+        ];
+        let cycles = detect_cycles(&tasks);
+        assert!(!cycles.is_empty(), "two-node cycle should be detected");
+        // Both 'a' and 'b' should appear in the cycle
+        let all_nodes: Vec<&str> = cycles.iter().flat_map(|c| c.iter().map(String::as_str)).collect();
+        assert!(all_nodes.contains(&"a"), "'a' missing from cycle: {cycles:?}");
+        assert!(all_nodes.contains(&"b"), "'b' missing from cycle: {cycles:?}");
+    }
+
+    #[test]
+    fn detect_cycles_three_node_cycle_is_detected() {
+        // a → b → c → a
+        let tasks = vec![
+            make_task("a", TaskStatus::Pending, AgentRole::Implementer, vec!["c"]),
+            make_task("b", TaskStatus::Pending, AgentRole::Implementer, vec!["a"]),
+            make_task("c", TaskStatus::Pending, AgentRole::Implementer, vec!["b"]),
+        ];
+        let cycles = detect_cycles(&tasks);
+        assert!(!cycles.is_empty(), "three-node cycle should be detected");
+    }
+
+    #[test]
+    fn detect_cycles_isolated_nodes_have_no_cycles() {
+        let tasks = vec![
+            make_task("x", TaskStatus::Pending, AgentRole::Implementer, vec![]),
+            make_task("y", TaskStatus::Pending, AgentRole::Implementer, vec![]),
+        ];
+        let cycles = detect_cycles(&tasks);
+        assert!(cycles.is_empty(), "isolated nodes should have no cycles: {cycles:?}");
     }
 }

@@ -800,6 +800,11 @@ async fn main() -> Result<()> {
             let tasks = task_manager::load_tasks(&task_file).with_context(|| {
                 format!("Failed to load task file: {}", task_file.display())
             })?;
+            // Warn about circular dependencies before rendering.
+            let cycles = graph::detect_cycles(&tasks);
+            for cycle in &cycles {
+                tracing::warn!("Circular dependency detected: {}", cycle.join(" -> "));
+            }
             let content = match format {
                 graph::GraphFormat::Mermaid => graph::generate_mermaid(&tasks),
                 graph::GraphFormat::Dot => graph::generate_dot(&tasks),
