@@ -2,15 +2,16 @@
   {
     "id": "ideas-webhook-notifications",
     "description": "Research and design a webhook notification system for wreck-it. The system should allow users to configure one or more webhook URLs (e.g. Slack, Discord, or generic HTTP endpoints) that receive JSON payloads whenever a task changes status (started, completed, failed). Review the existing Config and Task types in cli/src/types.rs and cli/src/ralph_loop.rs to design the integration points. Propose a Config field (e.g. notify_webhooks: Vec<String>), a minimal JSON payload schema, and identify exactly where in ralph_loop.rs the hook calls should be inserted (after status transitions). Document findings as inline comments in a new cli/src/notifier.rs stub file.",
-    "status": "inprogress",
+    "status": "completed",
     "role": "ideas",
     "priority": 3,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1772857429
   },
   {
     "id": "impl-webhook-notifications",
     "description": "Implement the webhook notification system designed in ideas-webhook-notifications. Create cli/src/notifier.rs with an async `notify` function that sends an HTTP POST with a JSON payload (task id, status, timestamp, description) to each configured URL using reqwest. Add a `notify_webhooks: Vec<String>` field to Config in cli/src/types.rs (default empty, skip_serializing_if empty). Wire calls to `notify` in cli/src/ralph_loop.rs after task status transitions to InProgress, Completed, and Failed. Add `--notify-webhook <URL>` (multi-value) CLI flag in cli/src/cli.rs that appends to the config's webhook list. Ensure failures to reach a webhook are logged as warnings but do not abort the loop.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 2,
     "depends_on": [
       "ideas-webhook-notifications"
