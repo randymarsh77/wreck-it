@@ -602,29 +602,61 @@ async fn advance_tracked_prs(
                         );
                     }
                 } else {
-                    // No required checks – merge directly.
-                    println!(
-                        "[wreck-it] advance: PR #{} is mergeable, merging directly",
-                        pr_number
-                    );
-                    match client.merge_pr(pr_number).await {
-                        Ok(()) => {
-                            println!("[wreck-it] advance: merged PR #{}", pr_number);
-                            state
-                                .memory
-                                .push(format!("advance: merged PR #{}", pr_number));
-                            mark_task_complete_by_id(&tracked.task_id, &task_file)?;
-                            if state.pr_number == Some(pr_number) {
-                                state.phase = AgentPhase::Completed;
-                            }
-                            resolved_pr_numbers.push(pr_number);
-                            made_progress = true;
-                        }
+                    // No required checks detected.  As a safety net, check
+                    // for pending (queued/in-progress) check runs before
+                    // merging directly.
+                    let has_pending = match client.has_pending_checks_for_pr(pr_number).await {
+                        Ok(v) => v,
                         Err(e) => {
                             println!(
-                                "[wreck-it] advance: failed to merge PR #{}: {}",
+                                "[wreck-it] advance: failed to check pending checks for PR #{}: {}",
                                 pr_number, e
                             );
+                            false
+                        }
+                    };
+                    if has_pending {
+                        println!(
+                            "[wreck-it] advance: PR #{} has pending check runs, enabling auto-merge instead of merging directly",
+                            pr_number
+                        );
+                        if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                            println!(
+                                "[wreck-it] advance: failed to approve workflows for PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
+                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                            println!(
+                                "[wreck-it] advance: failed to enable auto-merge for PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
+                    } else {
+                        // No required checks and no pending check runs — merge directly.
+                        println!(
+                            "[wreck-it] advance: PR #{} is mergeable, merging directly",
+                            pr_number
+                        );
+                        match client.merge_pr(pr_number).await {
+                            Ok(()) => {
+                                println!("[wreck-it] advance: merged PR #{}", pr_number);
+                                state
+                                    .memory
+                                    .push(format!("advance: merged PR #{}", pr_number));
+                                mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                                if state.pr_number == Some(pr_number) {
+                                    state.phase = AgentPhase::Completed;
+                                }
+                                resolved_pr_numbers.push(pr_number);
+                                made_progress = true;
+                            }
+                            Err(e) => {
+                                println!(
+                                    "[wreck-it] advance: failed to merge PR #{}: {}",
+                                    pr_number, e
+                                );
+                            }
                         }
                     }
                 }
@@ -1238,7 +1270,46 @@ async fn run_needs_verification(
         return Ok(StepOutcome::Yield);
     }
 
-    // No required checks — merge directly.
+    // No required checks detected via branch protection / rulesets.
+    // As a safety net, check whether there are any pending (queued or
+    // in-progress) check runs on the head commit.  If so, enable
+    // auto-merge instead of merging directly to avoid merging before
+    // checks complete.
+    let has_pending = match client.has_pending_checks_for_pr(pr_number).await {
+        Ok(v) => v,
+        Err(e) => {
+            println!(
+                "[wreck-it] failed to check pending checks for PR #{}: {}",
+                pr_number, e
+            );
+            false
+        }
+    };
+    if has_pending {
+        println!(
+            "[wreck-it] PR #{} has pending check runs, enabling auto-merge instead of merging directly",
+            pr_number
+        );
+        if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+            println!(
+                "[wreck-it] failed to approve workflow runs for PR #{}: {}",
+                pr_number, e
+            );
+        }
+        if let Err(e) = client.enable_auto_merge(pr_number).await {
+            println!(
+                "[wreck-it] failed to enable auto-merge for PR #{}: {}",
+                pr_number, e
+            );
+        }
+        state.memory.push(format!(
+            "iteration {}: PR #{} has pending checks, enabled auto-merge",
+            state.iteration, pr_number,
+        ));
+        return Ok(StepOutcome::Yield);
+    }
+
+    // No required checks and no pending check runs — merge directly.
     match client.merge_pr(pr_number).await {
         Ok(()) => {
             println!("[wreck-it] PR #{} merged successfully", pr_number);

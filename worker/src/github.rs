@@ -916,7 +916,7 @@ impl GitHubClient {
             .and_then(|v| v.as_str())
             .unwrap_or("main");
 
-        // Check branch protection.
+        // Check legacy branch protection.
         let protection_url = format!(
             "https://api.github.com/repos/{}/{}/branches/{}/protection/required_status_checks",
             url_encode(&self.owner),
@@ -945,8 +945,162 @@ impl GitHubClient {
             .await
             .map_err(|e| format!("GitHub API request failed: {e}"))?;
 
-        // 404 means no branch protection or no required status checks.
-        Ok(prot_response.status_code() == 200)
+        if prot_response.status_code() == 200 {
+            return Ok(true);
+        }
+
+        // Legacy branch protection didn't report required checks.  Fall back
+        // to the repository rulesets API which covers the newer GitHub
+        // rulesets that are not reflected by the legacy endpoint.
+        let rules_url = format!(
+            "https://api.github.com/repos/{}/{}/rules/branches/{}",
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            url_encode(base_branch),
+        );
+
+        let mut rules_headers = worker::Headers::new();
+        rules_headers
+            .set("Accept", "application/vnd.github+json")
+            .ok();
+        rules_headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        rules_headers.set("User-Agent", "wreck-it-worker").ok();
+        rules_headers
+            .set("X-GitHub-Api-Version", "2022-11-28")
+            .ok();
+
+        let rules_request = worker::Request::new_with_init(
+            &rules_url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Get)
+                .with_headers(rules_headers),
+        )
+        .map_err(|e| format!("Failed to create request: {e}"))?;
+
+        let mut rules_response = Fetch::Request(rules_request)
+            .send()
+            .await
+            .map_err(|e| format!("GitHub API request failed: {e}"))?;
+
+        if rules_response.status_code() != 200 {
+            return Ok(false);
+        }
+
+        let rules: serde_json::Value = rules_response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse rules response: {e}"))?;
+
+        if let Some(arr) = rules.as_array() {
+            for rule in arr {
+                if rule["type"].as_str() == Some("required_status_checks") {
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Check whether the head commit of a pull request has any check runs
+    /// that are still queued or in progress.
+    ///
+    /// Returns `true` when at least one check run is pending (not yet
+    /// completed), `false` otherwise.
+    pub async fn has_pending_checks_for_pr(&self, pr_number: u64) -> Result<bool, String> {
+        // Fetch the PR to obtain the head SHA.
+        let pr_url = format!(
+            "https://api.github.com/repos/{}/{}/pulls/{}",
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            pr_number,
+        );
+
+        let mut headers = worker::Headers::new();
+        headers.set("Accept", "application/vnd.github+json").ok();
+        headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        headers.set("User-Agent", "wreck-it-worker").ok();
+        headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+        let request = worker::Request::new_with_init(
+            &pr_url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Get)
+                .with_headers(headers),
+        )
+        .map_err(|e| format!("Failed to create request: {e}"))?;
+
+        let mut response = Fetch::Request(request)
+            .send()
+            .await
+            .map_err(|e| format!("GitHub API request failed: {e}"))?;
+
+        if response.status_code() != 200 {
+            return Ok(false);
+        }
+
+        let pr: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse PR response: {e}"))?;
+
+        let head_sha = pr
+            .pointer("/head/sha")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing head SHA in PR response".to_string())?;
+
+        for status in &["queued", "in_progress"] {
+            let checks_url = format!(
+                "https://api.github.com/repos/{}/{}/commits/{}/check-runs?status={}&per_page=1",
+                url_encode(&self.owner),
+                url_encode(&self.repo),
+                url_encode(head_sha),
+                status,
+            );
+
+            let mut chk_headers = worker::Headers::new();
+            chk_headers.set("Accept", "application/vnd.github+json").ok();
+            chk_headers
+                .set("Authorization", &format!("Bearer {}", self.token))
+                .ok();
+            chk_headers.set("User-Agent", "wreck-it-worker").ok();
+            chk_headers
+                .set("X-GitHub-Api-Version", "2022-11-28")
+                .ok();
+
+            let chk_request = worker::Request::new_with_init(
+                &checks_url,
+                worker::RequestInit::new()
+                    .with_method(worker::Method::Get)
+                    .with_headers(chk_headers),
+            )
+            .map_err(|e| format!("Failed to create request: {e}"))?;
+
+            let mut chk_response = Fetch::Request(chk_request)
+                .send()
+                .await
+                .map_err(|e| format!("GitHub API request failed: {e}"))?;
+
+            if chk_response.status_code() != 200 {
+                continue;
+            }
+
+            let body: serde_json::Value = chk_response
+                .json()
+                .await
+                .map_err(|e| format!("Failed to parse check runs response: {e}"))?;
+
+            let count = body["total_count"].as_u64().unwrap_or(0);
+            if count > 0 {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     /// Check whether the head commit of a pull request has any failing
