@@ -183,7 +183,9 @@ A task with all available fields:
   ],
   "runtime": "local",
   "parent_id": "epic-auth",
-  "labels": ["backend", "api"]
+  "labels": ["backend", "api"],
+  "timeout_seconds": 300,
+  "max_retries": 2
 }
 ```
 
@@ -205,6 +207,8 @@ A task with all available fields:
 | `precondition_prompt` | Agent-evaluated precondition; task is skipped when the agent determines the condition is not met | *(none)* |
 | `parent_id` | ID of the parent task (epic); marks this task as a sub-task | *(none)* |
 | `labels` | Free-form labels for categorization (e.g. board columns, tags) | `[]` |
+| `timeout_seconds` | Maximum wall-clock seconds the agent may run; the task is marked failed if the limit is exceeded | *(none)* |
+| `max_retries` | Maximum number of automatic retries after failure (`N` means up to `N+1` total attempts); auto-retry is skipped when the adaptive re-planner takes over | *(none)* |
 
 ## GitHub Action
 
