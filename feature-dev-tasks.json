@@ -103,18 +103,19 @@
   {
     "id": "impl-task-graph-export",
     "description": "Implement the `wreck-it graph` sub-command. Add a `Graph` variant to the Commands enum in cli/src/cli.rs with args `--task-file`, `--format` (mermaid or dot, default mermaid), and `--output`. Create cli/src/graph.rs with a `generate_mermaid` and `generate_dot` function that reads the task list and emits the graph text: nodes labelled with task id and role, edges from each task to its dependents, node style reflecting status (pending/completed/failed/inprogress). Wire the command in cli/src/main.rs. No extra crate dependencies are needed.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-task-graph-export"
     ],
     "priority": 2,
-    "complexity": 3
+    "complexity": 3,
+    "last_attempt_at": 1772876274
   },
   {
     "id": "test-task-graph-export",
     "description": "Add tests for the graph export feature. In cli/src/graph.rs or a test module, add unit tests that: (1) verify `generate_mermaid` produces valid Mermaid syntax for a simple 3-task chain (A → B → C), including the correct flowchart header and arrow syntax, (2) verify `generate_dot` produces valid DOT syntax with digraph header, node definitions, and edge declarations, (3) verify tasks with no dependencies appear as isolated nodes. Run `cargo test` to confirm all tests pass.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "impl-task-graph-export"
