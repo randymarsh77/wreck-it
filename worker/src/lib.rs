@@ -73,10 +73,10 @@ fn should_process_pr_event(
         return false;
     }
     let merged = pr.merged.unwrap_or(false);
-    (action == "closed" && merged)
-        || action == "opened"
-        || action == "ready_for_review"
-        || action == "synchronize"
+    // Workflow-approval actions (approve pending runs + enable auto-merge).
+    ["opened", "ready_for_review", "synchronize"].contains(&action)
+        // Task-completion action (merged PR).
+        || (action == "closed" && merged)
 }
 
 #[event(fetch)]
