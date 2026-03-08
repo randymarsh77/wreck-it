@@ -1450,6 +1450,13 @@ impl CloudAgentClient {
                             );
                             if !node_id.is_empty() {
                                 run_node_ids.insert(id, node_id.to_string());
+                            } else {
+                                tracing::warn!(
+                                    "Workflow run {} (name={}) for PR #{} has no node_id, GraphQL approval will be skipped",
+                                    id,
+                                    name,
+                                    pr_number,
+                                );
                             }
                             all_run_ids.push(id);
                             if *status_filter == "waiting" {
@@ -1488,8 +1495,18 @@ impl CloudAgentClient {
                     .await
                 {
                     Ok(resp) if resp.status().is_success() => {
-                        let gql_resp: serde_json::Value =
-                            resp.json().await.unwrap_or_default();
+                        let gql_resp: serde_json::Value = match resp.json().await {
+                            Ok(v) => v,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Failed to parse GraphQL response for run {} (PR #{}): {}",
+                                    run_id,
+                                    pr_number,
+                                    e,
+                                );
+                                serde_json::Value::default()
+                            }
+                        };
                         if gql_resp.get("errors").is_none() {
                             tracing::info!(
                                 "Approved workflow run {} via GraphQL for PR #{}",

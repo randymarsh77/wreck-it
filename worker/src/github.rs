@@ -1407,6 +1407,13 @@ impl GitHubClient {
                             );
                             if !node_id.is_empty() {
                                 run_node_ids.insert(id, node_id.to_string());
+                            } else {
+                                worker::console_warn!(
+                                    "Workflow run {} (name={}) for PR #{} has no node_id, GraphQL approval will be skipped",
+                                    id,
+                                    name,
+                                    pr_number,
+                                );
                             }
                             all_run_ids.push(id);
                             if *status_filter == "waiting" {
