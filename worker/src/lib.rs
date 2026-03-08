@@ -164,22 +164,27 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             true
         }
         WebhookEvent::PullRequest => {
-            // Process when a PR is merged (task completion signal), but
-            // only if the PR was opened by a known coding agent or the
-            // authenticated user.  This prevents an attacker from marking
-            // tasks as complete by getting an unauthorized PR merged.
             let action = payload.action.as_deref().unwrap_or("");
-            let merged = payload
-                .pull_request
-                .as_ref()
-                .and_then(|pr| pr.merged)
-                .unwrap_or(false);
             let trusted = payload
                 .pull_request
                 .as_ref()
                 .map(|pr| is_trusted_pr_author(pr, auth_login_ref))
                 .unwrap_or(false);
-            action == "closed" && merged && trusted
+            if !trusted {
+                false
+            } else {
+                let merged = payload
+                    .pull_request
+                    .as_ref()
+                    .and_then(|pr| pr.merged)
+                    .unwrap_or(false);
+                // Process merged PRs (task completion signal) and
+                // newly created / updated PRs (workflow approval).
+                (action == "closed" && merged)
+                    || action == "opened"
+                    || action == "ready_for_review"
+                    || action == "synchronize"
+            }
         }
         _ => false,
     };
@@ -201,20 +206,66 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return Response::ok("no wreck-it configuration found; skipping");
     }
 
-    // For merged PR events, handle task completion and PR management.
-    // Note: the `should_process` check above already filters PullRequest events
-    // to only those with action == "closed" && merged == true.
+    // For PR events from trusted authors, approve pending workflow runs
+    // and enable auto-merge when required checks are detected.  This
+    // handles the case where workflow runs need explicit approval before
+    // they can execute (e.g. first-time contributors, outside
+    // collaborators, or fork PRs).
     if event == WebhookEvent::PullRequest {
         if let Some(pr) = &payload.pull_request {
-            match processor::process_merged_pr(&client, default_branch, pr.number).await {
-                Ok(result) => {
-                    let status = if result.changed { "processed" } else { "no-op" };
-                    return Response::ok(format!("pr-merged {status}: {}", result.summary));
+            let action = payload.action.as_deref().unwrap_or("");
+            let merged = pr.merged.unwrap_or(false);
+
+            if action == "closed" && merged {
+                // Merged PR — handle task completion.
+                match processor::process_merged_pr(&client, default_branch, pr.number).await {
+                    Ok(result) => {
+                        let status = if result.changed { "processed" } else { "no-op" };
+                        return Response::ok(format!("pr-merged {status}: {}", result.summary));
+                    }
+                    Err(e) => {
+                        console_error!("PR merge handling failed: {e}");
+                        // Fall through to the normal iteration processing.
+                    }
                 }
-                Err(e) => {
-                    console_error!("PR merge handling failed: {e}");
-                    // Fall through to the normal iteration processing.
+            } else {
+                // Non-merged PR event (opened, ready_for_review, synchronize)
+                // — approve pending workflow runs so required checks can
+                // execute, then enable auto-merge.
+                let pr_number = pr.number;
+                if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                    console_warn!(
+                        "Failed to approve workflow runs for PR #{}: {}",
+                        pr_number,
+                        e,
+                    );
                 }
+
+                // Enable auto-merge when the base branch has required checks.
+                match client.has_required_checks_for_pr(pr_number).await {
+                    Ok(true) => {
+                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                            console_warn!(
+                                "Failed to enable auto-merge for PR #{}: {}",
+                                pr_number,
+                                e,
+                            );
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(e) => {
+                        console_warn!(
+                            "Failed to check required checks for PR #{}: {}",
+                            pr_number,
+                            e,
+                        );
+                    }
+                }
+
+                return Response::ok(format!(
+                    "pr-workflow-approval: processed PR #{} ({})",
+                    pr_number, action,
+                ));
             }
         }
     }
