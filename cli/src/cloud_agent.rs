@@ -1331,10 +1331,12 @@ impl CloudAgentClient {
 
     /// Approve any pending workflow runs for a pull request.
     ///
-    /// When a repo requires approval for Actions (e.g. first-time contributors
-    /// or fork PRs), workflow runs sit in `action_required` status until
-    /// explicitly approved.  This method fetches the PR's head SHA, lists
-    /// workflow runs for that commit, and approves every run that is waiting.
+    /// When a repo requires approval for Actions (e.g. first-time contributors,
+    /// outside collaborators, or fork PRs), workflow runs may sit in
+    /// `action_required`, `pending`, or `waiting` status until explicitly
+    /// approved.  This method fetches the PR's head SHA, lists workflow runs
+    /// for that commit across all three statuses, and approves every run that
+    /// is waiting.
     pub async fn approve_pending_workflow_runs(&self, pr_number: u64) -> Result<()> {
         // Fetch the PR to obtain the head SHA.
         let pr_url = format!(
@@ -1369,49 +1371,87 @@ impl CloudAgentClient {
             .and_then(|v| v.as_str())
             .context("Missing head SHA in PR response")?;
 
-        // List workflow runs for the head SHA that need approval.
-        let runs_url = format!(
-            "{}/repos/{}/{}/actions/runs?head_sha={}&status=action_required",
-            GITHUB_API_BASE, self.repo_owner, self.repo_name, head_sha,
-        );
+        // Query workflow runs across all statuses that may indicate a run is
+        // waiting for approval.  Depending on the repository configuration,
+        // GitHub may place pending runs in `action_required` (fork PRs),
+        // `pending` (first-time contributors), or `waiting` (outside
+        // collaborators / deployment protection rules).
+        let mut all_run_ids: Vec<u64> = Vec::new();
+        let mut waiting_run_ids: Vec<u64> = Vec::new();
 
-        let runs_resp = self
-            .http
-            .get(&runs_url)
-            .header("Authorization", format!("Bearer {}", self.github_token))
-            .header("User-Agent", "wreck-it")
-            .header("Accept", "application/vnd.github+json")
-            .send()
-            .await
-            .context("Failed to list workflow runs")?;
-
-        if !runs_resp.status().is_success() {
-            tracing::warn!(
-                "Failed to list workflow runs for PR #{} ({})",
-                pr_number,
-                runs_resp.status(),
+        for status_filter in &["action_required", "pending", "waiting"] {
+            let runs_url = format!(
+                "{}/repos/{}/{}/actions/runs?head_sha={}&status={}",
+                GITHUB_API_BASE, self.repo_owner, self.repo_name, head_sha, status_filter,
             );
-            return Ok(());
+
+            let runs_resp = match self
+                .http
+                .get(&runs_url)
+                .header("Authorization", format!("Bearer {}", self.github_token))
+                .header("User-Agent", "wreck-it")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to list {} workflow runs for PR #{}: {}",
+                        status_filter,
+                        pr_number,
+                        e,
+                    );
+                    continue;
+                }
+            };
+
+            if !runs_resp.status().is_success() {
+                tracing::warn!(
+                    "Failed to list {} workflow runs for PR #{} ({})",
+                    status_filter,
+                    pr_number,
+                    runs_resp.status(),
+                );
+                continue;
+            }
+
+            let runs: serde_json::Value = match runs_resp.json().await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to parse {} workflow runs response for PR #{}: {}",
+                        status_filter,
+                        pr_number,
+                        e,
+                    );
+                    continue;
+                }
+            };
+
+            if let Some(arr) = runs["workflow_runs"].as_array() {
+                for run in arr {
+                    if let Some(id) = run["id"].as_u64() {
+                        if !all_run_ids.contains(&id) {
+                            all_run_ids.push(id);
+                            if *status_filter == "waiting" {
+                                waiting_run_ids.push(id);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        let runs: serde_json::Value = runs_resp.json().await?;
-        let run_ids: Vec<u64> = match runs["workflow_runs"].as_array() {
-            Some(arr) => arr.iter().filter_map(|r| r["id"].as_u64()).collect(),
-            None => {
-                tracing::warn!(
-                    "Unexpected workflow runs response for PR #{}: missing workflow_runs array",
-                    pr_number,
-                );
-                return Ok(());
-            }
-        };
-
-        if run_ids.is_empty() {
+        if all_run_ids.is_empty() {
             tracing::debug!("No workflow runs awaiting approval for PR #{}", pr_number);
             return Ok(());
         }
 
-        for run_id in &run_ids {
+        let mut approved_count: usize = 0;
+
+        for run_id in &all_run_ids {
+            // Try the standard approval endpoint first.
             let approve_url = format!(
                 "{}/repos/{}/{}/actions/runs/{}/approve",
                 GITHUB_API_BASE, self.repo_owner, self.repo_name, run_id,
@@ -1427,33 +1467,167 @@ impl CloudAgentClient {
                 .await
             {
                 Ok(resp) if resp.status().is_success() => {
-                    tracing::info!("Approved workflow run {} for PR #{}", run_id, pr_number,);
+                    tracing::info!("Approved workflow run {} for PR #{}", run_id, pr_number);
+                    approved_count += 1;
+                    continue;
                 }
                 Ok(resp) => {
-                    tracing::warn!(
-                        "Failed to approve workflow run {} for PR #{} ({})",
+                    tracing::debug!(
+                        "Standard approve failed for workflow run {} on PR #{} ({})",
                         run_id,
                         pr_number,
                         resp.status(),
                     );
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "HTTP error approving workflow run {} for PR #{}: {}",
+                    tracing::debug!(
+                        "HTTP error on standard approve for workflow run {} on PR #{}: {}",
                         run_id,
                         pr_number,
                         e,
                     );
                 }
             }
+
+            // For `waiting` runs (e.g. deployment protection rules), try
+            // approving via the pending_deployments endpoint.
+            if waiting_run_ids.contains(run_id)
+                && self
+                    .approve_pending_deployments(*run_id, pr_number)
+                    .await
+            {
+                approved_count += 1;
+            }
         }
 
-        tracing::info!(
-            "Approved {} pending workflow run(s) for PR #{}",
-            run_ids.len(),
-            pr_number,
-        );
+        if approved_count > 0 {
+            tracing::info!(
+                "Approved {} of {} pending workflow run(s) for PR #{}",
+                approved_count,
+                all_run_ids.len(),
+                pr_number,
+            );
+        } else {
+            tracing::warn!(
+                "Found {} pending workflow run(s) for PR #{} but could not approve any",
+                all_run_ids.len(),
+                pr_number,
+            );
+        }
         Ok(())
+    }
+
+    /// Attempt to approve pending deployments for a workflow run.
+    ///
+    /// When a workflow run is in `waiting` status due to deployment protection
+    /// rules, the standard `/approve` endpoint does not work.  Instead we
+    /// must query the pending deployments and approve each environment.
+    async fn approve_pending_deployments(&self, run_id: u64, pr_number: u64) -> bool {
+        let pending_url = format!(
+            "{}/repos/{}/{}/actions/runs/{}/pending_deployments",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, run_id,
+        );
+
+        let pending_resp = match self
+            .http
+            .get(&pending_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to fetch pending deployments for run {} (PR #{}): {}",
+                    run_id,
+                    pr_number,
+                    e,
+                );
+                return false;
+            }
+        };
+
+        if !pending_resp.status().is_success() {
+            tracing::debug!(
+                "Pending deployments request failed for run {} (PR #{}) ({})",
+                run_id,
+                pr_number,
+                pending_resp.status(),
+            );
+            return false;
+        }
+
+        let deployments: serde_json::Value = match pending_resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to parse pending deployments for run {} (PR #{}): {}",
+                    run_id,
+                    pr_number,
+                    e,
+                );
+                return false;
+            }
+        };
+
+        let env_ids: Vec<u64> = deployments
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|d| d.pointer("/environment/id").and_then(|v| v.as_u64()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if env_ids.is_empty() {
+            return false;
+        }
+
+        let approve_body = serde_json::json!({
+            "environment_ids": env_ids,
+            "state": "approved",
+            "comment": "Approved by wreck-it",
+        });
+
+        match self
+            .http
+            .post(&pending_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&approve_body)
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                tracing::info!(
+                    "Approved pending deployments for workflow run {} (PR #{})",
+                    run_id,
+                    pr_number,
+                );
+                true
+            }
+            Ok(resp) => {
+                tracing::warn!(
+                    "Failed to approve pending deployments for run {} (PR #{}) ({})",
+                    run_id,
+                    pr_number,
+                    resp.status(),
+                );
+                false
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "HTTP error approving pending deployments for run {} (PR #{}): {}",
+                    run_id,
+                    pr_number,
+                    e,
+                );
+                false
+            }
+        }
     }
 
     /// Merge a pull request using a squash merge.

@@ -1251,6 +1251,326 @@ impl GitHubClient {
         worker::console_log!("Posted comment on PR #{}", pr_number);
         Ok(())
     }
+
+    /// Approve any pending workflow runs for a pull request.
+    ///
+    /// When a repo requires approval for Actions (e.g. first-time contributors,
+    /// outside collaborators, or fork PRs), workflow runs may sit in
+    /// `action_required`, `pending`, or `waiting` status until explicitly
+    /// approved.  This method fetches the PR's head SHA, lists workflow runs
+    /// for that commit across all three statuses, and approves every run that
+    /// is waiting.
+    pub async fn approve_pending_workflow_runs(&self, pr_number: u64) -> Result<(), String> {
+        // Fetch the PR to obtain the head SHA.
+        let pr_url = format!(
+            "https://api.github.com/repos/{}/{}/pulls/{}",
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            pr_number,
+        );
+
+        let mut headers = worker::Headers::new();
+        headers.set("Accept", "application/vnd.github+json").ok();
+        headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        headers.set("User-Agent", "wreck-it-worker").ok();
+        headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+        let request = worker::Request::new_with_init(
+            &pr_url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Get)
+                .with_headers(headers),
+        )
+        .map_err(|e| format!("Failed to create request: {e}"))?;
+
+        let mut response = Fetch::Request(request)
+            .send()
+            .await
+            .map_err(|e| format!("GitHub API request failed: {e}"))?;
+
+        if response.status_code() != 200 {
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!(
+                "Failed to fetch PR #{pr_number} ({}): {body}",
+                response.status_code(),
+            ));
+        }
+
+        let pr: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse PR response: {e}"))?;
+
+        let head_sha = pr
+            .pointer("/head/sha")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "Missing head SHA in PR response".to_string())?;
+
+        // Query workflow runs across all statuses that may indicate a run is
+        // waiting for approval.  Depending on the repository configuration,
+        // GitHub may place pending runs in `action_required` (fork PRs),
+        // `pending` (first-time contributors), or `waiting` (outside
+        // collaborators / deployment protection rules).
+        let mut all_run_ids: Vec<u64> = Vec::new();
+        let mut waiting_run_ids: Vec<u64> = Vec::new();
+
+        for status_filter in &["action_required", "pending", "waiting"] {
+            let runs_url = format!(
+                "https://api.github.com/repos/{}/{}/actions/runs?head_sha={}&status={}",
+                url_encode(&self.owner),
+                url_encode(&self.repo),
+                url_encode(head_sha),
+                status_filter,
+            );
+
+            let mut run_headers = worker::Headers::new();
+            run_headers.set("Accept", "application/vnd.github+json").ok();
+            run_headers
+                .set("Authorization", &format!("Bearer {}", self.token))
+                .ok();
+            run_headers.set("User-Agent", "wreck-it-worker").ok();
+            run_headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+            let run_request = match worker::Request::new_with_init(
+                &runs_url,
+                worker::RequestInit::new()
+                    .with_method(worker::Method::Get)
+                    .with_headers(run_headers),
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    worker::console_warn!(
+                        "Failed to create {} workflow runs request for PR #{}: {}",
+                        status_filter,
+                        pr_number,
+                        e,
+                    );
+                    continue;
+                }
+            };
+
+            let mut run_response = match Fetch::Request(run_request).send().await {
+                Ok(r) => r,
+                Err(e) => {
+                    worker::console_warn!(
+                        "Failed to list {} workflow runs for PR #{}: {}",
+                        status_filter,
+                        pr_number,
+                        e,
+                    );
+                    continue;
+                }
+            };
+
+            if run_response.status_code() != 200 {
+                continue;
+            }
+
+            let runs: serde_json::Value = match run_response.json().await {
+                Ok(v) => v,
+                Err(e) => {
+                    worker::console_warn!(
+                        "Failed to parse {} workflow runs for PR #{}: {}",
+                        status_filter,
+                        pr_number,
+                        e,
+                    );
+                    continue;
+                }
+            };
+
+            if let Some(arr) = runs["workflow_runs"].as_array() {
+                for run in arr {
+                    if let Some(id) = run["id"].as_u64() {
+                        if !all_run_ids.contains(&id) {
+                            all_run_ids.push(id);
+                            if *status_filter == "waiting" {
+                                waiting_run_ids.push(id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if all_run_ids.is_empty() {
+            return Ok(());
+        }
+
+        let mut approved_count: usize = 0;
+
+        for run_id in &all_run_ids {
+            // Try the standard approval endpoint first.
+            let approve_url = format!(
+                "https://api.github.com/repos/{}/{}/actions/runs/{}/approve",
+                url_encode(&self.owner),
+                url_encode(&self.repo),
+                run_id,
+            );
+
+            let mut approve_headers = worker::Headers::new();
+            approve_headers
+                .set("Accept", "application/vnd.github+json")
+                .ok();
+            approve_headers
+                .set("Authorization", &format!("Bearer {}", self.token))
+                .ok();
+            approve_headers.set("User-Agent", "wreck-it-worker").ok();
+            approve_headers
+                .set("X-GitHub-Api-Version", "2022-11-28")
+                .ok();
+
+            let approve_request = match worker::Request::new_with_init(
+                &approve_url,
+                worker::RequestInit::new()
+                    .with_method(worker::Method::Post)
+                    .with_headers(approve_headers),
+            ) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+
+            match Fetch::Request(approve_request).send().await {
+                Ok(r) if r.status_code() < 300 => {
+                    worker::console_log!(
+                        "Approved workflow run {} for PR #{}",
+                        run_id,
+                        pr_number,
+                    );
+                    approved_count += 1;
+                    continue;
+                }
+                _ => {}
+            }
+
+            // For `waiting` runs (deployment protection rules), try
+            // approving via the pending_deployments endpoint.
+            if waiting_run_ids.contains(run_id)
+                && self
+                    .approve_pending_deployments(*run_id, pr_number)
+                    .await
+            {
+                approved_count += 1;
+            }
+        }
+
+        if approved_count > 0 {
+            worker::console_log!(
+                "Approved {} of {} pending workflow run(s) for PR #{}",
+                approved_count,
+                all_run_ids.len(),
+                pr_number,
+            );
+        }
+        Ok(())
+    }
+
+    /// Attempt to approve pending deployments for a workflow run.
+    ///
+    /// When a workflow run is in `waiting` status due to deployment protection
+    /// rules, the standard `/approve` endpoint does not work.  Instead we
+    /// must query the pending deployments and approve each environment.
+    async fn approve_pending_deployments(&self, run_id: u64, pr_number: u64) -> bool {
+        let pending_url = format!(
+            "https://api.github.com/repos/{}/{}/actions/runs/{}/pending_deployments",
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            run_id,
+        );
+
+        let mut headers = worker::Headers::new();
+        headers.set("Accept", "application/vnd.github+json").ok();
+        headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        headers.set("User-Agent", "wreck-it-worker").ok();
+        headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+        let request = match worker::Request::new_with_init(
+            &pending_url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Get)
+                .with_headers(headers),
+        ) {
+            Ok(r) => r,
+            Err(_) => return false,
+        };
+
+        let mut response = match Fetch::Request(request).send().await {
+            Ok(r) => r,
+            Err(_) => return false,
+        };
+
+        if response.status_code() != 200 {
+            return false;
+        }
+
+        let deployments: serde_json::Value = match response.json().await {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+
+        let env_ids: Vec<u64> = deployments
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|d| d.pointer("/environment/id").and_then(|v| v.as_u64()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if env_ids.is_empty() {
+            return false;
+        }
+
+        let approve_body = serde_json::json!({
+            "environment_ids": env_ids,
+            "state": "approved",
+            "comment": "Approved by wreck-it",
+        });
+        let body_json = match serde_json::to_string(&approve_body) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+
+        let mut post_headers = worker::Headers::new();
+        post_headers
+            .set("Accept", "application/vnd.github+json")
+            .ok();
+        post_headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        post_headers.set("User-Agent", "wreck-it-worker").ok();
+        post_headers
+            .set("X-GitHub-Api-Version", "2022-11-28")
+            .ok();
+        post_headers.set("Content-Type", "application/json").ok();
+
+        let post_request = match worker::Request::new_with_init(
+            &pending_url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Post)
+                .with_headers(post_headers)
+                .with_body(Some(worker::wasm_bindgen::JsValue::from_str(&body_json))),
+        ) {
+            Ok(r) => r,
+            Err(_) => return false,
+        };
+
+        match Fetch::Request(post_request).send().await {
+            Ok(r) if r.status_code() < 300 => {
+                worker::console_log!(
+                    "Approved pending deployments for workflow run {} (PR #{})",
+                    run_id,
+                    pr_number,
+                );
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
