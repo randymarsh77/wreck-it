@@ -6,7 +6,11 @@
 #
 # Required secrets:
 #   PAT_TOKEN – Personal Access Token with repo scope.  Used for the
-#               GitHub API calls that list PRs and post comments.
+#               GitHub API calls that list PRs and post comments.  Also
+#               set as GITHUB_TOKEN so the wreck-it action can authenticate
+#               with the GitHub API (the default GITHUB_TOKEN lacks the
+#               scopes needed to create issue/PR comments on behalf of the
+#               PAT owner).
 name: Unstuck
 
 on:

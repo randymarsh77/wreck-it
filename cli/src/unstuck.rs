@@ -49,7 +49,7 @@ pub async fn run_unstuck(config: &Config) -> Result<()> {
 
     println!("[wreck-it] unstuck: found {} open PR(s)", prs.len());
 
-    let mut fixed = 0u32;
+    let mut requested = 0u32;
     for pr in &prs {
         match client.has_failing_checks_for_pr(pr.number).await {
             Ok(true) => {
@@ -72,7 +72,7 @@ pub async fn run_unstuck(config: &Config) -> Result<()> {
                         pr.number, e,
                     );
                 } else {
-                    fixed += 1;
+                    requested += 1;
                 }
             }
             Ok(false) => {
@@ -91,8 +91,8 @@ pub async fn run_unstuck(config: &Config) -> Result<()> {
     }
 
     println!(
-        "[wreck-it] unstuck: done — commented on {} PR(s) with failing checks",
-        fixed,
+        "[wreck-it] unstuck: done — requested fixes on {} PR(s) with failing checks",
+        requested,
     );
     Ok(())
 }

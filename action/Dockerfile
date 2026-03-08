@@ -31,7 +31,9 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 
 # Install the Copilot CLI extension so that `gh copilot` is available inside
 # the container.  The GITHUB_TOKEN env var must be set at runtime for auth.
-RUN gh extension install github/gh-copilot || true
+# The install may fail in environments without network access; log the error
+# but allow the build to continue since wreck-it itself does not require it.
+RUN gh extension install github/gh-copilot 2>&1 || echo "[wreck-it] gh-copilot extension install skipped"
 
 COPY --from=builder /build/target/release/wreck-it /usr/local/bin/wreck-it
 
