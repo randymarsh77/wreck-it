@@ -2399,7 +2399,6 @@ impl CloudAgentClient {
     }
 
     /// List all open pull requests in the repository.
-    #[allow(dead_code)]
     pub async fn list_open_prs(&self) -> Result<Vec<OpenPr>> {
         let mut prs = Vec::new();
         let mut page = 1u32;

@@ -223,6 +223,7 @@ mod tests {
                 branch: None,
                 agent: None,
                 reviewers: None,
+                command: None,
             }],
             ..RepoConfig::default()
         };

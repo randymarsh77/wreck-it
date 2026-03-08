@@ -16,6 +16,9 @@ inputs:
     description: 'Git branch used to persist wreck-it state (orphan branch)'
     required: false
     default: 'wreck-it-state'
+  copilot_token:
+    description: 'Token for authenticating with the Copilot CLI (e.g. a PAT with copilot scope)'
+    required: false
 runs:
   using: 'docker'
   image: 'docker://ghcr.io/randymarsh77/wreck-it:latest'
@@ -24,3 +27,4 @@ runs:
     INPUT_MAX_ITERATIONS: ${{ inputs.max_iterations }}
     INPUT_VERIFY_COMMAND: ${{ inputs.verify_command }}
     INPUT_STATE_BRANCH: ${{ inputs.state_branch }}
+    INPUT_COPILOT_TOKEN: ${{ inputs.copilot_token }}

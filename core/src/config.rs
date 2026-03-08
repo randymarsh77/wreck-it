@@ -87,6 +87,15 @@ pub struct RalphConfig {
     /// omitted, the PR proceeds directly to merge without review.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewers: Option<Vec<String>>,
+
+    /// Optional command override for this ralph context.
+    ///
+    /// When set to `"unstuck"`, the headless runner skips the normal task
+    /// state machine and instead scans all open PRs for failing CI checks,
+    /// commenting `@copilot` to request fixes.  If omitted, the default
+    /// headless loop runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
 }
 
 fn default_state_branch() -> String {

@@ -186,6 +186,14 @@ pub enum Commands {
         work_dir: Option<PathBuf>,
     },
 
+    /// Scan open PRs (and optionally the default branch) for failing CI
+    /// checks and comment `@copilot` to request fixes.
+    Unstuck {
+        /// Working directory (defaults to current directory)
+        #[arg(short, long)]
+        work_dir: Option<PathBuf>,
+    },
+
     /// Export the task dependency graph in Mermaid or GraphViz DOT format.
     Graph {
         /// Path to the task file to read (default: tasks.json)
