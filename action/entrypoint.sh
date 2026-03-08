@@ -7,6 +7,12 @@ git config --global --add safe.directory "$(pwd)"
 git config --global user.name "wreck-it[bot]"
 git config --global user.email "wreck-it[bot]@users.noreply.github.com"
 
+# Authenticate the Copilot CLI when a token is provided.
+if [ -n "${INPUT_COPILOT_TOKEN}" ]; then
+  export GITHUB_TOKEN="${INPUT_COPILOT_TOKEN}"
+  echo "[wreck-it] Copilot token configured"
+fi
+
 echo "[wreck-it] running headless iteration in $(pwd)"
 
 # wreck-it automatically creates a worktree at .wreck-it/state for the state

@@ -6,6 +6,7 @@ use std::path::Path;
 /// Workflow files embedded at compile time from `templates/workflows/`.
 const RALPH_WORKFLOW: &str = include_str!("../../templates/workflows/ralph.yml");
 const PLAN_WORKFLOW: &str = include_str!("../../templates/workflows/plan.yml");
+const UNSTUCK_WORKFLOW: &str = include_str!("../../templates/workflows/unstuck.yml");
 
 /// Summary of what was created during an install.
 #[derive(Debug)]
@@ -94,6 +95,14 @@ pub fn install(target_dir: &Path) -> Result<InstallResult> {
         &mut skipped,
     )?;
 
+    write_if_missing(
+        &workflows_dir.join("unstuck.yml"),
+        UNSTUCK_WORKFLOW,
+        ".github/workflows/unstuck.yml",
+        &mut written,
+        &mut skipped,
+    )?;
+
     Ok(InstallResult {
         written,
         skipped,
@@ -176,6 +185,21 @@ mod tests {
     }
 
     #[test]
+    fn test_install_creates_unstuck_workflow() {
+        let dir = tempdir().unwrap();
+        let result = install(dir.path()).unwrap();
+
+        assert!(result
+            .written
+            .contains(&".github/workflows/unstuck.yml".to_string()));
+        assert!(dir.path().join(".github/workflows/unstuck.yml").exists());
+
+        let content =
+            std::fs::read_to_string(dir.path().join(".github/workflows/unstuck.yml")).unwrap();
+        assert!(content.contains("Unstuck"));
+    }
+
+    #[test]
     fn test_install_skips_existing_files() {
         let dir = tempdir().unwrap();
 
@@ -193,6 +217,9 @@ mod tests {
         assert!(result
             .skipped
             .contains(&".github/workflows/plan.yml".to_string()));
+        assert!(result
+            .skipped
+            .contains(&".github/workflows/unstuck.yml".to_string()));
         assert!(result.ralphs_added.is_empty());
     }
 
@@ -223,6 +250,7 @@ mod tests {
                 branch: None,
                 agent: None,
                 reviewers: None,
+                command: None,
             }],
             ..RepoConfig::default()
         };

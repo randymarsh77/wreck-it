@@ -1,0 +1,40 @@
+# wreck-it unstuck workflow: scan open PRs for failing CI checks and ask
+# @copilot to fix them.
+#
+# This workflow uses the published Docker image so it can also detect and
+# fix failures on the default branch.
+#
+# Required secrets:
+#   PAT_TOKEN – Personal Access Token with repo scope.  Used for the
+#               GitHub API calls that list PRs and post comments.
+name: Unstuck
+
+on:
+  schedule:
+    # Run every hour
+    - cron: '0 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: unstuck
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  models: read
+
+jobs:
+  unstuck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          fetch-depth: 0
+
+      - name: Run wreck-it unstuck
+        uses: randymarsh77/wreck-it/action@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}

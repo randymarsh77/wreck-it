@@ -28,6 +28,7 @@ mod task_manager;
 mod templates;
 mod tui;
 mod types;
+mod unstuck;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -234,7 +235,11 @@ async fn main() -> Result<()> {
                     let config = build_config(Some(rc));
                     save_user_config(&config)?;
 
-                    if headless {
+                    if rc.command.as_deref() == Some("unstuck") {
+                        if let Err(e) = unstuck::run_unstuck(&config).await {
+                            println!("[wreck-it] ralph '{}' (unstuck) failed: {}. Continuing…", rc.name, e);
+                        }
+                    } else if headless {
                         if let Err(e) = headless::run_headless(config, Some(rc)).await {
                             println!("[wreck-it] ralph '{}' failed: {}. Continuing…", rc.name, e);
                         }
@@ -355,6 +360,7 @@ async fn main() -> Result<()> {
                         branch: None,
                         agent: None,
                         reviewers: None,
+                        command: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -450,6 +456,7 @@ async fn main() -> Result<()> {
                         branch: None,
                         agent: None,
                         reviewers: None,
+                        command: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -791,6 +798,18 @@ async fn main() -> Result<()> {
             } else {
                 println!("\nInstallation complete! Configure PAT_TOKEN secret and enable workflows.");
             }
+        }
+
+        Commands::Unstuck { work_dir } => {
+            let resolved_work_dir = work_dir.unwrap_or_else(|| env::current_dir().unwrap_or_default());
+
+            let mut config = load_user_config().unwrap_or_default();
+            config.work_dir = resolved_work_dir;
+            config.api_token = config
+                .api_token
+                .or_else(|| env::var("GITHUB_TOKEN").ok());
+
+            unstuck::run_unstuck(&config).await?;
         }
 
         Commands::Graph {
