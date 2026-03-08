@@ -57,6 +57,28 @@ fn is_trusted_pr_author(pr: &types::PullRequest, authenticated_login: Option<&st
     wreck_it_core::types::is_trusted_pr_author(login, authenticated_login)
 }
 
+/// Determine whether a pull request webhook event should be processed.
+///
+/// Returns `true` for:
+///   - `closed` + `merged == true` (task completion signal)
+///   - `opened`, `ready_for_review`, `synchronize` (workflow approval)
+///
+/// In all cases the PR must be from a trusted author.
+fn should_process_pr_event(
+    action: &str,
+    pr: &types::PullRequest,
+    authenticated_login: Option<&str>,
+) -> bool {
+    if !is_trusted_pr_author(pr, authenticated_login) {
+        return false;
+    }
+    let merged = pr.merged.unwrap_or(false);
+    (action == "closed" && merged)
+        || action == "opened"
+        || action == "ready_for_review"
+        || action == "synchronize"
+}
+
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     // Only accept POST requests at the webhook endpoint.
@@ -165,26 +187,11 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         }
         WebhookEvent::PullRequest => {
             let action = payload.action.as_deref().unwrap_or("");
-            let trusted = payload
+            payload
                 .pull_request
                 .as_ref()
-                .map(|pr| is_trusted_pr_author(pr, auth_login_ref))
-                .unwrap_or(false);
-            if !trusted {
-                false
-            } else {
-                let merged = payload
-                    .pull_request
-                    .as_ref()
-                    .and_then(|pr| pr.merged)
-                    .unwrap_or(false);
-                // Process merged PRs (task completion signal) and
-                // newly created / updated PRs (workflow approval).
-                (action == "closed" && merged)
-                    || action == "opened"
-                    || action == "ready_for_review"
-                    || action == "synchronize"
-            }
+                .map(|pr| should_process_pr_event(action, pr, auth_login_ref))
+                .unwrap_or(false)
         }
         _ => false,
     };
@@ -555,5 +562,79 @@ mod tests {
     fn untrusted_pr_author_login_mismatch() {
         let pr = make_pr("attacker", "User");
         assert!(!is_trusted_pr_author(&pr, Some("my-user")));
+    }
+
+    // ---- should_process_pr_event ----
+
+    #[test]
+    fn process_pr_merged_trusted() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.merged = Some(true);
+        assert!(should_process_pr_event("closed", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_closed_not_merged_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(!should_process_pr_event("closed", &pr, None));
+    }
+
+    #[test]
+    fn process_pr_opened_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(should_process_pr_event("opened", &pr, None));
+    }
+
+    #[test]
+    fn process_pr_ready_for_review_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(should_process_pr_event("ready_for_review", &pr, None));
+    }
+
+    #[test]
+    fn process_pr_synchronize_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(should_process_pr_event("synchronize", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_opened_untrusted() {
+        let pr = make_pr("attacker", "User");
+        assert!(!should_process_pr_event("opened", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_ready_for_review_untrusted() {
+        let pr = make_pr("attacker", "User");
+        assert!(!should_process_pr_event("ready_for_review", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_synchronize_untrusted() {
+        let pr = make_pr("attacker", "User");
+        assert!(!should_process_pr_event("synchronize", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_unknown_action_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(!should_process_pr_event("edited", &pr, None));
+    }
+
+    #[test]
+    fn process_pr_opened_authenticated_user() {
+        let pr = make_pr("my-user", "User");
+        assert!(should_process_pr_event("opened", &pr, Some("my-user")));
+    }
+
+    #[test]
+    fn reject_pr_no_user() {
+        let pr = types::PullRequest {
+            number: 1,
+            state: "open".into(),
+            merged: None,
+            user: None,
+        };
+        assert!(!should_process_pr_event("opened", &pr, None));
     }
 }
