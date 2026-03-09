@@ -1,5 +1,6 @@
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 // Re-export shared types from wreck-it-core so that the rest of the crate
@@ -152,6 +153,20 @@ pub struct Config {
     /// to the estimate).  Leave `None` to impose no budget limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cost_usd: Option<f64>,
+
+    /// Optional per-task or per-role working directory overrides.
+    ///
+    /// Maps a task id or role name (e.g. `"frontend"`, `"backend"`) to an
+    /// absolute or relative path of a local git repository.  When a task's
+    /// `id` (or `role`) matches a key in this map, the agent uses that path
+    /// as its working directory instead of the top-level [`Config::work_dir`].
+    ///
+    /// This is the entry point for **multi-repository orchestration**: a
+    /// single `wreck-it run` invocation can coordinate tasks that span
+    /// multiple local git repositories by routing each task to the
+    /// appropriate repo.  See `docs/multi-repo.md` for the full design.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub work_dirs: HashMap<String, String>,
 }
 
 fn default_max_iterations() -> usize {
@@ -208,6 +223,7 @@ impl Default for Config {
             github_issues_enabled: false,
             github_repo: None,
             max_cost_usd: None,
+            work_dirs: HashMap::new(),
         }
     }
 }
@@ -820,5 +836,41 @@ mod tests {
         assert!(loaded[0].parent_id.is_none());
         assert_eq!(loaded[1].parent_id.as_deref(), Some("epic-1"));
         assert_eq!(loaded[1].labels, vec!["backend"]);
+    }
+
+    // ---- work_dirs tests ----
+
+    #[test]
+    fn config_work_dirs_defaults_to_empty() {
+        let config = Config::default();
+        assert!(config.work_dirs.is_empty());
+    }
+
+    #[test]
+    fn config_work_dirs_omitted_when_empty() {
+        let config = Config::default();
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(
+            !json.contains("work_dirs"),
+            "empty work_dirs should be omitted from serialization"
+        );
+    }
+
+    #[test]
+    fn config_work_dirs_roundtrip() {
+        let mut config = Config::default();
+        config.work_dirs.insert("frontend".to_string(), "/repos/frontend".to_string());
+        config.work_dirs.insert("backend".to_string(), "/repos/backend".to_string());
+        let json = serde_json::to_string(&config).unwrap();
+        let loaded: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.work_dirs.get("frontend").map(String::as_str), Some("/repos/frontend"));
+        assert_eq!(loaded.work_dirs.get("backend").map(String::as_str), Some("/repos/backend"));
+    }
+
+    #[test]
+    fn config_work_dirs_defaults_when_absent_from_json() {
+        let json = r#"{"max_iterations":5}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.work_dirs.is_empty());
     }
 }
