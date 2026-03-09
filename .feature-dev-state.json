@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 15,
-  "current_task_id": "test-github-issues-integration",
-  "issue_number": 172,
-  "last_prompt": "Add tests for the GitHub Issues integration. Mock the GitHub REST API (using httpmock or wiremock, or a simple tokio TCP server) to verify: (1) a POST to /repos/{owner}/{repo}/issues is made when a task transitions to InProgress, (2) a PATCH request to close the issue is made when the task reaches Completed or Failed, (3) when github_issues_enabled is false, no HTTP calls are made, (4) a GitHub API error (e.g. 401 Unauthorized) logs a warning and does not abort the loop. Run `cargo test` to confirm all tests pass.",
+  "iteration": 16,
+  "current_task_id": "eval-github-issues-integration",
+  "issue_number": 175,
+  "last_prompt": "Evaluate the GitHub Issues integration. Review cli/src/github_client.rs, Config changes, CLI flags, and ralph_loop.rs call sites. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the feature is opt-in (no behavior change when github_issues_enabled is false or absent), (3) GITHUB_TOKEN environment variable fallback works correctly, (4) the feature is documented in README.md with a short description and the new CLI flags, (5) no sensitive tokens are logged at any level. Fix any issues found and mark the task complete.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -160,6 +160,10 @@
     "iteration 14: enabled auto-merge for PR #162",
     "iteration 14: enabled auto-merge for PR #162",
     "advance: merged PR #162",
-    "iteration 15: triggered cloud agent for task test-github-issues-integration (issue #172)"
+    "iteration 15: triggered cloud agent for task test-github-issues-integration (issue #172)",
+    "iteration 15: agent created PR #173 for task Some(\"test-github-issues-integration\")",
+    "iteration 15: marked PR #173 as ready for review",
+    "iteration 15: merged PR #173 for task Some(\"test-github-issues-integration\") (brute mode)",
+    "iteration 16: triggered cloud agent for task eval-github-issues-integration (issue #175)"
   ]
 }
