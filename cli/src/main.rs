@@ -361,6 +361,7 @@ async fn main() -> Result<()> {
                         agent: None,
                         reviewers: None,
                         command: None,
+                        brute_mode: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -457,6 +458,7 @@ async fn main() -> Result<()> {
                         agent: None,
                         reviewers: None,
                         command: None,
+                        brute_mode: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }

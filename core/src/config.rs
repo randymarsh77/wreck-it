@@ -96,6 +96,14 @@ pub struct RalphConfig {
     /// headless loop runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+
+    /// When `true`, enables "brute mode" for this ralph context.
+    ///
+    /// In brute mode the headless runner disables auto-merge (if it was
+    /// previously enabled) and merges pull requests directly instead of
+    /// waiting for GitHub's auto-merge to kick in once checks pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brute_mode: Option<bool>,
 }
 
 fn default_state_branch() -> String {
