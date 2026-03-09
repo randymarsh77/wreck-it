@@ -100,6 +100,7 @@ Options:
 - `-t, --task-file <PATH>`: Path to task file (default: `tasks.json`)
 - `-m, --max-iterations <NUM>`: Maximum iterations (default: `100`)
 - `-w, --work-dir <PATH>`: Working directory (default: `.`)
+- `--work-dir-map <ROLE_OR_ID=PATH>`: Override the working directory for tasks matching a role or ID (may be repeated; see `docs/multi-repo.md`)
 - `--model-provider <github-models|copilot|llama>`: Model provider
 - `--api-endpoint <URL>`: Provider endpoint (for local llama use `http://localhost:11434/v1`)
 - `--api-token <TOKEN>`: API token (can also be set via `COPILOT_API_TOKEN` env var)
