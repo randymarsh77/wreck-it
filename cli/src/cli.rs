@@ -226,6 +226,20 @@ pub enum Commands {
         work_dir: Option<PathBuf>,
     },
 
+    /// Scan open PRs for merge conflicts with the base branch and resolve
+    /// them.  Uses a cloud coding agent by default; pass `--backend cli` to
+    /// merge locally and push.
+    Merge {
+        /// Working directory (defaults to current directory)
+        #[arg(short, long)]
+        work_dir: Option<PathBuf>,
+
+        /// Backend to use for conflict resolution: "cloud_agent" (default)
+        /// or "cli".
+        #[arg(long, default_value = "cloud_agent")]
+        backend: String,
+    },
+
     /// Export the task dependency graph in Mermaid or GraphViz DOT format.
     Graph {
         /// Path to the task file to read (default: tasks.json)

@@ -30,6 +30,7 @@ mod task_manager;
 mod templates;
 mod tui;
 mod types;
+mod merge;
 mod unstuck;
 
 use anyhow::{Context, Result};
@@ -279,6 +280,15 @@ async fn main() -> Result<()> {
                                 rc.name, e
                             );
                         }
+                    } else if rc.command.as_deref() == Some("merge") {
+                        if let Err(e) =
+                            merge::run_merge(&config, rc.backend.as_deref()).await
+                        {
+                            println!(
+                                "[wreck-it] ralph '{}' (merge) failed: {}. Continuing…",
+                                rc.name, e
+                            );
+                        }
                     } else if headless {
                         if let Err(e) = headless::run_headless(config, Some(rc)).await {
                             println!("[wreck-it] ralph '{}' failed: {}. Continuing…", rc.name, e);
@@ -402,6 +412,7 @@ async fn main() -> Result<()> {
                         reviewers: None,
                         command: None,
                         brute_mode: None,
+                        backend: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -499,6 +510,7 @@ async fn main() -> Result<()> {
                         reviewers: None,
                         command: None,
                         brute_mode: None,
+                        backend: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -853,6 +865,17 @@ async fn main() -> Result<()> {
             config.api_token = config.api_token.or_else(|| env::var("GITHUB_TOKEN").ok());
 
             unstuck::run_unstuck(&config).await?;
+        }
+
+        Commands::Merge { work_dir, backend } => {
+            let resolved_work_dir =
+                work_dir.unwrap_or_else(|| env::current_dir().unwrap_or_default());
+
+            let mut config = load_user_config().unwrap_or_default();
+            config.work_dir = resolved_work_dir;
+            config.api_token = config.api_token.or_else(|| env::var("GITHUB_TOKEN").ok());
+
+            merge::run_merge(&config, Some(&backend)).await?;
         }
 
         Commands::Graph {
