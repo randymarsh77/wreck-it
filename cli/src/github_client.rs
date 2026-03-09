@@ -181,6 +181,7 @@ impl GitHubIssueClient {
     /// Creates the label with a default colour (`#0075ca`) if it does not
     /// already exist.  If the label already exists (HTTP 422) the error is
     /// silently ignored.
+    #[allow(dead_code)]
     pub async fn ensure_label(&self) -> Result<()> {
         let url = format!("{GITHUB_API_BASE}/repos/{}/labels", self.repo);
 
