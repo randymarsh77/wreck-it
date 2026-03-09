@@ -287,18 +287,19 @@
   {
     "id": "impl-multi-repo-orchestration",
     "description": "Implement the multi-repository orchestration feature designed in ideas-multi-repo-orchestration. Add `work_dirs: HashMap<String, String>` to Config in cli/src/types.rs (maps task-id prefix or role to a local path; absent means use the default work_dir). In cli/src/ralph_loop.rs, resolve the effective work_dir for each task before dispatching it to the agent. In cli/src/agent.rs, accept a per-call work_dir override so that file context, test running, and git commits all use the resolved path. Add a `--work-dir-map <ROLE_OR_ID>=<PATH>` CLI flag (multi-value) in cli/src/cli.rs that populates the config map. Create the docs/multi-repo.md documentation file explaining the feature and providing an example config.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-multi-repo-orchestration"
     ],
     "priority": 2,
-    "complexity": 5
+    "complexity": 5,
+    "last_attempt_at": 1773055547
   },
   {
     "id": "test-multi-repo-orchestration",
     "description": "Add tests for the multi-repository orchestration feature. In cli/src/ or a test module, write tests using temporary directories to verify: (1) when `work_dirs` maps a task id to a secondary path, the agent receives the correct work_dir for that task while other tasks use the default, (2) git commits are made to the correct repository (not the default one) when a task is mapped to a different path, (3) when `work_dirs` is empty or absent, behavior is identical to the current single-repo behavior. Run `cargo test` to confirm all tests pass.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "impl-multi-repo-orchestration"

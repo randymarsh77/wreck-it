@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 26,
-  "current_task_id": "impl-multi-repo-orchestration",
-  "issue_number": 195,
-  "last_prompt": "Implement the multi-repository orchestration feature designed in ideas-multi-repo-orchestration. Add `work_dirs: HashMap<String, String>` to Config in cli/src/types.rs (maps task-id prefix or role to a local path; absent means use the default work_dir). In cli/src/ralph_loop.rs, resolve the effective work_dir for each task before dispatching it to the agent. In cli/src/agent.rs, accept a per-call work_dir override so that file context, test running, and git commits all use the resolved path. Add a `--work-dir-map <ROLE_OR_ID>=<PATH>` CLI flag (multi-value) in cli/src/cli.rs that populates the config map. Create the docs/multi-repo.md documentation file explaining the feature and providing an example config.",
+  "iteration": 27,
+  "current_task_id": "test-multi-repo-orchestration",
+  "issue_number": 197,
+  "last_prompt": "Add tests for the multi-repository orchestration feature. In cli/src/ or a test module, write tests using temporary directories to verify: (1) when `work_dirs` maps a task id to a secondary path, the agent receives the correct work_dir for that task while other tasks use the default, (2) git commits are made to the correct repository (not the default one) when a task is mapped to a different path, (3) when `work_dirs` is empty or absent, behavior is identical to the current single-repo behavior. Run `cargo test` to confirm all tests pass.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -204,6 +204,10 @@
     "iteration 25: agent created PR #194 for task Some(\"ideas-multi-repo-orchestration\")",
     "iteration 25: marked PR #194 as ready for review",
     "iteration 25: merged PR #194 for task Some(\"ideas-multi-repo-orchestration\") (brute mode)",
-    "iteration 26: triggered cloud agent for task impl-multi-repo-orchestration (issue #195)"
+    "iteration 26: triggered cloud agent for task impl-multi-repo-orchestration (issue #195)",
+    "iteration 26: agent created PR #196 for task Some(\"impl-multi-repo-orchestration\")",
+    "iteration 26: marked PR #196 as ready for review",
+    "iteration 26: merged PR #196 for task Some(\"impl-multi-repo-orchestration\") (brute mode)",
+    "iteration 27: triggered cloud agent for task test-multi-repo-orchestration (issue #197)"
   ]
 }
