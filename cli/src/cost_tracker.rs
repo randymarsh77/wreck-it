@@ -342,6 +342,78 @@ mod tests {
         assert_eq!(out, PRICE_GPT4O_OUTPUT);
     }
 
+    /// Verify that total counters keep growing across two sequential tasks while
+    /// the per-task counters are correctly reset between them.
+    #[test]
+    fn accumulates_across_multiple_tasks() {
+        let mut tracker = CostTracker::new(PRICE_GPT4O_INPUT, PRICE_GPT4O_OUTPUT);
+
+        // ── Task 1 ────────────────────────────────────────────────────────────
+        let task1 = TokenUsage {
+            prompt_tokens: 1_000,
+            completion_tokens: 200,
+        };
+        tracker.record(&task1);
+        tracker.record(&task1);
+
+        assert_eq!(tracker.task_prompt_tokens, 2_000);
+        assert_eq!(tracker.task_completion_tokens, 400);
+        assert_eq!(tracker.total_prompt_tokens, 2_000);
+        assert_eq!(tracker.total_completion_tokens, 400);
+
+        tracker.reset_task();
+
+        // ── Task 2 ────────────────────────────────────────────────────────────
+        let task2 = TokenUsage {
+            prompt_tokens: 500,
+            completion_tokens: 100,
+        };
+        tracker.record(&task2);
+
+        // Per-task counters reflect only task 2.
+        assert_eq!(tracker.task_prompt_tokens, 500);
+        assert_eq!(tracker.task_completion_tokens, 100);
+
+        // Run totals must span both tasks.
+        assert_eq!(tracker.total_prompt_tokens, 2_500);
+        assert_eq!(tracker.total_completion_tokens, 500);
+
+        // Cumulative cost must be positive and greater than any single task.
+        assert!(tracker.total_estimated_cost_usd > tracker.task_estimated_cost_usd);
+    }
+
+    /// Verify that `estimated_cost_usd` is computed correctly for two distinct
+    /// known models (GPT-4o-mini and Claude Sonnet 4) using their published
+    /// per-million-token rates.
+    #[test]
+    fn estimated_cost_usd_two_known_models() {
+        // ── GPT-4o-mini ───────────────────────────────────────────────────────
+        // $0.15 / 1M input, $0.60 / 1M output
+        // 2_000_000 prompt + 1_000_000 completion
+        // expected = 2 * 0.15 + 1 * 0.60 = 0.30 + 0.60 = $0.90
+        let usage_mini = TokenUsage {
+            prompt_tokens: 2_000_000,
+            completion_tokens: 1_000_000,
+        };
+        let cost_mini = usage_mini.estimate_cost(PRICE_GPT4O_MINI_INPUT, PRICE_GPT4O_MINI_OUTPUT);
+        assert!((cost_mini - 0.90).abs() < 1e-9, "gpt-4o-mini cost was {cost_mini}");
+
+        // ── Claude Sonnet 4 ───────────────────────────────────────────────────
+        // $3.00 / 1M input, $15.00 / 1M output
+        // 1_000_000 prompt + 500_000 completion
+        // expected = 1 * 3.00 + 0.5 * 15.00 = 3.00 + 7.50 = $10.50
+        let usage_sonnet = TokenUsage {
+            prompt_tokens: 1_000_000,
+            completion_tokens: 500_000,
+        };
+        let cost_sonnet =
+            usage_sonnet.estimate_cost(PRICE_CLAUDE_SONNET_4_INPUT, PRICE_CLAUDE_SONNET_4_OUTPUT);
+        assert!(
+            (cost_sonnet - 10.50).abs() < 1e-9,
+            "claude-sonnet-4 cost was {cost_sonnet}"
+        );
+    }
+
     #[test]
     fn iteration_summary_format() {
         let mut tracker = CostTracker::new(2.50, 10.00);
