@@ -196,6 +196,82 @@ Options:
 - `-f, --format <mermaid|dot>`: Output format (default: `mermaid`)
 - `-o, --output <PATH>`: Write output to file instead of stdout
 
+### Manage Tasks from the CLI
+
+The `wreck-it tasks` family of sub-commands lets you inspect and edit task files without touching raw JSON.
+
+#### `tasks list` — list all tasks
+
+```bash
+# Print a table of all tasks
+wreck-it tasks list
+
+# Filter by status (pending | in-progress | completed | failed)
+wreck-it tasks list --status pending
+
+# Use a non-default task file
+wreck-it tasks list --task-file .wreck-it/my-tasks.json
+```
+
+Options:
+- `-t, --task-file <PATH>`: Task file to read (default: `tasks.json`)
+- `--status <STATUS>`: Show only tasks with this status (`pending`, `in-progress`, `completed`, `failed`)
+
+#### `tasks add` — append a new task
+
+```bash
+# Add a minimal task
+wreck-it tasks add --id my-task --description "Implement the widget"
+
+# Add a task with dependencies, phase, and priority
+wreck-it tasks add \
+  --id my-task \
+  --description "Implement the widget" \
+  --role implementer \
+  --phase 2 \
+  --priority 10 \
+  --depends-on setup,design
+```
+
+The command exits with an error if a task with the same `--id` already exists.
+
+Options:
+- `-t, --task-file <PATH>`: Task file to append to (default: `tasks.json`)
+- `--id <ID>`: Unique task identifier *(required)*
+- `-d, --description <TEXT>`: Human-readable task description *(required)*
+- `--role <ideas|implementer|evaluator>`: Agent role (default: `implementer`)
+- `--phase <N>`: Execution phase — lower phases run first (default: `1`)
+- `--priority <N>`: Scheduling priority — higher values run sooner (default: `0`)
+- `--depends-on <ID,...>`: Comma-separated list of task IDs this task depends on
+
+#### `tasks set-status` — update a task's status
+
+```bash
+wreck-it tasks set-status --id my-task --status completed
+```
+
+Exits with an error if no task with the given `--id` exists.
+
+Options:
+- `-t, --task-file <PATH>`: Task file to update (default: `tasks.json`)
+- `--id <ID>`: ID of the task to update *(required)*
+- `--status <STATUS>`: New status value (`pending`, `in-progress`, `completed`, `failed`) *(required)*
+
+#### `tasks validate` — check a task file for correctness
+
+```bash
+wreck-it tasks validate
+
+# Use a non-default task file
+wreck-it tasks validate --task-file .wreck-it/my-tasks.json
+```
+
+Checks for duplicate IDs, unresolved `depends_on` references, and circular dependencies.
+Prints each issue to stderr and **exits non-zero** when any issue is found, making it suitable for use in CI scripts.
+
+Options:
+- `-t, --task-file <PATH>`: Task file to validate (default: `tasks.json`)
+
 ### TUI Controls
 
 - **Space**: Pause/Resume the loop
