@@ -1486,12 +1486,13 @@ impl CloudAgentClient {
             if !fork_run_ids.contains(run_id) {
                 // For `waiting` runs (e.g. deployment protection rules), try
                 // approving via the pending_deployments endpoint.
-                if waiting_run_ids.contains(run_id)
-                    && self
+                if waiting_run_ids.contains(run_id) {
+                    if self
                         .approve_pending_deployments(*run_id, pr_number)
                         .await
-                {
-                    approved_count += 1;
+                    {
+                        approved_count += 1;
+                    }
                 } else {
                     tracing::debug!(
                         "Workflow run {} for PR #{} is not from a fork; skipping REST approve",
@@ -1568,7 +1569,7 @@ impl CloudAgentClient {
             );
         } else if skipped_count == all_run_ids.len() {
             tracing::debug!(
-                "All {} pending workflow run(s) for PR #{} are non-fork; no approval needed",
+                "All {} pending workflow run(s) for PR #{} are non-fork; no REST approval needed",
                 all_run_ids.len(),
                 pr_number,
             );

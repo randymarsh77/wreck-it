@@ -1442,12 +1442,13 @@ impl GitHubClient {
             if !fork_run_ids.contains(run_id) {
                 // For `waiting` runs (e.g. deployment protection rules), try
                 // approving via the pending_deployments endpoint.
-                if waiting_run_ids.contains(run_id)
-                    && self
+                if waiting_run_ids.contains(run_id) {
+                    if self
                         .approve_pending_deployments(*run_id, pr_number)
                         .await
-                {
-                    approved_count += 1;
+                    {
+                        approved_count += 1;
+                    }
                 } else {
                     skipped_count += 1;
                 }
