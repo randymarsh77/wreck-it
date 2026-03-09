@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 22,
-  "current_task_id": "impl-task-cli-management",
-  "issue_number": 187,
-  "last_prompt": "Implement the `wreck-it tasks` sub-command family designed in ideas-task-cli-management. Add a `Tasks` variant to the Commands enum in cli/src/cli.rs with `list`, `add`, `set-status`, and `validate` sub-commands and their respective argument structs. Create cli/src/task_cli.rs implementing each sub-command: list prints a formatted table (id, role, phase, status, depends_on count), add reads the task file, appends the new task, and writes it back, set-status mutates the matching task's status field in place, validate checks for duplicate IDs and unresolved depends_on chains and reports errors. Wire the `Tasks` command in cli/src/main.rs. No new crate dependencies beyond what is already available (use the existing serde_json and tabular-style formatting with plain std string formatting).",
+  "iteration": 23,
+  "current_task_id": "test-task-cli-management",
+  "issue_number": 189,
+  "last_prompt": "Add tests for the `wreck-it tasks` sub-commands. In cli/src/task_cli.rs or a test module, write unit tests that: (1) verify `list` correctly filters by status and formats task rows, (2) verify `add` appends a valid new task to a JSON file and that the resulting file parses correctly, (3) verify `set-status` updates the correct task and leaves all other tasks unchanged, (4) verify `validate` detects and reports duplicate IDs and a depends_on reference to a nonexistent task, (5) verify `validate` returns a clean result for a well-formed task file. Run `cargo test` to confirm all tests pass.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -188,6 +188,10 @@
     "iteration 21: agent created PR #186 for task Some(\"ideas-task-cli-management\")",
     "iteration 21: marked PR #186 as ready for review",
     "iteration 21: merged PR #186 for task Some(\"ideas-task-cli-management\") (brute mode)",
-    "iteration 22: triggered cloud agent for task impl-task-cli-management (issue #187)"
+    "iteration 22: triggered cloud agent for task impl-task-cli-management (issue #187)",
+    "iteration 22: agent created PR #188 for task Some(\"impl-task-cli-management\")",
+    "iteration 22: marked PR #188 as ready for review",
+    "iteration 22: merged PR #188 for task Some(\"impl-task-cli-management\") (brute mode)",
+    "iteration 23: triggered cloud agent for task test-task-cli-management (issue #189)"
   ]
 }

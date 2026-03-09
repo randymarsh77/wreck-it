@@ -241,18 +241,19 @@
   {
     "id": "impl-task-cli-management",
     "description": "Implement the `wreck-it tasks` sub-command family designed in ideas-task-cli-management. Add a `Tasks` variant to the Commands enum in cli/src/cli.rs with `list`, `add`, `set-status`, and `validate` sub-commands and their respective argument structs. Create cli/src/task_cli.rs implementing each sub-command: list prints a formatted table (id, role, phase, status, depends_on count), add reads the task file, appends the new task, and writes it back, set-status mutates the matching task's status field in place, validate checks for duplicate IDs and unresolved depends_on chains and reports errors. Wire the `Tasks` command in cli/src/main.rs. No new crate dependencies beyond what is already available (use the existing serde_json and tabular-style formatting with plain std string formatting).",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-task-cli-management"
     ],
     "priority": 3,
-    "complexity": 4
+    "complexity": 4,
+    "last_attempt_at": 1773050115
   },
   {
     "id": "test-task-cli-management",
     "description": "Add tests for the `wreck-it tasks` sub-commands. In cli/src/task_cli.rs or a test module, write unit tests that: (1) verify `list` correctly filters by status and formats task rows, (2) verify `add` appends a valid new task to a JSON file and that the resulting file parses correctly, (3) verify `set-status` updates the correct task and leaves all other tasks unchanged, (4) verify `validate` detects and reports duplicate IDs and a depends_on reference to a nonexistent task, (5) verify `validate` returns a clean result for a well-formed task file. Run `cargo test` to confirm all tests pass.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "impl-task-cli-management"
