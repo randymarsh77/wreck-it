@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 18,
-  "current_task_id": "impl-api-cost-tracking",
-  "issue_number": 179,
-  "last_prompt": "Implement the API token cost-tracking system designed in ideas-api-cost-tracking. Create cli/src/cost_tracker.rs with a CostTracker struct holding per-task and cumulative token counts and a method to compute estimated_cost_usd given a model name. Extend the agent response handling in cli/src/agent.rs to capture the usage object from OpenAI-compatible API responses and update the tracker. Add `max_cost_usd: Option<f64>` to Config in cli/src/types.rs (default None, skip_serializing_if None). In cli/src/ralph_loop.rs, check the cumulative cost after each task and abort the loop with a clear message if max_cost_usd is exceeded. Add a `--max-cost <USD>` CLI flag in cli/src/cli.rs. Print a cost summary (total tokens + estimated USD) at the end of each iteration and at run completion.",
+  "iteration": 19,
+  "current_task_id": "test-api-cost-tracking",
+  "issue_number": 181,
+  "last_prompt": "Add unit and integration tests for the API cost-tracking feature. In cli/src/cost_tracker.rs or a test module, verify: (1) CostTracker accumulates token counts correctly across multiple tasks, (2) estimated_cost_usd is computed correctly for at least two known models with fixed per-token rates, (3) when max_cost_usd is set and the cumulative cost exceeds it, the loop-abort condition is triggered correctly, (4) when max_cost_usd is None, no budget check occurs. Run `cargo test` to confirm all tests pass.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -172,6 +172,10 @@
     "iteration 17: agent created PR #178 for task Some(\"ideas-api-cost-tracking\")",
     "iteration 17: marked PR #178 as ready for review",
     "iteration 17: merged PR #178 for task Some(\"ideas-api-cost-tracking\") (brute mode)",
-    "iteration 18: triggered cloud agent for task impl-api-cost-tracking (issue #179)"
+    "iteration 18: triggered cloud agent for task impl-api-cost-tracking (issue #179)",
+    "iteration 18: agent created PR #180 for task Some(\"impl-api-cost-tracking\")",
+    "iteration 18: marked PR #180 as ready for review",
+    "iteration 18: merged PR #180 for task Some(\"impl-api-cost-tracking\") (brute mode)",
+    "iteration 19: triggered cloud agent for task test-api-cost-tracking (issue #181)"
   ]
 }

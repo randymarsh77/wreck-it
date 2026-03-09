@@ -195,18 +195,19 @@
   {
     "id": "impl-api-cost-tracking",
     "description": "Implement the API token cost-tracking system designed in ideas-api-cost-tracking. Create cli/src/cost_tracker.rs with a CostTracker struct holding per-task and cumulative token counts and a method to compute estimated_cost_usd given a model name. Extend the agent response handling in cli/src/agent.rs to capture the usage object from OpenAI-compatible API responses and update the tracker. Add `max_cost_usd: Option<f64>` to Config in cli/src/types.rs (default None, skip_serializing_if None). In cli/src/ralph_loop.rs, check the cumulative cost after each task and abort the loop with a clear message if max_cost_usd is exceeded. Add a `--max-cost <USD>` CLI flag in cli/src/cli.rs. Print a cost summary (total tokens + estimated USD) at the end of each iteration and at run completion.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-api-cost-tracking"
     ],
     "priority": 4,
-    "complexity": 4
+    "complexity": 4,
+    "last_attempt_at": 1773044681
   },
   {
     "id": "test-api-cost-tracking",
     "description": "Add unit and integration tests for the API cost-tracking feature. In cli/src/cost_tracker.rs or a test module, verify: (1) CostTracker accumulates token counts correctly across multiple tasks, (2) estimated_cost_usd is computed correctly for at least two known models with fixed per-token rates, (3) when max_cost_usd is set and the cumulative cost exceeds it, the loop-abort condition is triggered correctly, (4) when max_cost_usd is None, no budget check occurs. Run `cargo test` to confirm all tests pass.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "impl-api-cost-tracking"
