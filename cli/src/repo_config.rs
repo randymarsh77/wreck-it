@@ -283,7 +283,7 @@ name = "docs"
                 reviewers: None,
                 command: None,
                 brute_mode: None,
-                    backend: None,
+                backend: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
