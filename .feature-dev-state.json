@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 24,
-  "current_task_id": "eval-task-cli-management",
-  "issue_number": 191,
-  "last_prompt": "Evaluate the `wreck-it tasks` CLI implementation. Review cli/src/task_cli.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) each sub-command is documented in README.md under Usage, (3) error messages for invalid input (unknown task id, invalid status value) are user-friendly, (4) the `add` command validates that the provided id does not already exist and reports an error if it does, (5) the `validate` sub-command is suitable for use in CI scripts (exits non-zero on errors). Fix any issues found and mark the task complete.",
+  "iteration": 25,
+  "current_task_id": "ideas-multi-repo-orchestration",
+  "issue_number": 193,
+  "last_prompt": "Research and design multi-repository orchestration for wreck-it. The feature should allow a single `wreck-it run` invocation to coordinate tasks that span multiple local git repositories (e.g., a monorepo split into separate repos, or a frontend + backend pair). Review the Config and RalphConfig types in cli/src/types.rs and cli/src/repo_config.rs, the agent execution in cli/src/agent.rs, and the git integration in cli/src/state_worktree.rs. Design: (1) a new optional `work_dirs: HashMap<String, String>` Config field mapping task roles or ids to repo paths, (2) how the agent context (file listing, git diff) is assembled when a task's work_dir differs from the root, (3) how test-runner detection (cargo/npm/pytest) works per-repo, (4) how commits are made to the correct repo. Document the design in a new docs/multi-repo.md stub.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -196,6 +196,10 @@
     "iteration 23: agent created PR #190 for task Some(\"test-task-cli-management\")",
     "iteration 23: marked PR #190 as ready for review",
     "iteration 23: merged PR #190 for task Some(\"test-task-cli-management\") (brute mode)",
-    "iteration 24: triggered cloud agent for task eval-task-cli-management (issue #191)"
+    "iteration 24: triggered cloud agent for task eval-task-cli-management (issue #191)",
+    "iteration 24: agent created PR #192 for task Some(\"eval-task-cli-management\")",
+    "iteration 24: marked PR #192 as ready for review",
+    "iteration 24: merged PR #192 for task Some(\"eval-task-cli-management\") (brute mode)",
+    "iteration 25: triggered cloud agent for task ideas-multi-repo-orchestration (issue #193)"
   ]
 }

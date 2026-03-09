@@ -265,19 +265,20 @@
   {
     "id": "eval-task-cli-management",
     "description": "Evaluate the `wreck-it tasks` CLI implementation. Review cli/src/task_cli.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) each sub-command is documented in README.md under Usage, (3) error messages for invalid input (unknown task id, invalid status value) are user-friendly, (4) the `add` command validates that the provided id does not already exist and reports an error if it does, (5) the `validate` sub-command is suitable for use in CI scripts (exits non-zero on errors). Fix any issues found and mark the task complete.",
-    "status": "inprogress",
+    "status": "completed",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
       "test-task-cli-management"
     ],
     "priority": 3,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1773052876
   },
   {
     "id": "ideas-multi-repo-orchestration",
     "description": "Research and design multi-repository orchestration for wreck-it. The feature should allow a single `wreck-it run` invocation to coordinate tasks that span multiple local git repositories (e.g., a monorepo split into separate repos, or a frontend + backend pair). Review the Config and RalphConfig types in cli/src/types.rs and cli/src/repo_config.rs, the agent execution in cli/src/agent.rs, and the git integration in cli/src/state_worktree.rs. Design: (1) a new optional `work_dirs: HashMap<String, String>` Config field mapping task roles or ids to repo paths, (2) how the agent context (file listing, git diff) is assembled when a task's work_dir differs from the root, (3) how test-runner detection (cargo/npm/pytest) works per-repo, (4) how commits are made to the correct repo. Document the design in a new docs/multi-repo.md stub.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "ideas",
     "priority": 2,
     "complexity": 3
