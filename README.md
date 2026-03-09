@@ -42,6 +42,7 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 🏷️ **Epics & Sub-tasks**: Organize tasks into epics with hierarchical sub-tasks and progress tracking
 - 💡 **Per-Task Agent Memory**: Agents learn from prior attempts via persistent per-task memory files
 - 🔔 **Webhook Notifications**: HTTP POST alerts on task status transitions (`--notify-webhook <URL>`); failures are logged as warnings and never abort the loop
+- 🐛 **GitHub Issues Integration**: Automatically open a GitHub Issue when a task moves to `InProgress` and close it when the task reaches `Completed` or `Failed` (`--github-issues --github-repo owner/repo`)
 
 ## Installation
 
@@ -111,6 +112,9 @@ Options:
 - `--replan-threshold <NUM>`: Consecutive failures before adaptive re-planning (default: `2`, `0` to disable)
 - `--ralph <NAME>`: Named ralph context from `.wreck-it/config.toml`; use `--ralph all` (headless only) to run every ralph sequentially
 - `--goal <TEXT>`: Generate a task plan from a natural-language goal before starting
+- `--github-issues`: Enable GitHub Issues integration — open an issue when a task moves to `InProgress` and close it when it reaches `Completed` or `Failed`
+- `--github-repo <OWNER/REPO>`: GitHub repository for the Issues integration (e.g. `acme/my-project`); required when `--github-issues` is set
+- `--github-token <TOKEN>`: GitHub personal-access token or fine-grained token with `issues: write` permission; falls back to the `GITHUB_TOKEN` environment variable when not provided
 
 **Note**: When using `--model-provider copilot`, the Copilot CLI must be authenticated and available in your PATH. When using `--model-provider github-models`, set `GITHUB_TOKEN` in your environment.
 
