@@ -1377,9 +1377,6 @@ impl CloudAgentClient {
         // `pending` (first-time contributors), or `waiting` (outside
         // collaborators / deployment protection rules).
         let mut all_run_ids: Vec<u64> = Vec::new();
-        let mut run_node_ids: std::collections::HashMap<u64, String> =
-            std::collections::HashMap::new();
-        let mut waiting_run_ids: Vec<u64> = Vec::new();
 
         for status_filter in &["action_required", "pending", "waiting"] {
             let runs_url = format!(
@@ -1439,29 +1436,14 @@ impl CloudAgentClient {
                     if let Some(id) = run["id"].as_u64() {
                         if !all_run_ids.contains(&id) {
                             let name = run["name"].as_str().unwrap_or("unknown");
-                            let node_id = run["node_id"].as_str().unwrap_or("");
                             tracing::info!(
-                                "Found {} workflow run {} (name={}, node_id={}) for PR #{}",
+                                "Found {} workflow run {} (name={}) for PR #{}",
                                 status_filter,
                                 id,
                                 name,
-                                node_id,
                                 pr_number,
                             );
-                            if !node_id.is_empty() {
-                                run_node_ids.insert(id, node_id.to_string());
-                            } else {
-                                tracing::warn!(
-                                    "Workflow run {} (name={}) for PR #{} has no node_id, GraphQL approval will be skipped",
-                                    id,
-                                    name,
-                                    pr_number,
-                                );
-                            }
                             all_run_ids.push(id);
-                            if *status_filter == "waiting" {
-                                waiting_run_ids.push(id);
-                            }
                         }
                     }
                 }
@@ -1473,85 +1455,12 @@ impl CloudAgentClient {
             return Ok(());
         }
 
-        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
         let mut approved_count: usize = 0;
 
         for run_id in &all_run_ids {
-            // Try the GraphQL approveWorkflowRun mutation first.
-            if let Some(node_id) = run_node_ids.get(run_id) {
-                let query = serde_json::json!({
-                    "query": "mutation($runId: ID!) { approveWorkflowRun(input: { workflowRunId: $runId }) { clientMutationId } }",
-                    "variables": { "runId": node_id },
-                });
-
-                match self
-                    .http
-                    .post(&graphql_url)
-                    .header("Authorization", format!("Bearer {}", self.github_token))
-                    .header("User-Agent", "wreck-it")
-                    .header("Accept", "application/vnd.github+json")
-                    .json(&query)
-                    .send()
-                    .await
-                {
-                    Ok(resp) if resp.status().is_success() => {
-                        let gql_resp: serde_json::Value = match resp.json().await {
-                            Ok(v) => v,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to parse GraphQL response for run {} (PR #{}): {}",
-                                    run_id,
-                                    pr_number,
-                                    e,
-                                );
-                                serde_json::Value::default()
-                            }
-                        };
-                        if gql_resp.get("errors").is_none() {
-                            tracing::info!(
-                                "Approved workflow run {} via GraphQL for PR #{}",
-                                run_id,
-                                pr_number,
-                            );
-                            approved_count += 1;
-                            continue;
-                        }
-                        tracing::warn!(
-                            "GraphQL approveWorkflowRun errors for run {} (PR #{}): {}",
-                            run_id,
-                            pr_number,
-                            gql_resp["errors"],
-                        );
-                    }
-                    Ok(resp) => {
-                        let status = resp.status();
-                        let body = resp.text().await.unwrap_or_default();
-                        tracing::warn!(
-                            "GraphQL approveWorkflowRun failed for run {} (PR #{}) ({}): {}",
-                            run_id,
-                            pr_number,
-                            status,
-                            body,
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "HTTP error on GraphQL approveWorkflowRun for run {} (PR #{}): {}",
-                            run_id,
-                            pr_number,
-                            e,
-                        );
-                    }
-                }
-            } else {
-                tracing::warn!(
-                    "No node_id available for workflow run {} (PR #{}), skipping GraphQL",
-                    run_id,
-                    pr_number,
-                );
-            }
-
-            // Fall back to the REST approval endpoint.
+            // Attempt the REST approval endpoint.  This is the standard
+            // mechanism for approving workflow runs that require manual
+            // approval (fork PRs, first-time contributors, etc.).
             let approve_url = format!(
                 "{}/repos/{}/{}/actions/runs/{}/approve",
                 GITHUB_API_BASE, self.repo_owner, self.repo_name, run_id,
@@ -1578,11 +1487,11 @@ impl CloudAgentClient {
                 Ok(resp) => {
                     let status = resp.status();
                     let body = resp.text().await.unwrap_or_default();
-                    tracing::warn!(
-                        "REST approve failed for workflow run {} on PR #{} ({}): {}",
+                    tracing::debug!(
+                        "REST approve returned {} for workflow run {} on PR #{}: {}",
+                        status,
                         run_id,
                         pr_number,
-                        status,
                         body,
                     );
                 }
@@ -1596,12 +1505,12 @@ impl CloudAgentClient {
                 }
             }
 
-            // For `waiting` runs (e.g. deployment protection rules), try
-            // approving via the pending_deployments endpoint.
-            if waiting_run_ids.contains(run_id)
-                && self
-                    .approve_pending_deployments(*run_id, pr_number)
-                    .await
+            // Fall back to the pending_deployments endpoint.  This handles
+            // runs in `waiting` status (deployment protection rules) as well
+            // as other cases where the `/approve` endpoint is not sufficient.
+            if self
+                .approve_pending_deployments(*run_id, pr_number)
+                .await
             {
                 approved_count += 1;
             }
