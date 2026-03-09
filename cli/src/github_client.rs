@@ -69,6 +69,9 @@ pub struct GitHubIssueClient {
     repo: String,
     /// Bearer token used for every request.
     token: String,
+    /// Base URL for the GitHub API.  Defaults to [`GITHUB_API_BASE`].
+    /// Overridable in tests to point at a local mock server.
+    api_base: String,
 }
 
 impl GitHubIssueClient {
@@ -80,6 +83,22 @@ impl GitHubIssueClient {
         Self {
             repo: repo.into(),
             token: token.into(),
+            api_base: GITHUB_API_BASE.to_string(),
+        }
+    }
+
+    /// Create a client that sends requests to `base_url` instead of the
+    /// real GitHub API.  Used in tests to point at a local mock server.
+    #[cfg(test)]
+    fn new_with_base_url(
+        repo: impl Into<String>,
+        token: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
+        Self {
+            repo: repo.into(),
+            token: token.into(),
+            api_base: base_url.into(),
         }
     }
 
@@ -115,7 +134,7 @@ impl GitHubIssueClient {
              The issue will be closed automatically when the task completes or fails."
         );
 
-        let url = format!("{GITHUB_API_BASE}/repos/{}/issues", self.repo);
+        let url = format!("{}/repos/{}/issues", self.api_base, self.repo);
         let payload = CreateIssueRequest {
             title: &title,
             body: &body,
@@ -152,8 +171,8 @@ impl GitHubIssueClient {
     /// as warnings rather than aborting the main task loop.
     pub async fn close_issue(&self, issue_number: u64) -> Result<()> {
         let url = format!(
-            "{GITHUB_API_BASE}/repos/{}/issues/{issue_number}",
-            self.repo
+            "{}/repos/{}/issues/{issue_number}",
+            self.api_base, self.repo
         );
         let payload = UpdateIssueRequest { state: "closed" };
 
@@ -183,7 +202,7 @@ impl GitHubIssueClient {
     /// silently ignored.
     #[allow(dead_code)]
     pub async fn ensure_label(&self) -> Result<()> {
-        let url = format!("{GITHUB_API_BASE}/repos/{}/labels", self.repo);
+        let url = format!("{}/repos/{}/labels", self.api_base, self.repo);
 
         #[derive(Serialize)]
         struct CreateLabelRequest<'a> {
@@ -386,4 +405,182 @@ mod tests {
         let actual_title = format!("[{task_id}] {description}");
         assert_eq!(actual_title, expected_title);
     }
+
+    // ── HTTP integration tests (mock TCP server) ─────────────────────────────
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// Spin up a minimal HTTP/1.1 server on a random localhost port.
+    /// Returns the base URL and a future that accepts one connection, reads
+    /// the raw request bytes, sends back `status_line` with `resp_body`, and
+    /// returns the captured request bytes.
+    async fn mock_github_server(
+        status_line: &'static str,
+        resp_body: &'static str,
+    ) -> (String, impl std::future::Future<Output = Vec<u8>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let base_url = format!("http://127.0.0.1:{port}");
+
+        let fut = async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 16384];
+            let n = stream.read(&mut buf).await.unwrap();
+            buf.truncate(n);
+            let response = format!(
+                "{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                status_line,
+                resp_body.len(),
+                resp_body
+            );
+            let _ = stream.write_all(response.as_bytes()).await;
+            buf
+        };
+
+        (base_url, fut)
+    }
+
+    /// Extract the request line (first line) from a raw HTTP request.
+    fn request_line(raw: &[u8]) -> String {
+        let text = std::str::from_utf8(raw).expect("request is not valid UTF-8");
+        text.lines().next().unwrap_or("").to_string()
+    }
+
+    /// Extract and parse the JSON body from a raw HTTP request.
+    fn extract_body(raw: &[u8]) -> serde_json::Value {
+        let text = std::str::from_utf8(raw).expect("request is not valid UTF-8");
+        let body_start = text
+            .find("\r\n\r\n")
+            .expect("no header/body separator in request");
+        let body = &text[body_start + 4..];
+        serde_json::from_str(body).expect("body is not valid JSON")
+    }
+
+    /// (1) A POST to /repos/{owner}/{repo}/issues is made when create_issue is called
+    ///     (which corresponds to a task transitioning to InProgress).
+    #[tokio::test]
+    async fn create_issue_sends_post_to_issues_endpoint() {
+        let resp_body = r#"{"number": 42, "html_url": "https://github.com/owner/repo/issues/42"}"#;
+        let (base_url, req_fut) = mock_github_server("HTTP/1.1 201 Created", resp_body).await;
+
+        let client =
+            GitHubIssueClient::new_with_base_url("owner/repo", "fake-token", &base_url);
+
+        let (result, raw_req) = tokio::join!(
+            client.create_issue("impl-auth", "Implement the auth module"),
+            req_fut,
+        );
+
+        // The call must succeed and return the issue number from the response.
+        assert_eq!(result.unwrap(), 42, "create_issue should return the issue number");
+
+        // Verify the HTTP method and path.
+        let req_line = request_line(&raw_req);
+        assert!(
+            req_line.starts_with("POST /repos/owner/repo/issues"),
+            "expected POST to /repos/owner/repo/issues, got: {req_line}"
+        );
+
+        // Verify the payload contains the task id in the title and the wreck-it label.
+        let body = extract_body(&raw_req);
+        assert!(
+            body["title"].as_str().unwrap_or("").contains("impl-auth"),
+            "issue title should contain the task id"
+        );
+        let labels = body["labels"].as_array().expect("labels should be a JSON array");
+        assert!(!labels.is_empty(), "labels array should not be empty");
+        assert_eq!(
+            labels[0], "wreck-it",
+            "issue should be labeled 'wreck-it'"
+        );
+    }
+
+    /// (2) A PATCH request to close the issue is made when close_issue is called
+    ///     (which corresponds to a task reaching Completed or Failed).
+    #[tokio::test]
+    async fn close_issue_sends_patch_to_issue_endpoint() {
+        let resp_body = r#"{"number": 42, "state": "closed"}"#;
+        let (base_url, req_fut) = mock_github_server("HTTP/1.1 200 OK", resp_body).await;
+
+        let client =
+            GitHubIssueClient::new_with_base_url("owner/repo", "fake-token", &base_url);
+
+        let (result, raw_req) = tokio::join!(client.close_issue(42), req_fut);
+
+        result.unwrap();
+
+        let req_line = request_line(&raw_req);
+        assert!(
+            req_line.starts_with("PATCH /repos/owner/repo/issues/42"),
+            "expected PATCH to /repos/owner/repo/issues/42, got: {req_line}"
+        );
+
+        // Verify that the payload sets state to "closed".
+        let body = extract_body(&raw_req);
+        assert_eq!(body["state"], "closed", "close_issue should set state to 'closed'");
+    }
+
+    /// (3) When github_issues_enabled is false, no HTTP calls are made.
+    ///     client_from_config returns None, so the caller never constructs a
+    ///     client and therefore no network I/O happens.
+    #[test]
+    fn no_http_calls_when_github_issues_disabled() {
+        // client_from_config must return None regardless of other settings.
+        let client = client_from_config(false, Some("owner/repo"), Some("some-token"));
+        assert!(
+            client.is_none(),
+            "client_from_config should return None when github_issues_enabled is false"
+        );
+        // Because the client is None, the callers in ralph_loop.rs will skip
+        // all GitHub API calls – no HTTP requests are made.
+    }
+
+    /// (4) A GitHub API error (e.g. 401 Unauthorized) causes create_issue to
+    ///     return Err.  Callers log this as a warning and continue the loop
+    ///     without aborting.
+    #[tokio::test]
+    async fn create_issue_api_error_returns_err_without_panicking() {
+        let resp_body = r#"{"message": "Requires authentication", "documentation_url": "https://docs.github.com/rest"}"#;
+        let (base_url, req_fut) =
+            mock_github_server("HTTP/1.1 401 Unauthorized", resp_body).await;
+
+        let client =
+            GitHubIssueClient::new_with_base_url("owner/repo", "bad-token", &base_url);
+
+        let (result, _raw_req) = tokio::join!(
+            client.create_issue("task-1", "Do something important"),
+            req_fut,
+        );
+
+        // Must return an Err – not panic – so that callers can log a warning
+        // and continue the main task loop.
+        assert!(result.is_err(), "create_issue should return Err on 401");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("401"),
+            "error message should mention the 401 status, got: {err_msg}"
+        );
+    }
+
+    /// Companion to (4): close_issue also returns Err on API failure.
+    #[tokio::test]
+    async fn close_issue_api_error_returns_err_without_panicking() {
+        let resp_body = r#"{"message": "Requires authentication"}"#;
+        let (base_url, req_fut) =
+            mock_github_server("HTTP/1.1 401 Unauthorized", resp_body).await;
+
+        let client =
+            GitHubIssueClient::new_with_base_url("owner/repo", "bad-token", &base_url);
+
+        let (result, _raw_req) = tokio::join!(client.close_issue(7), req_fut);
+
+        assert!(result.is_err(), "close_issue should return Err on 401");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("401"),
+            "error message should mention the 401 status, got: {err_msg}"
+        );
+    }
+
 }
