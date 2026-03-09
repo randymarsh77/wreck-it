@@ -12,6 +12,7 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Commands {
     /// Run the Ralph Wiggum loop with TUI
     Run {
@@ -111,6 +112,15 @@ pub enum Commands {
         /// Leave unset to impose no budget limit.
         #[arg(long = "max-cost", value_name = "USD")]
         max_cost_usd: Option<f64>,
+
+        /// Per-task or per-role working directory overrides for multi-repository
+        /// orchestration.  Specify as `ROLE_OR_ID=PATH` pairs (may be repeated).
+        /// When a task's id or role matches a key, the agent uses that path
+        /// instead of the top-level --work-dir.  Example:
+        ///   --work-dir-map frontend=/home/user/my-frontend
+        ///   --work-dir-map backend=/home/user/my-backend
+        #[arg(long = "work-dir-map", value_name = "ROLE_OR_ID=PATH", number_of_values = 1)]
+        work_dir_map: Vec<String>,
     },
 
     /// Generate a structured task plan from a natural-language goal using the

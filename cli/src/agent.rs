@@ -244,6 +244,23 @@ impl AgentClient {
         self
     }
 
+    /// Override the working directory on an already-constructed client.
+    ///
+    /// Used by the multi-repo orchestration layer to route each task to the
+    /// correct local git repository without constructing a brand-new client.
+    pub fn with_work_dir(mut self, work_dir: String) -> Self {
+        self.work_dir = work_dir;
+        self
+    }
+
+    /// Update the working directory in place.
+    ///
+    /// Used by the main loop to redirect the shared agent to the correct local
+    /// git repository for each task without reconstructing the client.
+    pub fn set_work_dir(&mut self, work_dir: String) {
+        self.work_dir = work_dir;
+    }
+
     /// Return the configured evaluation mode.
     pub fn evaluation_mode(&self) -> EvaluationMode {
         self.evaluation_mode
@@ -696,7 +713,21 @@ impl AgentClient {
 
         tracing::info!("Running tests in {}", self.work_dir);
 
-        // Try to run common test commands
+        let work_path = Path::new(&self.work_dir);
+        if let Some((cmd, args)) = detect_test_command(work_path) {
+            tracing::info!("Detected test runner: {} {:?}", cmd, args);
+            if let Ok(output) = Command::new(cmd)
+                .args(args)
+                .current_dir(&self.work_dir)
+                .output()
+            {
+                let success = output.status.success();
+                tracing::info!("Test command '{}' result: {}", cmd, success);
+                return Ok(success);
+            }
+        }
+
+        // Fall back to trying common test commands when detection finds nothing.
         let test_commands = vec![
             ("cargo", vec!["test"]),
             ("npm", vec!["test"]),
@@ -1243,6 +1274,43 @@ pub fn parse_critic_result(response: &str) -> Result<CriticResult> {
         .context("Failed to parse CriticResult from LLM response")
 }
 
+/// Detect the most appropriate test runner for a given working directory by
+/// inspecting manifest files.  Prefers explicit manifest detection over the
+/// old try-everything approach to avoid false positives (e.g. a Python repo
+/// that happens to have `cargo` on PATH).
+///
+/// Returns `None` when no recognised manifest is found; the caller should then
+/// fall back to probing common commands.
+pub fn detect_test_command(work_dir: &Path) -> Option<(&'static str, &'static [&'static str])> {
+    if work_dir.join("Cargo.toml").exists() {
+        return Some(("cargo", &["test"]));
+    }
+    if work_dir.join("package.json").exists() {
+        return Some(("npm", &["test"]));
+    }
+    if work_dir.join("pyproject.toml").exists()
+        || work_dir.join("setup.py").exists()
+        || work_dir.join("requirements.txt").exists()
+    {
+        return Some(("pytest", &[]));
+    }
+    if work_dir.join("go.mod").exists() {
+        return Some(("go", &["test", "./..."]));
+    }
+    if work_dir.join("Makefile").exists() {
+        // Only use `make test` when a `test` target is present.
+        if let Ok(content) = std::fs::read_to_string(work_dir.join("Makefile")) {
+            if content
+                .lines()
+                .any(|l| l.starts_with("test:") || l.starts_with("test :"))
+            {
+                return Some(("make", &["test"]));
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1590,5 +1658,98 @@ mod tests {
         // (Err), which is expected in a unit test environment.
         let result = client.evaluate_precondition(&task).await;
         assert!(result.is_err() || !result.unwrap());
+    }
+
+    // ---- detect_test_command tests ----
+
+    #[test]
+    fn detect_test_command_identifies_cargo() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"x\"").unwrap();
+        let result = detect_test_command(dir.path()).unwrap();
+        assert_eq!(result.0, "cargo");
+        assert_eq!(result.1, &["test"]);
+    }
+
+    #[test]
+    fn detect_test_command_identifies_npm() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("package.json"), "{}").unwrap();
+        let result = detect_test_command(dir.path()).unwrap();
+        assert_eq!(result.0, "npm");
+    }
+
+    #[test]
+    fn detect_test_command_identifies_pytest_via_pyproject() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("pyproject.toml"), "[build-system]").unwrap();
+        let result = detect_test_command(dir.path()).unwrap();
+        assert_eq!(result.0, "pytest");
+    }
+
+    #[test]
+    fn detect_test_command_identifies_pytest_via_requirements() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("requirements.txt"), "requests").unwrap();
+        let result = detect_test_command(dir.path()).unwrap();
+        assert_eq!(result.0, "pytest");
+    }
+
+    #[test]
+    fn detect_test_command_identifies_go() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("go.mod"), "module example.com/x").unwrap();
+        let result = detect_test_command(dir.path()).unwrap();
+        assert_eq!(result.0, "go");
+        assert!(result.1.contains(&"test"));
+    }
+
+    #[test]
+    fn detect_test_command_identifies_make_when_test_target_present() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("Makefile"), "test:\n\techo running tests\n").unwrap();
+        let result = detect_test_command(dir.path()).unwrap();
+        assert_eq!(result.0, "make");
+    }
+
+    #[test]
+    fn detect_test_command_returns_none_for_empty_directory() {
+        let dir = tempdir().unwrap();
+        assert!(detect_test_command(dir.path()).is_none());
+    }
+
+    #[test]
+    fn detect_test_command_skips_makefile_without_test_target() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("Makefile"), "build:\n\tcargo build\n").unwrap();
+        assert!(detect_test_command(dir.path()).is_none());
+    }
+
+    // ---- with_work_dir / set_work_dir tests ----
+
+    #[test]
+    fn with_work_dir_overrides_work_dir() {
+        let client = AgentClient::new(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            "/original".to_string(),
+            None,
+        )
+        .with_work_dir("/overridden".to_string());
+        assert_eq!(client.work_dir, "/overridden");
+    }
+
+    #[test]
+    fn set_work_dir_mutates_work_dir_in_place() {
+        let mut client = AgentClient::new(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            "/original".to_string(),
+            None,
+        );
+        client.set_work_dir("/mutated".to_string());
+        assert_eq!(client.work_dir, "/mutated");
     }
 }

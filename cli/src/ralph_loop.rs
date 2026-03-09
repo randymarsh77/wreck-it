@@ -165,6 +165,42 @@ impl RalphLoop {
         )
     }
 
+    /// Resolve the effective working directory for a task.
+    ///
+    /// Lookup order:
+    /// 1. Exact match on `task.id` in [`Config::work_dirs`].
+    /// 2. Match on the task's `role` (serialised as a lowercase string).
+    /// 3. Fall back to the top-level [`Config::work_dir`].
+    ///
+    /// Relative paths in the map are resolved relative to [`Config::work_dir`].
+    fn resolve_work_dir(&self, task: &crate::types::Task) -> std::path::PathBuf {
+        // 1. Exact task-id match.
+        if let Some(p) = self.config.work_dirs.get(&task.id) {
+            let path = std::path::Path::new(p);
+            if path.is_absolute() {
+                return path.to_path_buf();
+            }
+            return self.config.work_dir.join(path);
+        }
+
+        // 2. Role match (AgentRole serialised to lowercase string via serde).
+        let role_str = serde_json::to_value(task.role)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        if let Some(role_key) = role_str {
+            if let Some(p) = self.config.work_dirs.get(&role_key) {
+                let path = std::path::Path::new(p);
+                if path.is_absolute() {
+                    return path.to_path_buf();
+                }
+                return self.config.work_dir.join(path);
+            }
+        }
+
+        // 3. Default.
+        self.config.work_dir.clone()
+    }
+
     /// Initialize the loop by loading tasks
     pub fn initialize(&mut self) -> Result<()> {
         self.state
@@ -284,6 +320,18 @@ impl RalphLoop {
     /// Execute a single task by index, running evaluation & commit logic.
     async fn run_single_task(&mut self, task_idx: usize) -> Result<bool> {
         self.state.current_task = Some(task_idx);
+
+        // Resolve the effective working directory for this task and redirect the
+        // shared agent before any agent calls are made.
+        let effective_work_dir = self.resolve_work_dir(&self.state.tasks[task_idx]);
+        self.agent
+            .set_work_dir(effective_work_dir.to_string_lossy().to_string());
+        if effective_work_dir != self.config.work_dir {
+            self.state.add_log(format!(
+                "Using per-task work dir: {}",
+                effective_work_dir.display()
+            ));
+        }
 
         // Evaluate agent-based precondition before executing the task.
         if self.state.tasks[task_idx].precondition_prompt.is_some() {
@@ -673,11 +721,13 @@ impl RalphLoop {
         // Spawn concurrent agent work (include per-task timestamp for provenance).
         let mut handles = Vec::new();
         for (idx, task, ts) in task_data {
+            // Resolve per-task working directory for multi-repo orchestration.
+            let task_work_dir = self.resolve_work_dir(&task);
             let agent = AgentClient::with_evaluation(
                 self.config.model_provider.clone(),
                 self.config.api_endpoint.clone(),
                 self.config.api_token.clone(),
-                self.config.work_dir.to_string_lossy().to_string(),
+                task_work_dir.to_string_lossy().to_string(),
                 self.config.verification_command.clone(),
                 self.config.evaluation_mode,
                 self.config.completeness_prompt.clone(),
@@ -1359,6 +1409,87 @@ mod tests {
             t.status,
             TaskStatus::Failed,
             "when replan succeeded auto-retry must be skipped"
+        );
+    }
+
+    // ---- resolve_work_dir tests (multi-repo orchestration) ----
+
+    fn make_config_with_work_dirs(
+        default_work_dir: &str,
+        overrides: &[(&str, &str)],
+    ) -> crate::types::Config {
+        let mut config = crate::types::Config::default();
+        config.work_dir = std::path::PathBuf::from(default_work_dir);
+        for &(k, v) in overrides {
+            config.work_dirs.insert(k.to_string(), v.to_string());
+        }
+        config
+    }
+
+    fn make_ralph_loop(config: crate::types::Config) -> RalphLoop {
+        RalphLoop::new(config)
+    }
+
+    #[test]
+    fn resolve_work_dir_falls_back_to_default() {
+        let config = make_config_with_work_dirs("/default", &[]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/default")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_matches_exact_task_id() {
+        let config =
+            make_config_with_work_dirs("/default", &[("my-task", "/repo/my-task-dir")]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/repo/my-task-dir")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_matches_role() {
+        // AgentRole::Implementer serialises to "implementer" via serde.
+        let config =
+            make_config_with_work_dirs("/default", &[("implementer", "/repo/impl-dir")]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("other-id", TaskStatus::Pending, 0, 1, 0, vec![]);
+        // default role is Implementer
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/repo/impl-dir")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_prefers_task_id_over_role() {
+        // Both id and role match — id must win.
+        let config = make_config_with_work_dirs(
+            "/default",
+            &[("my-task", "/by-id"), ("implementer", "/by-role")],
+        );
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/by-id")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_resolves_relative_path_against_default() {
+        let config = make_config_with_work_dirs("/projects", &[("my-task", "sub-repo")]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/projects/sub-repo")
         );
     }
 }

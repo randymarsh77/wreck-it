@@ -82,6 +82,7 @@ async fn main() -> Result<()> {
             github_repo,
             github_token,
             max_cost_usd,
+            work_dir_map,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -211,6 +212,21 @@ async fn main() -> Result<()> {
                 }
                 if let Some(cost) = max_cost_usd {
                     config.max_cost_usd = Some(cost);
+                }
+
+                // Parse `KEY=PATH` pairs from --work-dir-map into the config map.
+                for entry in &work_dir_map {
+                    if let Some((key, path)) = entry.split_once('=') {
+                        config
+                            .work_dirs
+                            .insert(key.to_string(), path.to_string());
+                    } else {
+                        eprintln!(
+                            "Warning: ignoring malformed --work-dir-map entry '{}' \
+                             (expected ROLE_OR_ID=PATH)",
+                            entry
+                        );
+                    }
                 }
 
                 config
