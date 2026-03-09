@@ -127,6 +127,44 @@ try-every-command approach.
 
 ## 5. Example Config
 
+### Two-Repository Setup (Simplest Case)
+
+The most common scenario is a project split across two repositories — for
+example a backend API and a web frontend.  Kick off a coordinated update with
+a single command:
+
+```sh
+wreck-it run \
+  --work-dir /home/user/projects/my-api \
+  --work-dir-map frontend=/home/user/projects/my-frontend
+```
+
+Or encode the same mapping in a config file:
+
+```toml
+# .wreck-it/run-config.toml
+max_iterations = 10
+work_dir = "/home/user/projects/my-api"   # default / primary repo
+
+[work_dirs]
+frontend = "/home/user/projects/my-frontend"
+```
+
+With tasks in `tasks.json`:
+
+```json
+[
+  { "id": "add-auth-endpoint",  "description": "Add POST /auth/token endpoint" },
+  { "id": "update-login-form",  "role": "frontend", "description": "Call new auth endpoint from login form" }
+]
+```
+
+`add-auth-endpoint` runs inside `my-api` (the default `work_dir`).
+`update-login-form` is routed to `my-frontend` because its `role` matches the
+`frontend` key in `work_dirs`.
+
+### Multi-Repository Setup
+
 ```toml
 # .wreck-it/run-config.toml
 max_iterations = 20

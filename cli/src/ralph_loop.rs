@@ -727,7 +727,7 @@ impl RalphLoop {
                 self.config.model_provider.clone(),
                 self.config.api_endpoint.clone(),
                 self.config.api_token.clone(),
-                task_work_dir.to_string_lossy().to_string(),
+                self.config.work_dir.to_string_lossy().to_string(),
                 self.config.verification_command.clone(),
                 self.config.evaluation_mode,
                 self.config.completeness_prompt.clone(),
@@ -736,6 +736,7 @@ impl RalphLoop {
                     .to_string_lossy()
                     .to_string(),
             )
+            .with_work_dir(task_work_dir.to_string_lossy().to_string())
             .with_cost_tracker(Arc::clone(&self.cost_tracker));
             let mut agent = agent;
             let handle = tokio::spawn(async move {
