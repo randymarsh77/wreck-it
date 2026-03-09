@@ -567,25 +567,33 @@ impl AgentClient {
 
         // Extract and record token usage when a cost tracker is attached.
         if let Some(ref tracker) = self.cost_tracker {
-            let usage = TokenUsage {
-                prompt_tokens: json
-                    .get("usage")
-                    .and_then(|u| u.get("prompt_tokens"))
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0),
-                completion_tokens: json
-                    .get("usage")
-                    .and_then(|u| u.get("completion_tokens"))
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0),
-            };
-            tracing::debug!(
-                "Token usage — prompt: {}, completion: {}",
-                usage.prompt_tokens,
-                usage.completion_tokens
-            );
-            if let Ok(mut guard) = tracker.lock() {
-                guard.record(&usage);
+            match json.get("usage") {
+                Some(usage_obj) => {
+                    let usage = TokenUsage {
+                        prompt_tokens: usage_obj
+                            .get("prompt_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        completion_tokens: usage_obj
+                            .get("completion_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                    };
+                    tracing::debug!(
+                        "Token usage — prompt: {}, completion: {}",
+                        usage.prompt_tokens,
+                        usage.completion_tokens
+                    );
+                    if let Ok(mut guard) = tracker.lock() {
+                        guard.record(&usage);
+                    }
+                }
+                None => {
+                    tracing::warn!(
+                        "API response did not include a 'usage' field; \
+                         token cost will not be tracked for this call"
+                    );
+                }
             }
         }
 
