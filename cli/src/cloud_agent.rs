@@ -2445,6 +2445,135 @@ impl CloudAgentClient {
 
         Ok(prs)
     }
+
+    /// Fetch the raw JSON representation of a pull request.
+    pub async fn fetch_pr_json(&self, pr_number: u64) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR JSON")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Failed to fetch PR #{} ({}): {}", pr_number, status, body);
+        }
+
+        Ok(resp.json().await?)
+    }
+
+    /// Fetch the most recent commit messages on a branch.
+    ///
+    /// Returns a newline-separated string of `<sha_short> <message>` lines.
+    pub async fn fetch_recent_commits(
+        &self,
+        branch: &str,
+        count: u32,
+    ) -> Result<String> {
+        let url = format!(
+            "{}/repos/{}/{}/commits?sha={}&per_page={}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, branch, count,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch recent commits")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch commits for branch {} ({}): {}",
+                branch,
+                status,
+                body,
+            );
+        }
+
+        let items: Vec<serde_json::Value> = resp.json().await?;
+        let lines: Vec<String> = items
+            .iter()
+            .filter_map(|c| {
+                let sha = c["sha"].as_str().unwrap_or("").get(..7).unwrap_or("");
+                let msg = c
+                    .pointer("/commit/message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let first_line = msg.lines().next().unwrap_or("");
+                if sha.is_empty() {
+                    None
+                } else {
+                    Some(format!("{} {}", sha, first_line))
+                }
+            })
+            .collect();
+
+        Ok(lines.join("\n"))
+    }
+
+    /// Fetch a summary of files changed in a pull request.
+    ///
+    /// Returns a newline-separated `<filename> | <changes> <status>` summary.
+    pub async fn fetch_pr_files_summary(&self, pr_number: u64) -> Result<String> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/files?per_page=100",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR files")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch files for PR #{} ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let items: Vec<serde_json::Value> = resp.json().await?;
+        let lines: Vec<String> = items
+            .iter()
+            .filter_map(|f| {
+                let filename = f["filename"].as_str().unwrap_or("");
+                let changes = f["changes"].as_u64().unwrap_or(0);
+                let status = f["status"].as_str().unwrap_or("modified");
+                if filename.is_empty() {
+                    None
+                } else {
+                    Some(format!("{} | {} {}", filename, changes, status))
+                }
+            })
+            .collect();
+
+        Ok(lines.join("\n"))
+    }
 }
 
 /// Parse a GitHub remote URL into (owner, repo).
