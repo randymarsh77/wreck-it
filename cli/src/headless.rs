@@ -512,21 +512,61 @@ async fn advance_tracked_prs(
                             );
                         }
                     } else {
-                        println!(
-                            "[wreck-it] advance: PR #{} not yet mergeable, approving workflows and enabling auto-merge",
-                            pr_number
-                        );
-                        if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                        let brute = ralph.and_then(|r| r.brute_mode).unwrap_or(false);
+                        if brute {
                             println!(
-                                "[wreck-it] advance: failed to approve workflows for PR #{}: {}",
-                                pr_number, e
+                                "[wreck-it] advance: PR #{} not yet mergeable (brute mode), disabling auto-merge and merging directly",
+                                pr_number
                             );
-                        }
-                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                            if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                                println!(
+                                    "[wreck-it] advance: failed to approve workflows for PR #{}: {}",
+                                    pr_number, e
+                                );
+                            }
+                            if let Err(e) = client.disable_auto_merge(pr_number).await {
+                                println!(
+                                    "[wreck-it] advance: failed to disable auto-merge for PR #{}: {}",
+                                    pr_number, e
+                                );
+                            }
+                            match client.merge_pr(pr_number).await {
+                                Ok(()) => {
+                                    println!("[wreck-it] advance: merged PR #{}", pr_number);
+                                    state
+                                        .memory
+                                        .push(format!("advance: merged PR #{}", pr_number));
+                                    mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                                    if state.pr_number == Some(pr_number) {
+                                        state.phase = AgentPhase::Completed;
+                                    }
+                                    resolved_pr_numbers.push(pr_number);
+                                    made_progress = true;
+                                }
+                                Err(e) => {
+                                    println!(
+                                        "[wreck-it] advance: failed to merge PR #{}: {}",
+                                        pr_number, e
+                                    );
+                                }
+                            }
+                        } else {
                             println!(
-                                "[wreck-it] advance: failed to enable auto-merge for PR #{}: {}",
-                                pr_number, e
+                                "[wreck-it] advance: PR #{} not yet mergeable, approving workflows and enabling auto-merge",
+                                pr_number
                             );
+                            if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                                println!(
+                                    "[wreck-it] advance: failed to approve workflows for PR #{}: {}",
+                                    pr_number, e
+                                );
+                            }
+                            if let Err(e) = client.enable_auto_merge(pr_number).await {
+                                println!(
+                                    "[wreck-it] advance: failed to enable auto-merge for PR #{}: {}",
+                                    pr_number, e
+                                );
+                            }
                         }
                     }
                 } else {
@@ -582,7 +622,46 @@ async fn advance_tracked_prs(
                         false
                     }
                 };
-                if has_checks {
+                let brute = ralph.and_then(|r| r.brute_mode).unwrap_or(false);
+                if brute {
+                    // Brute mode: disable auto-merge (if enabled) and merge directly.
+                    println!(
+                        "[wreck-it] advance: PR #{} is mergeable (brute mode), disabling auto-merge and merging directly",
+                        pr_number
+                    );
+                    if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                        println!(
+                            "[wreck-it] advance: failed to approve workflows for PR #{}: {}",
+                            pr_number, e
+                        );
+                    }
+                    if let Err(e) = client.disable_auto_merge(pr_number).await {
+                        println!(
+                            "[wreck-it] advance: failed to disable auto-merge for PR #{}: {}",
+                            pr_number, e
+                        );
+                    }
+                    match client.merge_pr(pr_number).await {
+                        Ok(()) => {
+                            println!("[wreck-it] advance: merged PR #{}", pr_number);
+                            state
+                                .memory
+                                .push(format!("advance: merged PR #{}", pr_number));
+                            mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                            if state.pr_number == Some(pr_number) {
+                                state.phase = AgentPhase::Completed;
+                            }
+                            resolved_pr_numbers.push(pr_number);
+                            made_progress = true;
+                        }
+                        Err(e) => {
+                            println!(
+                                "[wreck-it] advance: failed to merge PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
+                    }
+                } else if has_checks {
                     // Required checks exist and pass; enable auto-merge and
                     // approve workflows in case any are still pending.
                     println!(
@@ -1146,21 +1225,63 @@ async fn run_needs_verification(
                         );
                     }
                 } else {
-                    println!(
-                        "[wreck-it] PR #{} is not yet mergeable, approving workflows and enabling auto-merge",
-                        pr_number
-                    );
-                    if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                    let brute = ralph.and_then(|r| r.brute_mode).unwrap_or(false);
+                    if brute {
                         println!(
-                            "[wreck-it] failed to approve workflow runs for PR #{}: {}",
-                            pr_number, e
+                            "[wreck-it] PR #{} is not yet mergeable (brute mode), disabling auto-merge and merging directly",
+                            pr_number
                         );
-                    }
-                    if let Err(e) = client.enable_auto_merge(pr_number).await {
+                        if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                            println!(
+                                "[wreck-it] failed to approve workflow runs for PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
+                        if let Err(e) = client.disable_auto_merge(pr_number).await {
+                            println!(
+                                "[wreck-it] failed to disable auto-merge for PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
+                        match client.merge_pr(pr_number).await {
+                            Ok(()) => {
+                                println!("[wreck-it] PR #{} merged successfully (brute mode)", pr_number);
+                                state.phase = AgentPhase::Completed;
+                                state.memory.push(format!(
+                                    "iteration {}: merged PR #{} for task {:?} (brute mode)",
+                                    state.iteration, pr_number, state.current_task_id,
+                                ));
+                                let task_file = state_dir.join(&headless_cfg.task_file);
+                                if let Some(task_id) = &state.current_task_id {
+                                    mark_task_complete_by_id(task_id, &task_file)?;
+                                }
+                                state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
+                                return Ok(StepOutcome::Continue);
+                            }
+                            Err(e) => {
+                                println!(
+                                    "[wreck-it] failed to merge PR #{} (brute mode): {}",
+                                    pr_number, e
+                                );
+                            }
+                        }
+                    } else {
                         println!(
-                            "[wreck-it] failed to enable auto-merge for PR #{}: {}",
-                            pr_number, e
+                            "[wreck-it] PR #{} is not yet mergeable, approving workflows and enabling auto-merge",
+                            pr_number
                         );
+                        if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                            println!(
+                                "[wreck-it] failed to approve workflow runs for PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
+                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                            println!(
+                                "[wreck-it] failed to enable auto-merge for PR #{}: {}",
+                                pr_number, e
+                            );
+                        }
                     }
                 }
             } else {
@@ -1243,6 +1364,51 @@ async fn run_needs_verification(
             false
         }
     };
+
+    let brute = ralph.and_then(|r| r.brute_mode).unwrap_or(false);
+    if brute {
+        // Brute mode: disable auto-merge (if enabled) and merge directly.
+        println!(
+            "[wreck-it] PR #{} is mergeable (brute mode), disabling auto-merge and merging directly",
+            pr_number
+        );
+        if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+            println!(
+                "[wreck-it] failed to approve workflow runs for PR #{}: {}",
+                pr_number, e
+            );
+        }
+        if let Err(e) = client.disable_auto_merge(pr_number).await {
+            println!(
+                "[wreck-it] failed to disable auto-merge for PR #{}: {}",
+                pr_number, e
+            );
+        }
+        match client.merge_pr(pr_number).await {
+            Ok(()) => {
+                println!("[wreck-it] PR #{} merged successfully (brute mode)", pr_number);
+                state.phase = AgentPhase::Completed;
+                state.memory.push(format!(
+                    "iteration {}: merged PR #{} for task {:?} (brute mode)",
+                    state.iteration, pr_number, state.current_task_id,
+                ));
+                let task_file = state_dir.join(&headless_cfg.task_file);
+                if let Some(task_id) = &state.current_task_id {
+                    mark_task_complete_by_id(task_id, &task_file)?;
+                }
+                state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
+                return Ok(StepOutcome::Continue);
+            }
+            Err(e) => {
+                println!("[wreck-it] failed to merge PR #{} (brute mode): {}", pr_number, e);
+                state.memory.push(format!(
+                    "iteration {}: merge failed for PR #{} (brute mode): {}",
+                    state.iteration, pr_number, e,
+                ));
+                return Ok(StepOutcome::Yield);
+            }
+        }
+    }
 
     if has_checks {
         // Required checks exist and pass; enable auto-merge and approve

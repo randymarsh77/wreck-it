@@ -224,6 +224,7 @@ mod tests {
                 agent: None,
                 reviewers: None,
                 command: None,
+                brute_mode: None,
             }],
             ..RepoConfig::default()
         };

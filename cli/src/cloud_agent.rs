@@ -2021,6 +2021,97 @@ impl CloudAgentClient {
         Ok(())
     }
 
+    /// Disable auto-merge on a pull request.
+    ///
+    /// Uses the GraphQL `disablePullRequestAutoMerge` mutation so that
+    /// GitHub stops waiting for checks to pass before merging.  This is
+    /// used in "brute mode" to clear any previously-enabled auto-merge
+    /// before performing a direct merge.
+    pub async fn disable_auto_merge(&self, pr_number: u64) -> Result<()> {
+        // Fetch the PR to obtain the GraphQL node_id.
+        let pr_url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let pr_resp = self
+            .http
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for node_id")?;
+
+        if !pr_resp.status().is_success() {
+            let status = pr_resp.status();
+            let body = pr_resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch PR #{} for node_id ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let pr: serde_json::Value = pr_resp.json().await?;
+        let node_id = pr["node_id"]
+            .as_str()
+            .context("Missing node_id in PR response")?;
+
+        // Use the GraphQL API to disable auto-merge.
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": concat!(
+                "mutation($prId: ID!) { ",
+                  "disablePullRequestAutoMerge(input: { ",
+                    "pullRequestId: $prId ",
+                  "}) { ",
+                    "pullRequest { autoMergeRequest { enabledAt } } ",
+                  "} ",
+                "}"
+            ),
+            "variables": { "prId": node_id },
+        });
+
+        let resp = self
+            .http
+            .post(&graphql_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&query)
+            .send()
+            .await
+            .context("Failed to call GraphQL disablePullRequestAutoMerge")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "GraphQL request failed for PR #{} ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let gql_resp: serde_json::Value = resp.json().await?;
+
+        // Check for GraphQL-level errors.
+        if let Some(errors) = gql_resp.get("errors") {
+            bail!(
+                "GraphQL errors disabling auto-merge for PR #{}: {}",
+                pr_number,
+                errors,
+            );
+        }
+
+        tracing::info!("Disabled auto-merge for PR #{}", pr_number);
+        Ok(())
+    }
+
     /// Fetch the GraphQL node ID of a GitHub user by their login.
     async fn get_user_node_id(&self, login: &str) -> Option<String> {
         let url = format!("{}/users/{}", GITHUB_API_BASE, login);
