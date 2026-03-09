@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 17,
-  "current_task_id": "ideas-api-cost-tracking",
-  "issue_number": 177,
-  "last_prompt": "Research and design an API token cost-tracking and budget-control system for wreck-it. Review the agent execution flow in cli/src/agent.rs and cli/src/ralph_loop.rs to identify where token usage can be captured from LLM API responses (usage field in OpenAI-compatible responses). Design: (1) a CostTracker struct that accumulates prompt_tokens, completion_tokens, and estimated_cost_usd per task and for the whole run, (2) a new Config field `max_cost_usd: Option<f64>` that aborts the loop when the cumulative estimated cost exceeds the threshold, (3) a cost summary line printed at the end of each iteration in both headless and TUI modes, (4) per-model pricing constants for common GitHub Models / OpenAI models. Document the design as inline comments in a new cli/src/cost_tracker.rs stub file.",
+  "iteration": 18,
+  "current_task_id": "impl-api-cost-tracking",
+  "issue_number": 179,
+  "last_prompt": "Implement the API token cost-tracking system designed in ideas-api-cost-tracking. Create cli/src/cost_tracker.rs with a CostTracker struct holding per-task and cumulative token counts and a method to compute estimated_cost_usd given a model name. Extend the agent response handling in cli/src/agent.rs to capture the usage object from OpenAI-compatible API responses and update the tracker. Add `max_cost_usd: Option<f64>` to Config in cli/src/types.rs (default None, skip_serializing_if None). In cli/src/ralph_loop.rs, check the cumulative cost after each task and abort the loop with a clear message if max_cost_usd is exceeded. Add a `--max-cost <USD>` CLI flag in cli/src/cli.rs. Print a cost summary (total tokens + estimated USD) at the end of each iteration and at run completion.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -168,6 +168,10 @@
     "iteration 16: agent created PR #176 for task Some(\"eval-github-issues-integration\")",
     "iteration 16: marked PR #176 as ready for review",
     "iteration 16: merged PR #176 for task Some(\"eval-github-issues-integration\") (brute mode)",
-    "iteration 17: triggered cloud agent for task ideas-api-cost-tracking (issue #177)"
+    "iteration 17: triggered cloud agent for task ideas-api-cost-tracking (issue #177)",
+    "iteration 17: agent created PR #178 for task Some(\"ideas-api-cost-tracking\")",
+    "iteration 17: marked PR #178 as ready for review",
+    "iteration 17: merged PR #178 for task Some(\"ideas-api-cost-tracking\") (brute mode)",
+    "iteration 18: triggered cloud agent for task impl-api-cost-tracking (issue #179)"
   ]
 }
