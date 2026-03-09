@@ -2,11 +2,11 @@
   {
     "id": "docs-review",
     "description": "Assess the state of documentation across the project. Review README.md, docs/, and inline code comments for accuracy, completeness, and currency. Update any outdated sections, add missing documentation for new features, ensure examples are working, and verify links are valid.",
-    "status": "inprogress",
+    "status": "completed",
     "role": "evaluator",
     "kind": "recurring",
     "cooldown_seconds": 86400,
-    "last_attempt_at": 1772849357,
+    "last_attempt_at": 1773038482,
     "precondition_prompt": "Check if any documentation in the project is outdated, missing, or inaccurate by reviewing recent commits and comparing them with the current docs. Return true if documentation needs updating, false if everything is current and accurate."
   }
 ]

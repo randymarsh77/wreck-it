@@ -1,11 +1,6 @@
 {
-  "phase": "needs_verification",
+  "phase": "needs_trigger",
   "iteration": 4,
-  "current_task_id": "docs-review",
-  "issue_number": 164,
-  "pr_number": 165,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/165",
-  "last_prompt": "Assess the state of documentation across the project. Review README.md, docs/, and inline code comments for accuracy, completeness, and currency. Update any outdated sections, add missing documentation for new features, ensure examples are working, and verify links are valid.",
   "memory": [
     "iteration 1: triggered cloud agent for task docs-review (issue #96)",
     "iteration 1: agent created PR #97 for task Some(\"docs-review\")",
@@ -104,13 +99,7 @@
     "iteration 4: enabled auto-merge for PR #165",
     "iteration 4: enabled auto-merge for PR #165",
     "iteration 4: enabled auto-merge for PR #165",
-    "iteration 4: enabled auto-merge for PR #165"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 165,
-      "task_id": "docs-review",
-      "issue_number": 164
-    }
+    "iteration 4: enabled auto-merge for PR #165",
+    "advance: merged PR #165"
   ]
 }
