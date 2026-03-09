@@ -253,18 +253,19 @@
   {
     "id": "test-task-cli-management",
     "description": "Add tests for the `wreck-it tasks` sub-commands. In cli/src/task_cli.rs or a test module, write unit tests that: (1) verify `list` correctly filters by status and formats task rows, (2) verify `add` appends a valid new task to a JSON file and that the resulting file parses correctly, (3) verify `set-status` updates the correct task and leaves all other tasks unchanged, (4) verify `validate` detects and reports duplicate IDs and a depends_on reference to a nonexistent task, (5) verify `validate` returns a clean result for a well-formed task file. Run `cargo test` to confirm all tests pass.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-task-cli-management"
     ],
     "priority": 3,
-    "complexity": 3
+    "complexity": 3,
+    "last_attempt_at": 1773051636
   },
   {
     "id": "eval-task-cli-management",
     "description": "Evaluate the `wreck-it tasks` CLI implementation. Review cli/src/task_cli.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) each sub-command is documented in README.md under Usage, (3) error messages for invalid input (unknown task id, invalid status value) are user-friendly, (4) the `add` command validates that the provided id does not already exist and reports an error if it does, (5) the `validate` sub-command is suitable for use in CI scripts (exits non-zero on errors). Fix any issues found and mark the task complete.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [

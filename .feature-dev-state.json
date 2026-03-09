@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 23,
-  "current_task_id": "test-task-cli-management",
-  "issue_number": 189,
-  "last_prompt": "Add tests for the `wreck-it tasks` sub-commands. In cli/src/task_cli.rs or a test module, write unit tests that: (1) verify `list` correctly filters by status and formats task rows, (2) verify `add` appends a valid new task to a JSON file and that the resulting file parses correctly, (3) verify `set-status` updates the correct task and leaves all other tasks unchanged, (4) verify `validate` detects and reports duplicate IDs and a depends_on reference to a nonexistent task, (5) verify `validate` returns a clean result for a well-formed task file. Run `cargo test` to confirm all tests pass.",
+  "iteration": 24,
+  "current_task_id": "eval-task-cli-management",
+  "issue_number": 191,
+  "last_prompt": "Evaluate the `wreck-it tasks` CLI implementation. Review cli/src/task_cli.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) each sub-command is documented in README.md under Usage, (3) error messages for invalid input (unknown task id, invalid status value) are user-friendly, (4) the `add` command validates that the provided id does not already exist and reports an error if it does, (5) the `validate` sub-command is suitable for use in CI scripts (exits non-zero on errors). Fix any issues found and mark the task complete.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -192,6 +192,10 @@
     "iteration 22: agent created PR #188 for task Some(\"impl-task-cli-management\")",
     "iteration 22: marked PR #188 as ready for review",
     "iteration 22: merged PR #188 for task Some(\"impl-task-cli-management\") (brute mode)",
-    "iteration 23: triggered cloud agent for task test-task-cli-management (issue #189)"
+    "iteration 23: triggered cloud agent for task test-task-cli-management (issue #189)",
+    "iteration 23: agent created PR #190 for task Some(\"test-task-cli-management\")",
+    "iteration 23: marked PR #190 as ready for review",
+    "iteration 23: merged PR #190 for task Some(\"test-task-cli-management\") (brute mode)",
+    "iteration 24: triggered cloud agent for task eval-task-cli-management (issue #191)"
   ]
 }
