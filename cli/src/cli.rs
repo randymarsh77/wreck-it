@@ -89,6 +89,22 @@ pub enum Commands {
         /// multiple times).
         #[arg(long = "notify-webhook", value_name = "URL")]
         notify_webhooks: Vec<String>,
+
+        /// Enable GitHub Issues integration: open an issue when a task moves to
+        /// InProgress and close it when it reaches Completed or Failed.
+        #[arg(long = "github-issues")]
+        github_issues: bool,
+
+        /// GitHub repository for Issues integration in `owner/repo` format
+        /// (e.g. `acme/my-project`).  Required when --github-issues is set.
+        #[arg(long = "github-repo", value_name = "OWNER/REPO")]
+        github_repo: Option<String>,
+
+        /// GitHub personal-access token or fine-grained token with `issues: write`
+        /// permission.  Falls back to the GITHUB_TOKEN environment variable when
+        /// not provided.
+        #[arg(long = "github-token", value_name = "TOKEN")]
+        github_token: Option<String>,
     },
 
     /// Generate a structured task plan from a natural-language goal using the
