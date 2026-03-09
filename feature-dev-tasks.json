@@ -278,15 +278,16 @@
   {
     "id": "ideas-multi-repo-orchestration",
     "description": "Research and design multi-repository orchestration for wreck-it. The feature should allow a single `wreck-it run` invocation to coordinate tasks that span multiple local git repositories (e.g., a monorepo split into separate repos, or a frontend + backend pair). Review the Config and RalphConfig types in cli/src/types.rs and cli/src/repo_config.rs, the agent execution in cli/src/agent.rs, and the git integration in cli/src/state_worktree.rs. Design: (1) a new optional `work_dirs: HashMap<String, String>` Config field mapping task roles or ids to repo paths, (2) how the agent context (file listing, git diff) is assembled when a task's work_dir differs from the root, (3) how test-runner detection (cargo/npm/pytest) works per-repo, (4) how commits are made to the correct repo. Document the design in a new docs/multi-repo.md stub.",
-    "status": "inprogress",
+    "status": "completed",
     "role": "ideas",
     "priority": 2,
-    "complexity": 3
+    "complexity": 3,
+    "last_attempt_at": 1773054438
   },
   {
     "id": "impl-multi-repo-orchestration",
     "description": "Implement the multi-repository orchestration feature designed in ideas-multi-repo-orchestration. Add `work_dirs: HashMap<String, String>` to Config in cli/src/types.rs (maps task-id prefix or role to a local path; absent means use the default work_dir). In cli/src/ralph_loop.rs, resolve the effective work_dir for each task before dispatching it to the agent. In cli/src/agent.rs, accept a per-call work_dir override so that file context, test running, and git commits all use the resolved path. Add a `--work-dir-map <ROLE_OR_ID>=<PATH>` CLI flag (multi-value) in cli/src/cli.rs that populates the config map. Create the docs/multi-repo.md documentation file explaining the feature and providing an example config.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 2,
     "depends_on": [
       "ideas-multi-repo-orchestration"
