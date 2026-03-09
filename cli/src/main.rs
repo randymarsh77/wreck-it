@@ -33,7 +33,7 @@ mod unstuck;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands};
+use cli::{Cli, Commands, TasksAction};
 use config_manager::{load_user_config, save_user_config};
 use ralph_loop::RalphLoop;
 use repo_config::{
@@ -863,6 +863,141 @@ async fn main() -> Result<()> {
                 None => print!("{content}"),
             }
         }
+
+        Commands::Tasks { action } => match action {
+            // ── tasks list ───────────────────────────────────────────────
+            TasksAction::List { task_file, status } => {
+                let tasks = task_manager::load_tasks(&task_file).with_context(|| {
+                    format!("Failed to load task file: {}", task_file.display())
+                })?;
+
+                let filtered: Vec<_> = tasks
+                    .iter()
+                    .filter(|t| status.map_or(true, |s| t.status == s))
+                    .collect();
+
+                if filtered.is_empty() {
+                    println!("No tasks found.");
+                } else {
+                    // Column widths (minimum header width, grow to content).
+                    let id_w = filtered.iter().map(|t| t.id.len()).max().unwrap_or(2).max(2);
+                    let status_w = 11; // "in-progress"
+                    let role_w = 11;   // "implementer"
+
+                    println!(
+                        "{:<id_w$}  {:<status_w$}  {:<role_w$}  {:>5}  {:>8}  DEPENDS_ON",
+                        "ID", "STATUS", "ROLE", "PHASE", "PRIORITY",
+                        id_w = id_w,
+                        status_w = status_w,
+                        role_w = role_w,
+                    );
+                    println!("{}", "-".repeat(id_w + status_w + role_w + 30));
+                    for t in &filtered {
+                        let status_str = match t.status {
+                            types::TaskStatus::Pending => "pending",
+                            types::TaskStatus::InProgress => "in-progress",
+                            types::TaskStatus::Completed => "completed",
+                            types::TaskStatus::Failed => "failed",
+                        };
+                        let role_str = match t.role {
+                            types::AgentRole::Ideas => "ideas",
+                            types::AgentRole::Implementer => "implementer",
+                            types::AgentRole::Evaluator => "evaluator",
+                        };
+                        let deps = if t.depends_on.is_empty() {
+                            "-".to_string()
+                        } else {
+                            t.depends_on.join(",")
+                        };
+                        println!(
+                            "{:<id_w$}  {:<status_w$}  {:<role_w$}  {:>5}  {:>8}  {}",
+                            t.id,
+                            status_str,
+                            role_str,
+                            t.phase,
+                            t.priority,
+                            deps,
+                            id_w = id_w,
+                            status_w = status_w,
+                            role_w = role_w,
+                        );
+                    }
+                    println!("\n{} task(s) listed.", filtered.len());
+                }
+            }
+
+            // ── tasks add ────────────────────────────────────────────────
+            TasksAction::Add {
+                task_file,
+                id,
+                description,
+                role,
+                phase,
+                priority,
+                depends_on,
+            } => {
+                let new_task = Task {
+                    id: id.clone(),
+                    description,
+                    status: types::TaskStatus::Pending,
+                    role,
+                    kind: types::TaskKind::default(),
+                    cooldown_seconds: None,
+                    phase,
+                    depends_on,
+                    priority,
+                    complexity: 1,
+                    timeout_seconds: None,
+                    max_retries: None,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
+                    inputs: vec![],
+                    outputs: vec![],
+                    runtime: types::TaskRuntime::default(),
+                    precondition_prompt: None,
+                    parent_id: None,
+                    labels: vec![],
+                };
+                task_manager::append_task(&task_file, new_task)?;
+                println!("Task '{}' added to {}.", id, task_file.display());
+            }
+
+            // ── tasks set-status ─────────────────────────────────────────
+            TasksAction::SetStatus {
+                task_file,
+                id,
+                status,
+            } => {
+                task_manager::set_task_status(&task_file, &id, status)?;
+                println!("Task '{}' status updated.", id);
+            }
+
+            // ── tasks validate ───────────────────────────────────────────
+            TasksAction::Validate { task_file } => {
+                let tasks = task_manager::load_tasks(&task_file).with_context(|| {
+                    format!("Failed to load task file: {}", task_file.display())
+                })?;
+
+                let issues = task_manager::validate_tasks(&tasks);
+
+                if issues.is_empty() {
+                    println!(
+                        "Task file '{}' is valid ({} task(s)).",
+                        task_file.display(),
+                        tasks.len()
+                    );
+                } else {
+                    for issue in &issues {
+                        eprintln!("error: {}", issue);
+                    }
+                    anyhow::bail!(
+                        "{} validation error(s) found in '{}'",
+                        issues.len(),
+                        task_file.display()
+                    );
+                }
+            }
+        },
     }
 
     Ok(())
