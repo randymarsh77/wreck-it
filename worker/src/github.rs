@@ -1314,8 +1314,6 @@ impl GitHubClient {
         // `pending` (first-time contributors), or `waiting` (outside
         // collaborators / deployment protection rules).
         let mut all_run_ids: Vec<u64> = Vec::new();
-        let mut waiting_run_ids: Vec<u64> = Vec::new();
-        let mut fork_run_ids: Vec<u64> = Vec::new();
 
         for status_filter in &["action_required", "pending", "waiting"] {
             let runs_url = format!(
@@ -1402,27 +1400,7 @@ impl GitHubClient {
                                 name,
                                 pr_number,
                             );
-                            // Detect fork runs by comparing head and base
-                            // repository full names.  The REST `/approve`
-                            // endpoint only works for fork pull requests.
-                            let head_repo = run
-                                .pointer("/head_repository/full_name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            let base_repo = run
-                                .pointer("/repository/full_name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            if !head_repo.is_empty()
-                                && !base_repo.is_empty()
-                                && head_repo != base_repo
-                            {
-                                fork_run_ids.push(id);
-                            }
                             all_run_ids.push(id);
-                            if *status_filter == "waiting" {
-                                waiting_run_ids.push(id);
-                            }
                         }
                     }
                 }
@@ -1434,28 +1412,11 @@ impl GitHubClient {
         }
 
         let mut approved_count: usize = 0;
-        let mut skipped_count: usize = 0;
 
         for run_id in &all_run_ids {
-            // The REST `/approve` endpoint only applies to fork pull requests.
-            // Skip non-fork runs to avoid a 403 response.
-            if !fork_run_ids.contains(run_id) {
-                // For `waiting` runs (e.g. deployment protection rules), try
-                // approving via the pending_deployments endpoint.
-                if waiting_run_ids.contains(run_id) {
-                    if self
-                        .approve_pending_deployments(*run_id, pr_number)
-                        .await
-                    {
-                        approved_count += 1;
-                    }
-                } else {
-                    skipped_count += 1;
-                }
-                continue;
-            }
-
-            // Attempt the REST approval endpoint for fork pull request runs.
+            // Attempt the REST approval endpoint.  This is the standard
+            // mechanism for approving workflow runs that require manual
+            // approval (fork PRs, first-time contributors, etc.).
             let approve_url = format!(
                 "https://api.github.com/repos/{}/{}/actions/runs/{}/approve",
                 url_encode(&self.owner),
@@ -1498,11 +1459,11 @@ impl GitHubClient {
                 Ok(mut r) => {
                     let status = r.status_code();
                     let body = r.text().await.unwrap_or_default();
-                    worker::console_warn!(
-                        "REST approve failed for workflow run {} on PR #{} ({}): {}",
+                    worker::console_log!(
+                        "REST approve returned {} for workflow run {} on PR #{}: {}",
+                        status,
                         run_id,
                         pr_number,
-                        status,
                         body,
                     );
                 }
@@ -1516,12 +1477,12 @@ impl GitHubClient {
                 }
             }
 
-            // For `waiting` runs (deployment protection rules), try
-            // approving via the pending_deployments endpoint.
-            if waiting_run_ids.contains(run_id)
-                && self
-                    .approve_pending_deployments(*run_id, pr_number)
-                    .await
+            // Fall back to the pending_deployments endpoint.  This handles
+            // runs in `waiting` status (deployment protection rules) as well
+            // as other cases where the `/approve` endpoint is not sufficient.
+            if self
+                .approve_pending_deployments(*run_id, pr_number)
+                .await
             {
                 approved_count += 1;
             }
@@ -1534,8 +1495,6 @@ impl GitHubClient {
                 all_run_ids.len(),
                 pr_number,
             );
-        } else if skipped_count == all_run_ids.len() {
-            // All runs are non-fork; no approval needed via API.
         } else {
             worker::console_warn!(
                 "Found {} pending workflow run(s) for PR #{} but could not approve any",
