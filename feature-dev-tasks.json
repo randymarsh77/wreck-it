@@ -219,19 +219,20 @@
   {
     "id": "eval-api-cost-tracking",
     "description": "Evaluate the API cost-tracking implementation. Review cli/src/cost_tracker.rs, Config changes, CLI flag, and ralph_loop.rs call sites. Verify: (1) `cargo clippy -- -D warnings` passes cleanly, (2) the cost summary output is human-readable and informative (tokens used, estimated USD), (3) the budget-abort message is clear and includes the current cost vs. limit, (4) the `max_cost_usd` Config field and `--max-cost` CLI flag are documented in README.md, (5) when the usage field is absent from an API response the tracker degrades gracefully (logs a warning, does not panic). Fix any issues found and mark the task complete.",
-    "status": "inprogress",
+    "status": "completed",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
       "test-api-cost-tracking"
     ],
     "priority": 4,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1773047226
   },
   {
     "id": "ideas-task-cli-management",
     "description": "Research and design a `wreck-it tasks` sub-command family for managing task files interactively from the CLI without editing JSON by hand. Review the existing CLI structure in cli/src/cli.rs (clap commands) and the Task type in cli/src/types.rs. Design sub-commands: (1) `wreck-it tasks list [--task-file] [--status pending|inprogress|completed|failed]` — tabular output of all tasks with their status and role, (2) `wreck-it tasks add --id <id> --description <desc> [--role ideas|implementer|evaluator] [--phase N] [--priority N] [--depends-on id1,id2]` — appends a new task to the file, (3) `wreck-it tasks set-status --id <id> --status <status>` — updates the status of a task in place, (4) `wreck-it tasks validate [--task-file]` — checks for missing required fields, duplicate IDs, and unresolved depends_on references. Document design as inline comments in cli/src/cli.rs.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "ideas",
     "priority": 3,
     "complexity": 2
