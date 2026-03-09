@@ -207,18 +207,19 @@
   {
     "id": "test-api-cost-tracking",
     "description": "Add unit and integration tests for the API cost-tracking feature. In cli/src/cost_tracker.rs or a test module, verify: (1) CostTracker accumulates token counts correctly across multiple tasks, (2) estimated_cost_usd is computed correctly for at least two known models with fixed per-token rates, (3) when max_cost_usd is set and the cumulative cost exceeds it, the loop-abort condition is triggered correctly, (4) when max_cost_usd is None, no budget check occurs. Run `cargo test` to confirm all tests pass.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-api-cost-tracking"
     ],
     "priority": 4,
-    "complexity": 3
+    "complexity": 3,
+    "last_attempt_at": 1773046082
   },
   {
     "id": "eval-api-cost-tracking",
     "description": "Evaluate the API cost-tracking implementation. Review cli/src/cost_tracker.rs, Config changes, CLI flag, and ralph_loop.rs call sites. Verify: (1) `cargo clippy -- -D warnings` passes cleanly, (2) the cost summary output is human-readable and informative (tokens used, estimated USD), (3) the budget-abort message is clear and includes the current cost vs. limit, (4) the `max_cost_usd` Config field and `--max-cost` CLI flag are documented in README.md, (5) when the usage field is absent from an API response the tracker degrades gracefully (logs a warning, does not panic). Fix any issues found and mark the task complete.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
