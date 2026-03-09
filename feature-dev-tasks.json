@@ -299,18 +299,19 @@
   {
     "id": "test-multi-repo-orchestration",
     "description": "Add tests for the multi-repository orchestration feature. In cli/src/ or a test module, write tests using temporary directories to verify: (1) when `work_dirs` maps a task id to a secondary path, the agent receives the correct work_dir for that task while other tasks use the default, (2) git commits are made to the correct repository (not the default one) when a task is mapped to a different path, (3) when `work_dirs` is empty or absent, behavior is identical to the current single-repo behavior. Run `cargo test` to confirm all tests pass.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-multi-repo-orchestration"
     ],
     "priority": 2,
-    "complexity": 4
+    "complexity": 4,
+    "last_attempt_at": 1773056692
   },
   {
     "id": "eval-multi-repo-orchestration",
     "description": "Evaluate the multi-repository orchestration implementation. Review the Config changes, ralph_loop.rs modifications, agent.rs work_dir override, and docs/multi-repo.md. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the feature is fully backward-compatible when `work_dirs` is absent, (3) docs/multi-repo.md contains a clear example showing a two-repo setup, (4) the `--work-dir-map` CLI flag is documented in README.md under Usage, (5) path validation (work_dir must be an existing directory and a git repo) produces a clear error message. Fix any issues found and mark the task complete.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
