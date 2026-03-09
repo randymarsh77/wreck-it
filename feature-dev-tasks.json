@@ -173,19 +173,20 @@
   {
     "id": "eval-github-issues-integration",
     "description": "Evaluate the GitHub Issues integration. Review cli/src/github_client.rs, Config changes, CLI flags, and ralph_loop.rs call sites. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the feature is opt-in (no behavior change when github_issues_enabled is false or absent), (3) GITHUB_TOKEN environment variable fallback works correctly, (4) the feature is documented in README.md with a short description and the new CLI flags, (5) no sensitive tokens are logged at any level. Fix any issues found and mark the task complete.",
-    "status": "inprogress",
+    "status": "completed",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
       "test-github-issues-integration"
     ],
     "priority": 5,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1773042012
   },
   {
     "id": "ideas-api-cost-tracking",
     "description": "Research and design an API token cost-tracking and budget-control system for wreck-it. Review the agent execution flow in cli/src/agent.rs and cli/src/ralph_loop.rs to identify where token usage can be captured from LLM API responses (usage field in OpenAI-compatible responses). Design: (1) a CostTracker struct that accumulates prompt_tokens, completion_tokens, and estimated_cost_usd per task and for the whole run, (2) a new Config field `max_cost_usd: Option<f64>` that aborts the loop when the cumulative estimated cost exceeds the threshold, (3) a cost summary line printed at the end of each iteration in both headless and TUI modes, (4) per-model pricing constants for common GitHub Models / OpenAI models. Document the design as inline comments in a new cli/src/cost_tracker.rs stub file.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "ideas",
     "priority": 4,
     "complexity": 2

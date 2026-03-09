@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 16,
-  "current_task_id": "eval-github-issues-integration",
-  "issue_number": 175,
-  "last_prompt": "Evaluate the GitHub Issues integration. Review cli/src/github_client.rs, Config changes, CLI flags, and ralph_loop.rs call sites. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the feature is opt-in (no behavior change when github_issues_enabled is false or absent), (3) GITHUB_TOKEN environment variable fallback works correctly, (4) the feature is documented in README.md with a short description and the new CLI flags, (5) no sensitive tokens are logged at any level. Fix any issues found and mark the task complete.",
+  "iteration": 17,
+  "current_task_id": "ideas-api-cost-tracking",
+  "issue_number": 177,
+  "last_prompt": "Research and design an API token cost-tracking and budget-control system for wreck-it. Review the agent execution flow in cli/src/agent.rs and cli/src/ralph_loop.rs to identify where token usage can be captured from LLM API responses (usage field in OpenAI-compatible responses). Design: (1) a CostTracker struct that accumulates prompt_tokens, completion_tokens, and estimated_cost_usd per task and for the whole run, (2) a new Config field `max_cost_usd: Option<f64>` that aborts the loop when the cumulative estimated cost exceeds the threshold, (3) a cost summary line printed at the end of each iteration in both headless and TUI modes, (4) per-model pricing constants for common GitHub Models / OpenAI models. Document the design as inline comments in a new cli/src/cost_tracker.rs stub file.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -164,6 +164,10 @@
     "iteration 15: agent created PR #173 for task Some(\"test-github-issues-integration\")",
     "iteration 15: marked PR #173 as ready for review",
     "iteration 15: merged PR #173 for task Some(\"test-github-issues-integration\") (brute mode)",
-    "iteration 16: triggered cloud agent for task eval-github-issues-integration (issue #175)"
+    "iteration 16: triggered cloud agent for task eval-github-issues-integration (issue #175)",
+    "iteration 16: agent created PR #176 for task Some(\"eval-github-issues-integration\")",
+    "iteration 16: marked PR #176 as ready for review",
+    "iteration 16: merged PR #176 for task Some(\"eval-github-issues-integration\") (brute mode)",
+    "iteration 17: triggered cloud agent for task ideas-api-cost-tracking (issue #177)"
   ]
 }
