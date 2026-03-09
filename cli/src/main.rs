@@ -25,6 +25,7 @@ mod ralph_loop;
 mod replanner;
 mod repo_config;
 mod state_worktree;
+mod task_cli;
 mod task_manager;
 mod templates;
 mod tui;
@@ -871,10 +872,7 @@ async fn main() -> Result<()> {
                     format!("Failed to load task file: {}", task_file.display())
                 })?;
 
-                let filtered: Vec<_> = tasks
-                    .iter()
-                    .filter(|t| status.is_none_or(|s| t.status == s))
-                    .collect();
+                let filtered = task_cli::filter_tasks_by_status(&tasks, status);
 
                 if filtered.is_empty() {
                     println!("No tasks found.");
@@ -902,33 +900,9 @@ async fn main() -> Result<()> {
                     );
                     println!("{}", "-".repeat(id_w + status_w + role_w + 30));
                     for t in &filtered {
-                        let status_str = match t.status {
-                            types::TaskStatus::Pending => "pending",
-                            types::TaskStatus::InProgress => "in-progress",
-                            types::TaskStatus::Completed => "completed",
-                            types::TaskStatus::Failed => "failed",
-                        };
-                        let role_str = match t.role {
-                            types::AgentRole::Ideas => "ideas",
-                            types::AgentRole::Implementer => "implementer",
-                            types::AgentRole::Evaluator => "evaluator",
-                        };
-                        let deps = if t.depends_on.is_empty() {
-                            "-".to_string()
-                        } else {
-                            t.depends_on.join(",")
-                        };
                         println!(
-                            "{:<id_w$}  {:<status_w$}  {:<role_w$}  {:>5}  {:>8}  {}",
-                            t.id,
-                            status_str,
-                            role_str,
-                            t.phase,
-                            t.priority,
-                            deps,
-                            id_w = id_w,
-                            status_w = status_w,
-                            role_w = role_w,
+                            "{}",
+                            task_cli::format_task_row(t, id_w, status_w, role_w)
                         );
                     }
                     println!("\n{} task(s) listed.", filtered.len());
