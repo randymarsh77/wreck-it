@@ -464,8 +464,7 @@ mod tests {
         let resp_body = r#"{"number": 42, "html_url": "https://github.com/owner/repo/issues/42"}"#;
         let (base_url, req_fut) = mock_github_server("HTTP/1.1 201 Created", resp_body).await;
 
-        let client =
-            GitHubIssueClient::new_with_base_url("owner/repo", "fake-token", &base_url);
+        let client = GitHubIssueClient::new_with_base_url("owner/repo", "fake-token", &base_url);
 
         let (result, raw_req) = tokio::join!(
             client.create_issue("impl-auth", "Implement the auth module"),
@@ -473,7 +472,11 @@ mod tests {
         );
 
         // The call must succeed and return the issue number from the response.
-        assert_eq!(result.unwrap(), 42, "create_issue should return the issue number");
+        assert_eq!(
+            result.unwrap(),
+            42,
+            "create_issue should return the issue number"
+        );
 
         // Verify the HTTP method and path.
         let req_line = request_line(&raw_req);
@@ -488,12 +491,11 @@ mod tests {
             body["title"].as_str().unwrap_or("").contains("impl-auth"),
             "issue title should contain the task id"
         );
-        let labels = body["labels"].as_array().expect("labels should be a JSON array");
+        let labels = body["labels"]
+            .as_array()
+            .expect("labels should be a JSON array");
         assert!(!labels.is_empty(), "labels array should not be empty");
-        assert_eq!(
-            labels[0], "wreck-it",
-            "issue should be labeled 'wreck-it'"
-        );
+        assert_eq!(labels[0], "wreck-it", "issue should be labeled 'wreck-it'");
     }
 
     /// (2) A PATCH request to close the issue is made when close_issue is called
@@ -503,8 +505,7 @@ mod tests {
         let resp_body = r#"{"number": 42, "state": "closed"}"#;
         let (base_url, req_fut) = mock_github_server("HTTP/1.1 200 OK", resp_body).await;
 
-        let client =
-            GitHubIssueClient::new_with_base_url("owner/repo", "fake-token", &base_url);
+        let client = GitHubIssueClient::new_with_base_url("owner/repo", "fake-token", &base_url);
 
         let (result, raw_req) = tokio::join!(client.close_issue(42), req_fut);
 
@@ -518,7 +519,10 @@ mod tests {
 
         // Verify that the payload sets state to "closed".
         let body = extract_body(&raw_req);
-        assert_eq!(body["state"], "closed", "close_issue should set state to 'closed'");
+        assert_eq!(
+            body["state"], "closed",
+            "close_issue should set state to 'closed'"
+        );
     }
 
     /// (3) When github_issues_enabled is false, no HTTP calls are made.
@@ -542,11 +546,9 @@ mod tests {
     #[tokio::test]
     async fn create_issue_api_error_returns_err_without_panicking() {
         let resp_body = r#"{"message": "Requires authentication", "documentation_url": "https://docs.github.com/rest"}"#;
-        let (base_url, req_fut) =
-            mock_github_server("HTTP/1.1 401 Unauthorized", resp_body).await;
+        let (base_url, req_fut) = mock_github_server("HTTP/1.1 401 Unauthorized", resp_body).await;
 
-        let client =
-            GitHubIssueClient::new_with_base_url("owner/repo", "bad-token", &base_url);
+        let client = GitHubIssueClient::new_with_base_url("owner/repo", "bad-token", &base_url);
 
         let (result, _raw_req) = tokio::join!(
             client.create_issue("task-1", "Do something important"),
@@ -567,11 +569,9 @@ mod tests {
     #[tokio::test]
     async fn close_issue_api_error_returns_err_without_panicking() {
         let resp_body = r#"{"message": "Requires authentication"}"#;
-        let (base_url, req_fut) =
-            mock_github_server("HTTP/1.1 401 Unauthorized", resp_body).await;
+        let (base_url, req_fut) = mock_github_server("HTTP/1.1 401 Unauthorized", resp_body).await;
 
-        let client =
-            GitHubIssueClient::new_with_base_url("owner/repo", "bad-token", &base_url);
+        let client = GitHubIssueClient::new_with_base_url("owner/repo", "bad-token", &base_url);
 
         let (result, _raw_req) = tokio::join!(client.close_issue(7), req_fut);
 
@@ -582,5 +582,4 @@ mod tests {
             "error message should mention the 401 status, got: {err_msg}"
         );
     }
-
 }

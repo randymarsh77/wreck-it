@@ -396,7 +396,10 @@ mod tests {
             completion_tokens: 1_000_000,
         };
         let cost_mini = usage_mini.estimate_cost(PRICE_GPT4O_MINI_INPUT, PRICE_GPT4O_MINI_OUTPUT);
-        assert!((cost_mini - 0.90).abs() < 1e-9, "gpt-4o-mini cost was {cost_mini}");
+        assert!(
+            (cost_mini - 0.90).abs() < 1e-9,
+            "gpt-4o-mini cost was {cost_mini}"
+        );
 
         // ── Claude Sonnet 4 ───────────────────────────────────────────────────
         // $3.00 / 1M input, $15.00 / 1M output

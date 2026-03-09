@@ -111,10 +111,7 @@ pub fn validate_tasks(tasks: &[Task]) -> Vec<String> {
     for t in tasks {
         for dep in &t.depends_on {
             if !all_ids.contains(dep.as_str()) {
-                issues.push(format!(
-                    "Task '{}' depends_on unknown task '{}'",
-                    t.id, dep
-                ));
+                issues.push(format!("Task '{}' depends_on unknown task '{}'", t.id, dep));
             }
         }
     }
