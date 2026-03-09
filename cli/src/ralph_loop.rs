@@ -191,17 +191,15 @@ impl RalphLoop {
         }
 
         // Check the budget before starting a new task.
-        let budget_exceeded = self
-            .cost_tracker
-            .lock()
-            .map(|guard| guard.budget_exceeded(self.config.max_cost_usd))
-            .unwrap_or(false);
-        if budget_exceeded {
-            self.state.add_log(format!(
-                "Budget limit (${:.4}) reached – stopping",
-                self.config.max_cost_usd.unwrap_or(0.0)
-            ));
-            return Ok(false);
+        if let Ok(guard) = self.cost_tracker.lock() {
+            if guard.budget_exceeded(self.config.max_cost_usd) {
+                self.state.add_log(format!(
+                    "Budget limit reached – current cost ${:.4} >= limit ${:.4} – stopping",
+                    guard.total_estimated_cost_usd,
+                    self.config.max_cost_usd.unwrap_or(0.0)
+                ));
+                return Ok(false);
+            }
         }
 
         // Reset per-task cost counters at the start of each new iteration.

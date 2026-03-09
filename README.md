@@ -115,6 +115,10 @@ Options:
 - `--github-issues`: Enable GitHub Issues integration — open an issue when a task moves to `InProgress` and close it when it reaches `Completed` or `Failed`
 - `--github-repo <OWNER/REPO>`: GitHub repository for the Issues integration (e.g. `acme/my-project`); required when `--github-issues` is set
 - `--github-token <TOKEN>`: GitHub personal-access token or fine-grained token with `issues: write` permission; falls back to the `GITHUB_TOKEN` environment variable when not provided
+- `--max-cost <USD>`: Maximum cumulative estimated API cost (USD) for the entire run.
+  When the tracked spend reaches this threshold the loop aborts before starting the next task.
+  Leave unset to impose no limit. Only costs reported by the GitHub Models HTTP path are metered
+  (Copilot SDK and Llama calls contribute $0.00 to the estimate).
 
 **Note**: When using `--model-provider copilot`, the Copilot CLI must be authenticated and available in your PATH. When using `--model-provider github-models`, set `GITHUB_TOKEN` in your environment.
 
