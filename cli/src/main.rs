@@ -873,20 +873,29 @@ async fn main() -> Result<()> {
 
                 let filtered: Vec<_> = tasks
                     .iter()
-                    .filter(|t| status.map_or(true, |s| t.status == s))
+                    .filter(|t| status.is_none_or(|s| t.status == s))
                     .collect();
 
                 if filtered.is_empty() {
                     println!("No tasks found.");
                 } else {
                     // Column widths (minimum header width, grow to content).
-                    let id_w = filtered.iter().map(|t| t.id.len()).max().unwrap_or(2).max(2);
+                    let id_w = filtered
+                        .iter()
+                        .map(|t| t.id.len())
+                        .max()
+                        .unwrap_or(2)
+                        .max(2);
                     let status_w = 11; // "in-progress"
-                    let role_w = 11;   // "implementer"
+                    let role_w = 11; // "implementer"
 
                     println!(
                         "{:<id_w$}  {:<status_w$}  {:<role_w$}  {:>5}  {:>8}  DEPENDS_ON",
-                        "ID", "STATUS", "ROLE", "PHASE", "PRIORITY",
+                        "ID",
+                        "STATUS",
+                        "ROLE",
+                        "PHASE",
+                        "PRIORITY",
                         id_w = id_w,
                         status_w = status_w,
                         role_w = role_w,
