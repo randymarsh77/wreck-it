@@ -1492,4 +1492,65 @@ mod tests {
             std::path::PathBuf::from("/projects/sub-repo")
         );
     }
+
+    // ---- multi-repo orchestration integration tests using real temp dirs ----
+
+    /// When `work_dirs` maps a task id to a secondary path, the agent receives
+    /// the correct (secondary) work_dir for that task while other tasks continue
+    /// to use the default work_dir.
+    #[test]
+    fn work_dirs_maps_task_to_secondary_with_temp_dirs() {
+        let default_dir = tempfile::tempdir().unwrap();
+        let secondary_dir = tempfile::tempdir().unwrap();
+
+        let config = make_config_with_work_dirs(
+            default_dir.path().to_str().unwrap(),
+            &[(
+                "special-task",
+                secondary_dir.path().to_str().unwrap(),
+            )],
+        );
+        let rl = make_ralph_loop(config);
+
+        // The mapped task should resolve to the secondary directory.
+        let mapped_task = make_task("special-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&mapped_task),
+            secondary_dir.path(),
+            "mapped task must receive the secondary work_dir"
+        );
+
+        // All other tasks should fall back to the default directory.
+        for id in &["task-a", "task-b", "unrelated"] {
+            let other_task = make_task(id, TaskStatus::Pending, 0, 1, 0, vec![]);
+            assert_eq!(
+                rl.resolve_work_dir(&other_task),
+                default_dir.path(),
+                "unmapped task '{}' must receive the default work_dir",
+                id
+            );
+        }
+    }
+
+    /// When `work_dirs` is empty (absent), every task uses the default work_dir,
+    /// which is identical to the current single-repository behavior.
+    #[test]
+    fn work_dirs_absent_is_identical_to_single_repo_behavior() {
+        let default_dir = tempfile::tempdir().unwrap();
+
+        // No overrides – equivalent to a config that never sets work_dirs.
+        let config =
+            make_config_with_work_dirs(default_dir.path().to_str().unwrap(), &[]);
+        let rl = make_ralph_loop(config);
+
+        for id in &["impl-1", "test-2", "eval-3"] {
+            let task = make_task(id, TaskStatus::Pending, 0, 1, 0, vec![]);
+            assert_eq!(
+                rl.resolve_work_dir(&task),
+                default_dir.path(),
+                "task '{}' must use the default work_dir when work_dirs is empty",
+                id
+            );
+        }
+    }
 }
