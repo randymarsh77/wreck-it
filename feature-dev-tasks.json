@@ -149,18 +149,19 @@
   {
     "id": "impl-github-issues-integration",
     "description": "Implement GitHub Issues integration. Create cli/src/github_client.rs with async functions `create_issue(token, repo, title, body) -> Result<u64>` and `close_issue(token, repo, issue_number) -> Result<()>` using reqwest and the GitHub REST API (POST /repos/{owner}/{repo}/issues, PATCH to close). Add Config fields `github_issues_enabled`, `github_repo`, `github_token`. Add CLI flags `--github-issues`, `--github-repo <owner/repo>`, `--github-token <TOKEN>`. Wire into ralph_loop.rs: call create_issue when a task moves to InProgress (store issue number in task metadata or a side-channel map), call close_issue with the appropriate state when it reaches Completed or Failed. Failures should log warnings but not abort the loop.",
-    "status": "inprogress",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-github-issues-integration"
     ],
     "priority": 5,
-    "complexity": 6
+    "complexity": 6,
+    "last_attempt_at": 1773038495
   },
   {
     "id": "test-github-issues-integration",
     "description": "Add tests for the GitHub Issues integration. Mock the GitHub REST API (using httpmock or wiremock, or a simple tokio TCP server) to verify: (1) a POST to /repos/{owner}/{repo}/issues is made when a task transitions to InProgress, (2) a PATCH request to close the issue is made when the task reaches Completed or Failed, (3) when github_issues_enabled is false, no HTTP calls are made, (4) a GitHub API error (e.g. 401 Unauthorized) logs a warning and does not abort the loop. Run `cargo test` to confirm all tests pass.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "impl-github-issues-integration"

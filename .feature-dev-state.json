@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 14,
-  "current_task_id": "impl-github-issues-integration",
-  "issue_number": 161,
-  "pr_number": 162,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/162",
-  "last_prompt": "Implement GitHub Issues integration. Create cli/src/github_client.rs with async functions `create_issue(token, repo, title, body) -> Result<u64>` and `close_issue(token, repo, issue_number) -> Result<()>` using reqwest and the GitHub REST API (POST /repos/{owner}/{repo}/issues, PATCH to close). Add Config fields `github_issues_enabled`, `github_repo`, `github_token`. Add CLI flags `--github-issues`, `--github-repo <owner/repo>`, `--github-token <TOKEN>`. Wire into ralph_loop.rs: call create_issue when a task moves to InProgress (store issue number in task metadata or a side-channel map), call close_issue with the appropriate state when it reaches Completed or Failed. Failures should log warnings but not abort the loop.",
+  "phase": "agent_working",
+  "iteration": 15,
+  "current_task_id": "test-github-issues-integration",
+  "issue_number": 172,
+  "last_prompt": "Add tests for the GitHub Issues integration. Mock the GitHub REST API (using httpmock or wiremock, or a simple tokio TCP server) to verify: (1) a POST to /repos/{owner}/{repo}/issues is made when a task transitions to InProgress, (2) a PATCH request to close the issue is made when the task reaches Completed or Failed, (3) when github_issues_enabled is false, no HTTP calls are made, (4) a GitHub API error (e.g. 401 Unauthorized) logs a warning and does not abort the loop. Run `cargo test` to confirm all tests pass.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -160,13 +158,8 @@
     "iteration 14: enabled auto-merge for PR #162",
     "iteration 14: enabled auto-merge for PR #162",
     "iteration 14: enabled auto-merge for PR #162",
-    "iteration 14: enabled auto-merge for PR #162"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 162,
-      "task_id": "impl-github-issues-integration",
-      "issue_number": 161
-    }
+    "iteration 14: enabled auto-merge for PR #162",
+    "advance: merged PR #162",
+    "iteration 15: triggered cloud agent for task test-github-issues-integration (issue #172)"
   ]
 }
