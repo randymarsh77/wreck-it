@@ -133,7 +133,23 @@ wreck-it template list
 wreck-it template apply engineering-team
 ```
 
-The `engineering-team` template configures three ralph contexts (`docs`, `features`, `planner`) with recurring tasks and writes the corresponding task files into the state worktree. Ralph entries that already exist in `.wreck-it/config.toml` are left untouched (idempotent).
+The `engineering-team` template configures four ralph contexts (`docs`, `features`, `planner`, `feature-dev`) with recurring tasks and writes the corresponding task files into the state worktree. Ralph entries that already exist in `.wreck-it/config.toml` are left untouched (idempotent).
+
+### Install wreck-it into a Project
+
+Bootstrap a new project with the full `engineering-team` template and ready-to-use GitHub Actions workflows in a single step:
+
+```bash
+wreck-it install
+```
+
+This creates:
+- `.wreck-it/config.toml` — pre-populated with the four `engineering-team` ralphs (`docs`, `features`, `planner`, `feature-dev`)
+- `.wreck-it/plans/` — directory for cloud-agent plan files
+- `.github/workflows/ralph.yml` — the main cron-driven wreck-it workflow
+- `.github/workflows/plan.yml` — a workflow for running `wreck-it plan` on demand
+
+Existing files are never overwritten; the command is safe to re-run (idempotent).
 
 ### Inspect Provenance
 
