@@ -80,6 +80,7 @@ async fn main() -> Result<()> {
             github_issues,
             github_repo,
             github_token,
+            max_cost_usd,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -206,6 +207,9 @@ async fn main() -> Result<()> {
                 }
                 if let Some(token) = &github_token {
                     config.github_token = Some(token.clone());
+                }
+                if let Some(cost) = max_cost_usd {
+                    config.max_cost_usd = Some(cost);
                 }
 
                 config

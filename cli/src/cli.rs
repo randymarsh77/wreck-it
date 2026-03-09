@@ -105,6 +105,12 @@ pub enum Commands {
         /// not provided.
         #[arg(long = "github-token", value_name = "TOKEN")]
         github_token: Option<String>,
+
+        /// Maximum cumulative estimated API cost (USD) for the entire run.
+        /// The loop aborts after any iteration where this limit is exceeded.
+        /// Leave unset to impose no budget limit.
+        #[arg(long = "max-cost", value_name = "USD")]
+        max_cost_usd: Option<f64>,
     },
 
     /// Generate a structured task plan from a natural-language goal using the
