@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 21,
-  "current_task_id": "ideas-task-cli-management",
-  "issue_number": 185,
-  "last_prompt": "Research and design a `wreck-it tasks` sub-command family for managing task files interactively from the CLI without editing JSON by hand. Review the existing CLI structure in cli/src/cli.rs (clap commands) and the Task type in cli/src/types.rs. Design sub-commands: (1) `wreck-it tasks list [--task-file] [--status pending|inprogress|completed|failed]` — tabular output of all tasks with their status and role, (2) `wreck-it tasks add --id <id> --description <desc> [--role ideas|implementer|evaluator] [--phase N] [--priority N] [--depends-on id1,id2]` — appends a new task to the file, (3) `wreck-it tasks set-status --id <id> --status <status>` — updates the status of a task in place, (4) `wreck-it tasks validate [--task-file]` — checks for missing required fields, duplicate IDs, and unresolved depends_on references. Document design as inline comments in cli/src/cli.rs.",
+  "iteration": 22,
+  "current_task_id": "impl-task-cli-management",
+  "issue_number": 187,
+  "last_prompt": "Implement the `wreck-it tasks` sub-command family designed in ideas-task-cli-management. Add a `Tasks` variant to the Commands enum in cli/src/cli.rs with `list`, `add`, `set-status`, and `validate` sub-commands and their respective argument structs. Create cli/src/task_cli.rs implementing each sub-command: list prints a formatted table (id, role, phase, status, depends_on count), add reads the task file, appends the new task, and writes it back, set-status mutates the matching task's status field in place, validate checks for duplicate IDs and unresolved depends_on chains and reports errors. Wire the `Tasks` command in cli/src/main.rs. No new crate dependencies beyond what is already available (use the existing serde_json and tabular-style formatting with plain std string formatting).",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -184,6 +184,10 @@
     "iteration 20: agent created PR #184 for task Some(\"eval-api-cost-tracking\")",
     "iteration 20: marked PR #184 as ready for review",
     "iteration 20: merged PR #184 for task Some(\"eval-api-cost-tracking\") (brute mode)",
-    "iteration 21: triggered cloud agent for task ideas-task-cli-management (issue #185)"
+    "iteration 21: triggered cloud agent for task ideas-task-cli-management (issue #185)",
+    "iteration 21: agent created PR #186 for task Some(\"ideas-task-cli-management\")",
+    "iteration 21: marked PR #186 as ready for review",
+    "iteration 21: merged PR #186 for task Some(\"ideas-task-cli-management\") (brute mode)",
+    "iteration 22: triggered cloud agent for task impl-task-cli-management (issue #187)"
   ]
 }
