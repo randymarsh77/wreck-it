@@ -281,7 +281,8 @@ impl RalphLoop {
         if let Some(gh_client) = self.make_github_client() {
             match gh_client.create_issue(&task_id, &task_desc).await {
                 Ok(issue_number) => {
-                    self.github_issue_numbers.insert(task_id.clone(), issue_number);
+                    self.github_issue_numbers
+                        .insert(task_id.clone(), issue_number);
                     self.state.add_log(format!(
                         "GitHub Issue #{issue_number} opened for task {task_id}"
                     ));
@@ -603,7 +604,8 @@ impl RalphLoop {
             if let Some(gh_client) = self.make_github_client() {
                 match gh_client.create_issue(&task_id, &task_desc).await {
                     Ok(issue_number) => {
-                        self.github_issue_numbers.insert(task_id.clone(), issue_number);
+                        self.github_issue_numbers
+                            .insert(task_id.clone(), issue_number);
                         self.state.add_log(format!(
                             "GitHub Issue #{issue_number} opened for task {task_id}"
                         ));
@@ -1122,7 +1124,10 @@ mod tests {
     fn task_absent_timeout_and_retries_omitted_from_json() {
         let t = make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]);
         let json = serde_json::to_string(&t).expect("serialise");
-        assert!(!json.contains("timeout_seconds"), "unexpected key in {json}");
+        assert!(
+            !json.contains("timeout_seconds"),
+            "unexpected key in {json}"
+        );
         assert!(!json.contains("max_retries"), "unexpected key in {json}");
     }
 
@@ -1169,18 +1174,14 @@ mod tests {
 
         // Mirror the wrapping logic used in `run_single_task`, but use a 10 ms
         // deadline so the test runs quickly.
-        let execution_result: anyhow::Result<()> = match tokio::time::timeout(
-            std::time::Duration::from_millis(10),
-            slow_future,
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(_) => Err(anyhow::anyhow!(
-                "Task timed out after {} seconds",
-                TIMEOUT_SECS
-            )),
-        };
+        let execution_result: anyhow::Result<()> =
+            match tokio::time::timeout(std::time::Duration::from_millis(10), slow_future).await {
+                Ok(r) => r,
+                Err(_) => Err(anyhow::anyhow!(
+                    "Task timed out after {} seconds",
+                    TIMEOUT_SECS
+                )),
+            };
 
         assert!(execution_result.is_err(), "timed-out task must be an error");
         let msg = execution_result.unwrap_err().to_string();

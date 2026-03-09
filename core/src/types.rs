@@ -547,8 +547,14 @@ mod tests {
     fn task_new_fields_omitted_from_json_when_none() {
         let t = make_minimal_task("t1");
         let json = serde_json::to_string(&t).unwrap();
-        assert!(!json.contains("timeout_seconds"), "key should be absent: {json}");
-        assert!(!json.contains("max_retries"), "key should be absent: {json}");
+        assert!(
+            !json.contains("timeout_seconds"),
+            "key should be absent: {json}"
+        );
+        assert!(
+            !json.contains("max_retries"),
+            "key should be absent: {json}"
+        );
     }
 
     #[test]

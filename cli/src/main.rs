@@ -190,7 +190,9 @@ async fn main() -> Result<()> {
                     .or_else(|| env::var("COPILOT_API_TOKEN").ok())
                     .or_else(|| env::var("GITHUB_TOKEN").ok());
 
-                config.notify_webhooks.extend(notify_webhooks.iter().cloned());
+                config
+                    .notify_webhooks
+                    .extend(notify_webhooks.iter().cloned());
 
                 config
             };
@@ -237,7 +239,10 @@ async fn main() -> Result<()> {
 
                     if rc.command.as_deref() == Some("unstuck") {
                         if let Err(e) = unstuck::run_unstuck(&config).await {
-                            println!("[wreck-it] ralph '{}' (unstuck) failed: {}. Continuing…", rc.name, e);
+                            println!(
+                                "[wreck-it] ralph '{}' (unstuck) failed: {}. Continuing…",
+                                rc.name, e
+                            );
                         }
                     } else if headless {
                         if let Err(e) = headless::run_headless(config, Some(rc)).await {
@@ -798,18 +803,19 @@ async fn main() -> Result<()> {
             if result.written.is_empty() && result.ralphs_added.is_empty() {
                 println!("wreck-it is already installed.");
             } else {
-                println!("\nInstallation complete! Configure PAT_TOKEN secret and enable workflows.");
+                println!(
+                    "\nInstallation complete! Configure PAT_TOKEN secret and enable workflows."
+                );
             }
         }
 
         Commands::Unstuck { work_dir } => {
-            let resolved_work_dir = work_dir.unwrap_or_else(|| env::current_dir().unwrap_or_default());
+            let resolved_work_dir =
+                work_dir.unwrap_or_else(|| env::current_dir().unwrap_or_default());
 
             let mut config = load_user_config().unwrap_or_default();
             config.work_dir = resolved_work_dir;
-            config.api_token = config
-                .api_token
-                .or_else(|| env::var("GITHUB_TOKEN").ok());
+            config.api_token = config.api_token.or_else(|| env::var("GITHUB_TOKEN").ok());
 
             unstuck::run_unstuck(&config).await?;
         }
@@ -819,9 +825,8 @@ async fn main() -> Result<()> {
             format,
             output,
         } => {
-            let tasks = task_manager::load_tasks(&task_file).with_context(|| {
-                format!("Failed to load task file: {}", task_file.display())
-            })?;
+            let tasks = task_manager::load_tasks(&task_file)
+                .with_context(|| format!("Failed to load task file: {}", task_file.display()))?;
             // Warn about circular dependencies before rendering.
             let cycles = graph::detect_cycles(&tasks);
             for cycle in &cycles {
@@ -833,9 +838,8 @@ async fn main() -> Result<()> {
             };
             match output {
                 Some(path) => {
-                    std::fs::write(&path, &content).with_context(|| {
-                        format!("Failed to write graph to {}", path.display())
-                    })?;
+                    std::fs::write(&path, &content)
+                        .with_context(|| format!("Failed to write graph to {}", path.display()))?;
                     println!("Graph written to {}", path.display());
                 }
                 None => print!("{content}"),

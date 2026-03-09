@@ -138,7 +138,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let result = install(dir.path()).unwrap();
 
-        assert!(result.written.contains(&".wreck-it/config.toml".to_string()));
+        assert!(result
+            .written
+            .contains(&".wreck-it/config.toml".to_string()));
         assert!(dir.path().join(".wreck-it/config.toml").exists());
 
         // Verify the config contains engineering-team ralphs.
@@ -210,7 +212,9 @@ mod tests {
         let result = install(dir.path()).unwrap();
 
         assert!(result.written.is_empty());
-        assert!(result.skipped.contains(&".wreck-it/config.toml".to_string()));
+        assert!(result
+            .skipped
+            .contains(&".wreck-it/config.toml".to_string()));
         assert!(result
             .skipped
             .contains(&".github/workflows/ralph.yml".to_string()));

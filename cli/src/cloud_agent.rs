@@ -1508,10 +1508,7 @@ impl CloudAgentClient {
             // Fall back to the pending_deployments endpoint.  This handles
             // runs in `waiting` status (deployment protection rules) as well
             // as other cases where the `/approve` endpoint is not sufficient.
-            if self
-                .approve_pending_deployments(*run_id, pr_number)
-                .await
-            {
+            if self.approve_pending_deployments(*run_id, pr_number).await {
                 approved_count += 1;
             }
         }

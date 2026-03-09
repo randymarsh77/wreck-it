@@ -103,7 +103,13 @@ pub fn generate_mermaid(tasks: &[Task]) -> String {
 /// confuse the parser.  We replace `-` with `_` and strip other non-word chars.
 fn mermaid_id(id: &str) -> String {
     id.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -120,7 +126,12 @@ pub fn detect_cycles(tasks: &[Task]) -> Vec<Vec<String>> {
     // Build adjacency list: id → list of ids it depends on
     let adj: HashMap<&str, Vec<&str>> = tasks
         .iter()
-        .map(|t| (t.id.as_str(), t.depends_on.iter().map(String::as_str).collect()))
+        .map(|t| {
+            (
+                t.id.as_str(),
+                t.depends_on.iter().map(String::as_str).collect(),
+            )
+        })
         .collect();
 
     let mut visited: HashSet<&str> = HashSet::new();
@@ -303,9 +314,17 @@ mod tests {
 
     #[test]
     fn mermaid_single_node_appears_with_label_and_style() {
-        let tasks = vec![make_task("t1", TaskStatus::Completed, AgentRole::Implementer, vec![])];
+        let tasks = vec![make_task(
+            "t1",
+            TaskStatus::Completed,
+            AgentRole::Implementer,
+            vec![],
+        )];
         let out = generate_mermaid(&tasks);
-        assert!(out.contains("t1[\"t1\\nimplementer\"]"), "node label missing");
+        assert!(
+            out.contains("t1[\"t1\\nimplementer\"]"),
+            "node label missing"
+        );
         assert!(out.contains("fill:#90ee90"), "status colour missing");
     }
 
@@ -316,30 +335,51 @@ mod tests {
             make_task("b", TaskStatus::Pending, AgentRole::Implementer, vec!["a"]),
         ];
         let out = generate_mermaid(&tasks);
-        assert!(out.contains("a --> b"), "edge 'a --> b' missing from:\n{out}");
+        assert!(
+            out.contains("a --> b"),
+            "edge 'a --> b' missing from:\n{out}"
+        );
     }
 
     #[test]
     fn mermaid_hyphenated_ids_are_sanitised_in_edges() {
         let tasks = vec![
             make_task("ideas-1", TaskStatus::Completed, AgentRole::Ideas, vec![]),
-            make_task("impl-1", TaskStatus::Pending, AgentRole::Implementer, vec!["ideas-1"]),
+            make_task(
+                "impl-1",
+                TaskStatus::Pending,
+                AgentRole::Implementer,
+                vec!["ideas-1"],
+            ),
         ];
         let out = generate_mermaid(&tasks);
         // edges should use sanitised IDs
-        assert!(out.contains("ideas_1 --> impl_1"), "sanitised edge missing:\n{out}");
+        assert!(
+            out.contains("ideas_1 --> impl_1"),
+            "sanitised edge missing:\n{out}"
+        );
     }
 
     #[test]
     fn mermaid_failed_task_is_red() {
-        let tasks = vec![make_task("t1", TaskStatus::Failed, AgentRole::Implementer, vec![])];
+        let tasks = vec![make_task(
+            "t1",
+            TaskStatus::Failed,
+            AgentRole::Implementer,
+            vec![],
+        )];
         let out = generate_mermaid(&tasks);
         assert!(out.contains("fill:#ff7f7f"), "failed colour missing");
     }
 
     #[test]
     fn mermaid_ideas_role_label() {
-        let tasks = vec![make_task("t1", TaskStatus::Pending, AgentRole::Ideas, vec![])];
+        let tasks = vec![make_task(
+            "t1",
+            TaskStatus::Pending,
+            AgentRole::Ideas,
+            vec![],
+        )];
         let out = generate_mermaid(&tasks);
         assert!(out.contains("ideas"), "ideas role label missing");
     }
@@ -355,10 +395,18 @@ mod tests {
 
     #[test]
     fn dot_single_node_has_label_and_fillcolor() {
-        let tasks = vec![make_task("t1", TaskStatus::Pending, AgentRole::Implementer, vec![])];
+        let tasks = vec![make_task(
+            "t1",
+            TaskStatus::Pending,
+            AgentRole::Implementer,
+            vec![],
+        )];
         let out = generate_dot(&tasks);
         assert!(out.contains("\"t1\""), "node id missing");
-        assert!(out.contains("fillcolor=\"#d3d3d3\""), "pending fillcolor missing");
+        assert!(
+            out.contains("fillcolor=\"#d3d3d3\""),
+            "pending fillcolor missing"
+        );
         assert!(out.contains("implementer"), "role label missing");
     }
 
@@ -374,9 +422,17 @@ mod tests {
 
     #[test]
     fn dot_completed_task_is_green() {
-        let tasks = vec![make_task("t1", TaskStatus::Completed, AgentRole::Evaluator, vec![])];
+        let tasks = vec![make_task(
+            "t1",
+            TaskStatus::Completed,
+            AgentRole::Evaluator,
+            vec![],
+        )];
         let out = generate_dot(&tasks);
-        assert!(out.contains("fillcolor=\"#90ee90\""), "completed fillcolor missing");
+        assert!(
+            out.contains("fillcolor=\"#90ee90\""),
+            "completed fillcolor missing"
+        );
     }
 
     #[test]
@@ -396,11 +452,20 @@ mod tests {
         ];
         let out = generate_mermaid(&tasks);
         // Correct flowchart header
-        assert!(out.starts_with("flowchart TD\n"), "flowchart header missing");
+        assert!(
+            out.starts_with("flowchart TD\n"),
+            "flowchart header missing"
+        );
         // Arrow from A to B
-        assert!(out.contains("a --> b"), "edge 'a --> b' missing from:\n{out}");
+        assert!(
+            out.contains("a --> b"),
+            "edge 'a --> b' missing from:\n{out}"
+        );
         // Arrow from B to C
-        assert!(out.contains("b --> c"), "edge 'b --> c' missing from:\n{out}");
+        assert!(
+            out.contains("b --> c"),
+            "edge 'b --> c' missing from:\n{out}"
+        );
         // All three nodes declared
         assert!(out.contains("a["), "node 'a' missing");
         assert!(out.contains("b["), "node 'b' missing");
@@ -424,8 +489,14 @@ mod tests {
         assert!(out.contains("\"b\""), "node 'b' missing");
         assert!(out.contains("\"c\""), "node 'c' missing");
         // Edge declarations
-        assert!(out.contains("\"a\" -> \"b\""), "edge a->b missing from:\n{out}");
-        assert!(out.contains("\"b\" -> \"c\""), "edge b->c missing from:\n{out}");
+        assert!(
+            out.contains("\"a\" -> \"b\""),
+            "edge a->b missing from:\n{out}"
+        );
+        assert!(
+            out.contains("\"b\" -> \"c\""),
+            "edge b->c missing from:\n{out}"
+        );
     }
 
     // ---- isolated nodes (no dependencies) ----
@@ -441,7 +512,10 @@ mod tests {
         assert!(out.contains("x["), "node 'x' missing");
         assert!(out.contains("y["), "node 'y' missing");
         // No arrow/edge between them
-        assert!(!out.contains("-->"), "unexpected edges in isolated-node graph:\n{out}");
+        assert!(
+            !out.contains("-->"),
+            "unexpected edges in isolated-node graph:\n{out}"
+        );
     }
 
     #[test]
@@ -455,7 +529,10 @@ mod tests {
         assert!(out.contains("\"x\""), "node 'x' missing");
         assert!(out.contains("\"y\""), "node 'y' missing");
         // No directed edges (edge syntax is `"x" -> "y"`)
-        assert!(!out.contains("\" -> \""), "unexpected edges in isolated-node graph:\n{out}");
+        assert!(
+            !out.contains("\" -> \""),
+            "unexpected edges in isolated-node graph:\n{out}"
+        );
     }
 
     // ---- detect_cycles ----
@@ -474,15 +551,26 @@ mod tests {
             make_task("c", TaskStatus::Pending, AgentRole::Implementer, vec!["b"]),
         ];
         let cycles = detect_cycles(&tasks);
-        assert!(cycles.is_empty(), "acyclic chain should have no cycles: {cycles:?}");
+        assert!(
+            cycles.is_empty(),
+            "acyclic chain should have no cycles: {cycles:?}"
+        );
     }
 
     #[test]
     fn detect_cycles_self_loop_is_detected() {
         // a depends_on a (self-loop)
-        let tasks = vec![make_task("a", TaskStatus::Pending, AgentRole::Implementer, vec!["a"])];
+        let tasks = vec![make_task(
+            "a",
+            TaskStatus::Pending,
+            AgentRole::Implementer,
+            vec!["a"],
+        )];
         let cycles = detect_cycles(&tasks);
-        assert!(!cycles.is_empty(), "self-loop should be detected as a cycle");
+        assert!(
+            !cycles.is_empty(),
+            "self-loop should be detected as a cycle"
+        );
     }
 
     #[test]
@@ -495,9 +583,18 @@ mod tests {
         let cycles = detect_cycles(&tasks);
         assert!(!cycles.is_empty(), "two-node cycle should be detected");
         // Both 'a' and 'b' should appear in the cycle
-        let all_nodes: Vec<&str> = cycles.iter().flat_map(|c| c.iter().map(String::as_str)).collect();
-        assert!(all_nodes.contains(&"a"), "'a' missing from cycle: {cycles:?}");
-        assert!(all_nodes.contains(&"b"), "'b' missing from cycle: {cycles:?}");
+        let all_nodes: Vec<&str> = cycles
+            .iter()
+            .flat_map(|c| c.iter().map(String::as_str))
+            .collect();
+        assert!(
+            all_nodes.contains(&"a"),
+            "'a' missing from cycle: {cycles:?}"
+        );
+        assert!(
+            all_nodes.contains(&"b"),
+            "'b' missing from cycle: {cycles:?}"
+        );
     }
 
     #[test]
@@ -519,6 +616,9 @@ mod tests {
             make_task("y", TaskStatus::Pending, AgentRole::Implementer, vec![]),
         ];
         let cycles = detect_cycles(&tasks);
-        assert!(cycles.is_empty(), "isolated nodes should have no cycles: {cycles:?}");
+        assert!(
+            cycles.is_empty(),
+            "isolated nodes should have no cycles: {cycles:?}"
+        );
     }
 }

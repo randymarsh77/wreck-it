@@ -1245,7 +1245,10 @@ async fn run_needs_verification(
                         }
                         match client.merge_pr(pr_number).await {
                             Ok(()) => {
-                                println!("[wreck-it] PR #{} merged successfully (brute mode)", pr_number);
+                                println!(
+                                    "[wreck-it] PR #{} merged successfully (brute mode)",
+                                    pr_number
+                                );
                                 state.phase = AgentPhase::Completed;
                                 state.memory.push(format!(
                                     "iteration {}: merged PR #{} for task {:?} (brute mode)",
@@ -1386,7 +1389,10 @@ async fn run_needs_verification(
         }
         match client.merge_pr(pr_number).await {
             Ok(()) => {
-                println!("[wreck-it] PR #{} merged successfully (brute mode)", pr_number);
+                println!(
+                    "[wreck-it] PR #{} merged successfully (brute mode)",
+                    pr_number
+                );
                 state.phase = AgentPhase::Completed;
                 state.memory.push(format!(
                     "iteration {}: merged PR #{} for task {:?} (brute mode)",
@@ -1400,7 +1406,10 @@ async fn run_needs_verification(
                 return Ok(StepOutcome::Continue);
             }
             Err(e) => {
-                println!("[wreck-it] failed to merge PR #{} (brute mode): {}", pr_number, e);
+                println!(
+                    "[wreck-it] failed to merge PR #{} (brute mode): {}",
+                    pr_number, e
+                );
                 state.memory.push(format!(
                     "iteration {}: merge failed for PR #{} (brute mode): {}",
                     state.iteration, pr_number, e,

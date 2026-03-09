@@ -115,7 +115,9 @@ mod tests {
     /// Extract the JSON body from a raw HTTP request captured by `mock_server`.
     fn extract_body(raw: &[u8]) -> serde_json::Value {
         let text = std::str::from_utf8(raw).expect("request is not valid UTF-8");
-        let body_start = text.find("\r\n\r\n").expect("no header/body separator in request");
+        let body_start = text
+            .find("\r\n\r\n")
+            .expect("no header/body separator in request");
         let body = &text[body_start + 4..];
         serde_json::from_str(body).expect("body is not valid JSON")
     }
@@ -133,7 +135,13 @@ mod tests {
         let urls = vec![url1, url2];
 
         let ((), raw1, raw2) = tokio::join!(
-            notify(&urls, "task-42", TaskStatus::InProgress, 1_700_000_000, "doing work"),
+            notify(
+                &urls,
+                "task-42",
+                TaskStatus::InProgress,
+                1_700_000_000,
+                "doing work"
+            ),
             req1_fut,
             req2_fut,
         );
@@ -171,10 +179,8 @@ mod tests {
         for (status, expected_str) in statuses {
             let (url, req_fut) = mock_server("HTTP/1.1 200 OK").await;
             let urls = vec![url];
-            let ((), raw) = tokio::join!(
-                notify(&urls, "task-s", status, 0, "status test"),
-                req_fut,
-            );
+            let ((), raw) =
+                tokio::join!(notify(&urls, "task-s", status, 0, "status test"), req_fut,);
             let v = extract_body(&raw);
             assert_eq!(
                 v["status"], expected_str,
