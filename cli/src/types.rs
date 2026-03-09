@@ -139,6 +139,19 @@ pub struct Config {
     /// integration to determine where issues are created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_repo: Option<String>,
+
+    /// Maximum cumulative estimated cost in USD for a single run.
+    ///
+    /// When the [`crate::cost_tracker::CostTracker`] reports that the
+    /// accumulated estimated spend has reached this threshold, the main loop
+    /// aborts rather than starting the next task.  This prevents unintended
+    /// runaway spending in long autonomous sessions.
+    ///
+    /// Only token usage reported by the GitHub Models HTTP path is tracked;
+    /// Copilot SDK and Llama calls are not metered (they contribute $0.00
+    /// to the estimate).  Leave `None` to impose no budget limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cost_usd: Option<f64>,
 }
 
 fn default_max_iterations() -> usize {
@@ -194,6 +207,7 @@ impl Default for Config {
             notify_webhooks: Vec::new(),
             github_issues_enabled: false,
             github_repo: None,
+            max_cost_usd: None,
         }
     }
 }

@@ -1,5 +1,6 @@
 use crate::agent::AgentClient;
 use crate::artefact_store;
+use crate::cost_tracker::{model_pricing, CostTracker};
 use crate::github_client;
 use crate::notifier;
 use crate::provenance::{self, ProvenanceRecord};
@@ -11,6 +12,7 @@ use crate::types::{
 };
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Error message used when evaluation/tests fail without a prior agent error.
@@ -112,11 +114,26 @@ pub struct RalphLoop {
     /// Maps task_id → GitHub issue number for open wreck-it issues.
     /// Populated when a task moves to `InProgress` and cleared on closure.
     github_issue_numbers: HashMap<String, u64>,
+    /// Shared cost tracker updated by every HTTP chat completion call.
+    /// Cloned into per-task agents spawned for parallel execution.
+    cost_tracker: Arc<Mutex<CostTracker>>,
 }
 
 impl RalphLoop {
     pub fn new(config: Config) -> Self {
         let max_iterations = config.max_iterations;
+
+        // Build per-model pricing from the configured model name, then create a
+        // shared cost tracker that the main agent and parallel task agents all
+        // write into.
+        let model_str = match config.model_provider {
+            ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL,
+            ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
+            ModelProvider::Copilot => "copilot",
+        };
+        let (inp, out) = model_pricing(model_str);
+        let cost_tracker = Arc::new(Mutex::new(CostTracker::new(inp, out)));
+
         let agent = AgentClient::with_evaluation(
             config.model_provider.clone(),
             config.api_endpoint.clone(),
@@ -126,13 +143,15 @@ impl RalphLoop {
             config.evaluation_mode,
             config.completeness_prompt.clone(),
             config.completion_marker_file.to_string_lossy().to_string(),
-        );
+        )
+        .with_cost_tracker(Arc::clone(&cost_tracker));
 
         Self {
             config,
             state: LoopState::new(max_iterations),
             agent,
             github_issue_numbers: HashMap::new(),
+            cost_tracker,
         }
     }
 
@@ -169,6 +188,25 @@ impl RalphLoop {
         if self.state.iteration > self.state.max_iterations {
             self.state.add_log("Max iterations reached".to_string());
             return Ok(false);
+        }
+
+        // Check the budget before starting a new task.
+        let budget_exceeded = self
+            .cost_tracker
+            .lock()
+            .map(|guard| guard.budget_exceeded(self.config.max_cost_usd))
+            .unwrap_or(false);
+        if budget_exceeded {
+            self.state.add_log(format!(
+                "Budget limit (${:.4}) reached – stopping",
+                self.config.max_cost_usd.unwrap_or(0.0)
+            ));
+            return Ok(false);
+        }
+
+        // Reset per-task cost counters at the start of each new iteration.
+        if let Ok(mut guard) = self.cost_tracker.lock() {
+            guard.reset_task();
         }
 
         // Re-read the task file so that tasks dynamically appended by agents
@@ -210,7 +248,9 @@ impl RalphLoop {
         // Determine whether we can run tasks in parallel.
         let ready = TaskScheduler::schedule(&self.state.tasks);
         if ready.len() > 1 {
-            return self.run_parallel_tasks(ready).await;
+            let result = self.run_parallel_tasks(ready).await;
+            self.emit_cost_summary();
+            return result;
         }
 
         // Single-task execution: use scheduler result when available, fall back
@@ -227,7 +267,20 @@ impl RalphLoop {
             }
         };
 
-        self.run_single_task(task_idx).await
+        let result = self.run_single_task(task_idx).await;
+        self.emit_cost_summary();
+        result
+    }
+
+    /// Append a one-line cost summary to the loop log.
+    ///
+    /// Called at the end of every iteration (both single-task and parallel
+    /// paths) so that both headless and TUI consumers see the same summary.
+    fn emit_cost_summary(&mut self) {
+        if let Ok(guard) = self.cost_tracker.lock() {
+            let summary = guard.iteration_summary();
+            self.state.add_log(summary);
+        }
     }
 
     /// Execute a single task by index, running evaluation & commit logic.
@@ -622,7 +675,7 @@ impl RalphLoop {
         // Spawn concurrent agent work (include per-task timestamp for provenance).
         let mut handles = Vec::new();
         for (idx, task, ts) in task_data {
-            let mut agent = AgentClient::with_evaluation(
+            let agent = AgentClient::with_evaluation(
                 self.config.model_provider.clone(),
                 self.config.api_endpoint.clone(),
                 self.config.api_token.clone(),
@@ -634,7 +687,9 @@ impl RalphLoop {
                     .completion_marker_file
                     .to_string_lossy()
                     .to_string(),
-            );
+            )
+            .with_cost_tracker(Arc::clone(&self.cost_tracker));
+            let mut agent = agent;
             let handle = tokio::spawn(async move {
                 // Wrap execution in a per-task timeout when `timeout_seconds` is set.
                 let result = if let Some(timeout_secs) = task.timeout_seconds {

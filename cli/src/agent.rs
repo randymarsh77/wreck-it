@@ -1,5 +1,6 @@
 use crate::agent_memory::AgentMemory;
 use crate::artefact_store;
+use crate::cost_tracker::{CostTracker, TokenUsage};
 use crate::types::{
     CriticResult, EvaluationMode, ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL,
     DEFAULT_LLAMA_MODEL, DEFAULT_PRECONDITION_MARKER, LLAMA_PROVIDER_TYPE,
@@ -179,6 +180,9 @@ pub struct AgentClient {
     evaluation_mode: EvaluationMode,
     completeness_prompt: Option<String>,
     completion_marker_file: String,
+    /// Optional shared cost tracker updated by every HTTP chat completion call.
+    /// When `None` (e.g. Copilot / Llama provider), no usage is recorded.
+    cost_tracker: Option<Arc<std::sync::Mutex<CostTracker>>>,
 }
 
 impl AgentClient {
@@ -202,6 +206,7 @@ impl AgentClient {
             evaluation_mode: EvaluationMode::default(),
             completeness_prompt: None,
             completion_marker_file: crate::types::DEFAULT_COMPLETION_MARKER.to_string(),
+            cost_tracker: None,
         }
     }
 
@@ -228,7 +233,15 @@ impl AgentClient {
             evaluation_mode,
             completeness_prompt,
             completion_marker_file,
+            cost_tracker: None,
         }
+    }
+
+    /// Attach a shared [`CostTracker`] that will be updated by every HTTP
+    /// chat completion call made by this client.
+    pub fn with_cost_tracker(mut self, tracker: Arc<std::sync::Mutex<CostTracker>>) -> Self {
+        self.cost_tracker = Some(tracker);
+        self
     }
 
     /// Return the configured evaluation mode.
@@ -504,6 +517,9 @@ impl AgentClient {
     }
 
     /// Send a chat completion request via HTTP to an OpenAI-compatible API.
+    ///
+    /// If a [`CostTracker`] is attached it is updated with the `usage` field
+    /// returned by the API.
     async fn chat_via_http(&self, prompt: &str) -> Result<String> {
         let token = self
             .api_token
@@ -548,6 +564,30 @@ impl AgentClient {
             .json()
             .await
             .context("Failed to parse models API response")?;
+
+        // Extract and record token usage when a cost tracker is attached.
+        if let Some(ref tracker) = self.cost_tracker {
+            let usage = TokenUsage {
+                prompt_tokens: json
+                    .get("usage")
+                    .and_then(|u| u.get("prompt_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                completion_tokens: json
+                    .get("usage")
+                    .and_then(|u| u.get("completion_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+            };
+            tracing::debug!(
+                "Token usage — prompt: {}, completion: {}",
+                usage.prompt_tokens,
+                usage.completion_tokens
+            );
+            if let Ok(mut guard) = tracker.lock() {
+                guard.record(&usage);
+            }
+        }
 
         let content = json
             .get("choices")

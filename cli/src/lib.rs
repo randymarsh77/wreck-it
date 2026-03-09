@@ -20,6 +20,7 @@ mod artefact_store;
 mod cli;
 mod cloud_agent;
 mod config_manager;
+mod cost_tracker;
 mod gastown_client;
 mod github_auth;
 mod github_client;
