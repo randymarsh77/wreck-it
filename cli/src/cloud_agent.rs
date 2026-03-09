@@ -1377,9 +1377,8 @@ impl CloudAgentClient {
         // `pending` (first-time contributors), or `waiting` (outside
         // collaborators / deployment protection rules).
         let mut all_run_ids: Vec<u64> = Vec::new();
-        let mut run_node_ids: std::collections::HashMap<u64, String> =
-            std::collections::HashMap::new();
         let mut waiting_run_ids: Vec<u64> = Vec::new();
+        let mut fork_run_ids: Vec<u64> = Vec::new();
 
         for status_filter in &["action_required", "pending", "waiting"] {
             let runs_url = format!(
@@ -1439,24 +1438,29 @@ impl CloudAgentClient {
                     if let Some(id) = run["id"].as_u64() {
                         if !all_run_ids.contains(&id) {
                             let name = run["name"].as_str().unwrap_or("unknown");
-                            let node_id = run["node_id"].as_str().unwrap_or("");
                             tracing::info!(
-                                "Found {} workflow run {} (name={}, node_id={}) for PR #{}",
+                                "Found {} workflow run {} (name={}) for PR #{}",
                                 status_filter,
                                 id,
                                 name,
-                                node_id,
                                 pr_number,
                             );
-                            if !node_id.is_empty() {
-                                run_node_ids.insert(id, node_id.to_string());
-                            } else {
-                                tracing::warn!(
-                                    "Workflow run {} (name={}) for PR #{} has no node_id, GraphQL approval will be skipped",
-                                    id,
-                                    name,
-                                    pr_number,
-                                );
+                            // Detect fork runs by comparing head and base
+                            // repository full names.  The REST `/approve`
+                            // endpoint only works for fork pull requests.
+                            let head_repo = run
+                                .pointer("/head_repository/full_name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            let base_repo = run
+                                .pointer("/repository/full_name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            if !head_repo.is_empty()
+                                && !base_repo.is_empty()
+                                && head_repo != base_repo
+                            {
+                                fork_run_ids.push(id);
                             }
                             all_run_ids.push(id);
                             if *status_filter == "waiting" {
@@ -1473,85 +1477,33 @@ impl CloudAgentClient {
             return Ok(());
         }
 
-        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
         let mut approved_count: usize = 0;
+        let mut skipped_count: usize = 0;
 
         for run_id in &all_run_ids {
-            // Try the GraphQL approveWorkflowRun mutation first.
-            if let Some(node_id) = run_node_ids.get(run_id) {
-                let query = serde_json::json!({
-                    "query": "mutation($runId: ID!) { approveWorkflowRun(input: { workflowRunId: $runId }) { clientMutationId } }",
-                    "variables": { "runId": node_id },
-                });
-
-                match self
-                    .http
-                    .post(&graphql_url)
-                    .header("Authorization", format!("Bearer {}", self.github_token))
-                    .header("User-Agent", "wreck-it")
-                    .header("Accept", "application/vnd.github+json")
-                    .json(&query)
-                    .send()
-                    .await
+            // The REST `/approve` endpoint only applies to fork pull requests.
+            // Skip non-fork runs to avoid a 403 response.
+            if !fork_run_ids.contains(run_id) {
+                // For `waiting` runs (e.g. deployment protection rules), try
+                // approving via the pending_deployments endpoint.
+                if waiting_run_ids.contains(run_id)
+                    && self
+                        .approve_pending_deployments(*run_id, pr_number)
+                        .await
                 {
-                    Ok(resp) if resp.status().is_success() => {
-                        let gql_resp: serde_json::Value = match resp.json().await {
-                            Ok(v) => v,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to parse GraphQL response for run {} (PR #{}): {}",
-                                    run_id,
-                                    pr_number,
-                                    e,
-                                );
-                                serde_json::Value::default()
-                            }
-                        };
-                        if gql_resp.get("errors").is_none() {
-                            tracing::info!(
-                                "Approved workflow run {} via GraphQL for PR #{}",
-                                run_id,
-                                pr_number,
-                            );
-                            approved_count += 1;
-                            continue;
-                        }
-                        tracing::warn!(
-                            "GraphQL approveWorkflowRun errors for run {} (PR #{}): {}",
-                            run_id,
-                            pr_number,
-                            gql_resp["errors"],
-                        );
-                    }
-                    Ok(resp) => {
-                        let status = resp.status();
-                        let body = resp.text().await.unwrap_or_default();
-                        tracing::warn!(
-                            "GraphQL approveWorkflowRun failed for run {} (PR #{}) ({}): {}",
-                            run_id,
-                            pr_number,
-                            status,
-                            body,
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "HTTP error on GraphQL approveWorkflowRun for run {} (PR #{}): {}",
-                            run_id,
-                            pr_number,
-                            e,
-                        );
-                    }
+                    approved_count += 1;
+                } else {
+                    tracing::debug!(
+                        "Workflow run {} for PR #{} is not from a fork; skipping REST approve",
+                        run_id,
+                        pr_number,
+                    );
+                    skipped_count += 1;
                 }
-            } else {
-                tracing::warn!(
-                    "No node_id available for workflow run {} (PR #{}), skipping GraphQL",
-                    run_id,
-                    pr_number,
-                );
+                continue;
             }
 
-            // Fall back to the REST approval endpoint.
+            // Attempt the REST approval endpoint for fork pull request runs.
             let approve_url = format!(
                 "{}/repos/{}/{}/actions/runs/{}/approve",
                 GITHUB_API_BASE, self.repo_owner, self.repo_name, run_id,
@@ -1611,6 +1563,12 @@ impl CloudAgentClient {
             tracing::info!(
                 "Approved {} of {} pending workflow run(s) for PR #{}",
                 approved_count,
+                all_run_ids.len(),
+                pr_number,
+            );
+        } else if skipped_count == all_run_ids.len() {
+            tracing::debug!(
+                "All {} pending workflow run(s) for PR #{} are non-fork; no approval needed",
                 all_run_ids.len(),
                 pr_number,
             );
