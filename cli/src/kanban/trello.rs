@@ -100,10 +100,19 @@ impl TrelloProvider {
         api_base: impl Into<String>,
     ) -> Self {
         let kt: String = key_token.into();
-        let (key, token) = kt.split_once(':').unwrap_or((&kt, ""));
+        let (key, token) = match kt.split_once(':') {
+            Some((k, t)) => (k.to_string(), t.to_string()),
+            None => {
+                tracing::warn!(
+                    "Trello api_token should be in 'key:token' format; \
+                     using the entire value as the API key with an empty token"
+                );
+                (kt, String::new())
+            }
+        };
         Self {
-            api_key: key.to_string(),
-            api_token: token.to_string(),
+            api_key: key,
+            api_token: token,
             board_id: board_id.into(),
             api_base: api_base.into(),
         }
