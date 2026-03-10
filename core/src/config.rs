@@ -131,6 +131,19 @@ pub struct RalphConfig {
     /// that support it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
+
+    /// Optional path to a directory containing per-role system prompt
+    /// template files (e.g. `ideas.md`, `implementer.md`, `evaluator.md`) and
+    /// per-task overrides (e.g. `impl-my-task.md`).
+    ///
+    /// When set, the `prompt_loader` module reads templates from this
+    /// directory and injects them as the system prompt for the matching agent
+    /// invocation, falling back to the built-in defaults when no matching file
+    /// is found.  Relative paths are resolved from the repository root.
+    ///
+    /// Example: `.wreck-it/prompts`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_dir: Option<String>,
 }
 
 fn default_state_branch() -> String {

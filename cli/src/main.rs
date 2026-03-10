@@ -15,11 +15,13 @@ mod headless_state;
 mod install;
 #[cfg(test)]
 mod integration_eval;
+mod merge;
 mod notifier;
 mod openclaw;
 mod plan_migration;
 mod plan_wizard;
 mod planner;
+mod prompt_loader;
 mod provenance;
 mod ralph_loop;
 mod replanner;
@@ -30,7 +32,6 @@ mod task_manager;
 mod templates;
 mod tui;
 mod types;
-mod merge;
 mod unstuck;
 
 use anyhow::{Context, Result};
@@ -85,6 +86,7 @@ async fn main() -> Result<()> {
             github_token,
             max_cost_usd,
             work_dir_map,
+            prompt_dir,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -222,15 +224,22 @@ async fn main() -> Result<()> {
                 // Parse `KEY=PATH` pairs from --work-dir-map into the config map.
                 for entry in &work_dir_map {
                     if let Some((key, path)) = entry.split_once('=') {
-                        config
-                            .work_dirs
-                            .insert(key.to_string(), path.to_string());
+                        config.work_dirs.insert(key.to_string(), path.to_string());
                     } else {
                         eprintln!(
                             "Warning: ignoring malformed --work-dir-map entry '{}' \
                              (expected ROLE_OR_ID=PATH)",
                             entry
                         );
+                    }
+                }
+
+                // CLI --prompt-dir overrides config and ralph-level prompt_dir.
+                if let Some(ref pd) = prompt_dir {
+                    config.prompt_dir = Some(pd.clone());
+                } else if let Some(rc) = ralph_override {
+                    if let Some(ref pd) = rc.prompt_dir {
+                        config.prompt_dir = Some(pd.clone());
                     }
                 }
 
@@ -417,6 +426,8 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
+
+                        prompt_dir: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -515,6 +526,8 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
+
+                        prompt_dir: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -632,6 +645,7 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
                 },
                 Task {
                     id: "2".to_string(),
@@ -654,6 +668,7 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
                 },
                 Task {
                     id: "3".to_string(),
@@ -676,6 +691,7 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
                 },
             ];
 
@@ -944,10 +960,7 @@ async fn main() -> Result<()> {
                     );
                     println!("{}", "-".repeat(id_w + status_w + role_w + 30));
                     for t in &filtered {
-                        println!(
-                            "{}",
-                            task_cli::format_task_row(t, id_w, status_w, role_w)
-                        );
+                        println!("{}", task_cli::format_task_row(t, id_w, status_w, role_w));
                     }
                     println!("\n{} task(s) listed.", filtered.len());
                 }
@@ -984,6 +997,7 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
                 };
                 task_manager::append_task(&task_file, new_task)?;
                 println!("Task '{}' added to {}.", id, task_file.display());
