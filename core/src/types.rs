@@ -88,6 +88,7 @@ pub enum AgentRole {
 
 /// Status of an individual task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum TaskStatus {
     Pending,

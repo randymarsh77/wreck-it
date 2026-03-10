@@ -97,6 +97,7 @@ mod tests {
     fn test_repo_config_roundtrip() {
         let cfg = RepoConfig {
             state_branch: "my-state".to_string(),
+            task_branch: None,
             state_root: ".my-state-dir".to_string(),
             ralphs: vec![],
         };
@@ -110,6 +111,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "custom-branch".to_string(),
+            task_branch: None,
             state_root: ".custom-root".to_string(),
             ralphs: vec![],
         };
@@ -172,6 +174,7 @@ mod tests {
     fn test_repo_config_with_ralphs_roundtrip() {
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![
                 RalphConfig {
@@ -273,6 +276,7 @@ name = "docs"
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
@@ -310,6 +314,7 @@ state_file = ".docs-state.json"
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "feature-work".to_string(),
@@ -336,6 +341,7 @@ state_file = ".docs-state.json"
     fn test_ralph_config_branch_omitted_when_none() {
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
@@ -407,6 +413,7 @@ reviewers = ["alice", "bob"]
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "feature-work".to_string(),
@@ -431,6 +438,7 @@ reviewers = ["alice", "bob"]
     fn test_ralph_config_agent_omitted_when_none() {
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
@@ -480,6 +488,7 @@ command = "unstuck"
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "unstuck".to_string(),
@@ -503,6 +512,7 @@ command = "unstuck"
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "brute".to_string(),
@@ -525,6 +535,7 @@ command = "unstuck"
     fn test_ralph_config_brute_mode_omitted_when_none() {
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),

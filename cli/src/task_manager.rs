@@ -1,8 +1,10 @@
 use crate::types::Task;
 use anyhow::{bail, Context, Result};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use wreck_it_core::store::{StoreError, TaskStore};
+use wreck_it_core::types::TaskStatus;
 
 // Re-export from wreck-it-core so callers of `crate::task_manager::*`
 // continue to work unchanged.
@@ -65,6 +67,62 @@ pub fn append_task(path: &Path, new_task: Task) -> Result<()> {
 
     tasks.push(new_task);
     save_tasks(path, &tasks)
+}
+
+/// Update the status of a single task identified by `id`.
+///
+/// Returns an error when no task with the given `id` exists in the file.
+pub fn set_task_status(path: &Path, id: &str, status: TaskStatus) -> Result<()> {
+    let mut tasks = load_tasks(path)?;
+    let task = tasks
+        .iter_mut()
+        .find(|t| t.id == id)
+        .ok_or_else(|| anyhow::anyhow!("Task '{}' not found in '{}'", id, path.display()))?;
+    task.status = status;
+    save_tasks(path, &tasks)
+}
+
+/// Validate a task list and return a list of human-readable issue descriptions.
+///
+/// Checks performed:
+/// 1. Duplicate task IDs.
+/// 2. `depends_on` references that point to non-existent task IDs.
+/// 3. Circular dependencies (delegated to `graph::detect_cycles`).
+///
+/// Returns an empty `Vec` when the task list is valid.
+pub fn validate_tasks(tasks: &[Task]) -> Vec<String> {
+    use crate::graph::detect_cycles;
+    use std::collections::HashMap;
+
+    let mut issues = Vec::new();
+
+    // 1. Duplicate IDs.
+    let mut seen: HashMap<&str, usize> = HashMap::new();
+    for t in tasks {
+        let count = seen.entry(t.id.as_str()).or_insert(0);
+        *count += 1;
+        if *count == 2 {
+            issues.push(format!("Duplicate task ID: '{}'", t.id));
+        }
+    }
+
+    // 2. Unresolved depends_on references.
+    let all_ids: HashSet<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
+    for t in tasks {
+        for dep in &t.depends_on {
+            if !all_ids.contains(dep.as_str()) {
+                issues.push(format!("Task '{}' depends_on unknown task '{}'", t.id, dep));
+            }
+        }
+    }
+
+    // 3. Circular dependencies.
+    let cycles = detect_cycles(tasks);
+    for cycle in &cycles {
+        issues.push(format!("Circular dependency: {}", cycle.join(" -> ")));
+    }
+
+    issues
 }
 
 // ---------------------------------------------------------------------------
@@ -401,17 +459,28 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        let count = reset_recurring_tasks(&mut tasks, 200);
+        let mut state = wreck_it_core::state::HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 200);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&tasks[0], &state),
+            TaskStatus::Pending,
+        );
     }
 
     #[test]
     fn reset_recurring_skips_milestone_tasks() {
         let mut tasks = vec![make_task("a", TaskStatus::Completed, vec![])];
-        let count = reset_recurring_tasks(&mut tasks, 200);
+        let mut state = wreck_it_core::state::HeadlessState::default();
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 200);
         assert_eq!(count, 0);
-        assert_eq!(tasks[0].status, TaskStatus::Completed);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&tasks[0], &state),
+            TaskStatus::Completed,
+        );
     }
 
     #[test]
@@ -423,15 +492,25 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
+        let mut state = wreck_it_core::state::HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
         // Only 100 seconds have passed, cooldown is 3600.
-        let count = reset_recurring_tasks(&mut tasks, 200);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 200);
         assert_eq!(count, 0);
-        assert_eq!(tasks[0].status, TaskStatus::Completed);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&tasks[0], &state),
+            TaskStatus::Completed,
+        );
 
         // Now enough time has passed.
-        let count = reset_recurring_tasks(&mut tasks, 3800);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 3800);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&tasks[0], &state),
+            TaskStatus::Pending,
+        );
     }
 
     #[test]
@@ -442,9 +521,16 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        let count = reset_recurring_tasks(&mut tasks, 101);
+        let mut state = wreck_it_core::state::HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 101);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&tasks[0], &state),
+            TaskStatus::Pending,
+        );
     }
 
     #[test]
@@ -461,7 +547,8 @@ mod tests {
                 t
             },
         ];
-        let count = reset_recurring_tasks(&mut tasks, 9999);
+        let mut state = wreck_it_core::state::HeadlessState::default();
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 9999);
         assert_eq!(count, 0);
     }
 
@@ -501,5 +588,77 @@ mod tests {
         let loaded = store.load_tasks().unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].id, "b");
+    }
+
+    // ---- set_task_status tests ----
+
+    #[test]
+    fn set_task_status_updates_existing_task() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tasks.json");
+        save_tasks(&path, &[make_task("a", TaskStatus::Pending, vec![])]).unwrap();
+
+        set_task_status(&path, "a", TaskStatus::Completed).unwrap();
+
+        let tasks = load_tasks(&path).unwrap();
+        assert_eq!(tasks[0].status, TaskStatus::Completed);
+    }
+
+    #[test]
+    fn set_task_status_errors_for_unknown_id() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tasks.json");
+        save_tasks(&path, &[make_task("a", TaskStatus::Pending, vec![])]).unwrap();
+
+        let result = set_task_status(&path, "nonexistent", TaskStatus::Completed);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("nonexistent"));
+    }
+
+    // ---- validate_tasks tests ----
+
+    #[test]
+    fn validate_tasks_valid_list_returns_no_issues() {
+        let tasks = vec![
+            make_task("a", TaskStatus::Pending, vec![]),
+            make_task("b", TaskStatus::Pending, vec!["a"]),
+        ];
+        assert!(validate_tasks(&tasks).is_empty());
+    }
+
+    #[test]
+    fn validate_tasks_detects_duplicate_ids() {
+        let tasks = vec![
+            make_task("a", TaskStatus::Pending, vec![]),
+            make_task("a", TaskStatus::Completed, vec![]),
+        ];
+        let issues = validate_tasks(&tasks);
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].contains("Duplicate") && issues[0].contains("'a'"));
+    }
+
+    #[test]
+    fn validate_tasks_detects_unresolved_depends_on() {
+        let tasks = vec![make_task("a", TaskStatus::Pending, vec!["missing"])];
+        let issues = validate_tasks(&tasks);
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].contains("missing"));
+    }
+
+    #[test]
+    fn validate_tasks_detects_circular_dependency() {
+        let tasks = vec![
+            make_task("a", TaskStatus::Pending, vec!["b"]),
+            make_task("b", TaskStatus::Pending, vec!["a"]),
+        ];
+        let issues = validate_tasks(&tasks);
+        assert!(!issues.is_empty());
+        let combined = issues.join(" ");
+        assert!(combined.to_lowercase().contains("circular"));
+    }
+
+    #[test]
+    fn validate_tasks_empty_list_is_valid() {
+        assert!(validate_tasks(&[]).is_empty());
     }
 }

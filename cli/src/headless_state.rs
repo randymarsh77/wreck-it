@@ -62,6 +62,7 @@ mod tests {
                 review_requested: None,
             }],
             review_requested: None,
+            task_statuses: std::collections::HashMap::new(),
         };
 
         save_headless_state(&state_file, &state).unwrap();
@@ -213,6 +214,7 @@ mod tests {
             memory: vec![],
             tracked_prs: vec![],
             review_requested: Some(true),
+            task_statuses: std::collections::HashMap::new(),
         };
 
         save_headless_state(&state_file, &state).unwrap();

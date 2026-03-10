@@ -4,6 +4,9 @@
 //! are shared by the CLI headless runner and the Cloudflare Worker.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use crate::types::TaskStatus;
 
 /// Phases of a headless cloud agent iteration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +96,15 @@ pub struct HeadlessState {
     /// current PR so that it does not re-request on subsequent invocations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_requested: Option<bool>,
+
+    /// Per-task runtime status, keyed by task ID.
+    ///
+    /// This map is the authoritative source for task status when present.
+    /// Task definition files remain stateless (they carry no `status` field
+    /// that mutates at runtime).  If a task ID is absent from this map, it
+    /// is treated as [`TaskStatus::Pending`].
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub task_statuses: HashMap<String, TaskStatus>,
 }
 
 impl Default for HeadlessState {
@@ -108,6 +120,7 @@ impl Default for HeadlessState {
             memory: Vec::new(),
             tracked_prs: Vec::new(),
             review_requested: None,
+            task_statuses: HashMap::new(),
         }
     }
 }
