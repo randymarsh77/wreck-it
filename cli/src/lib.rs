@@ -36,6 +36,7 @@ mod openclaw;
 mod plan_migration;
 mod plan_wizard;
 mod planner;
+mod prompt_loader;
 mod provenance;
 mod ralph_loop;
 mod replanner;

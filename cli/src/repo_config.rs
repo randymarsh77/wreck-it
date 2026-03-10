@@ -187,6 +187,8 @@ mod tests {
                     command: None,
                     brute_mode: None,
                     backend: None,
+
+                    prompt_dir: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -198,6 +200,8 @@ mod tests {
                     command: None,
                     brute_mode: None,
                     backend: None,
+
+                    prompt_dir: None,
                 },
             ],
         };
@@ -246,6 +250,8 @@ name = "docs"
                     command: None,
                     brute_mode: None,
                     backend: None,
+
+                    prompt_dir: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -257,6 +263,8 @@ name = "docs"
                     command: None,
                     brute_mode: None,
                     backend: None,
+
+                    prompt_dir: None,
                 },
             ],
             ..RepoConfig::default()
@@ -288,6 +296,8 @@ name = "docs"
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -326,6 +336,8 @@ state_file = ".docs-state.json"
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -353,6 +365,8 @@ state_file = ".docs-state.json"
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -425,6 +439,8 @@ reviewers = ["alice", "bob"]
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -450,6 +466,8 @@ reviewers = ["alice", "bob"]
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -500,6 +518,8 @@ command = "unstuck"
                 command: Some("unstuck".to_string()),
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -524,6 +544,8 @@ command = "unstuck"
                 command: None,
                 brute_mode: Some(true),
                 backend: None,
+
+                prompt_dir: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -547,6 +569,8 @@ command = "unstuck"
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();

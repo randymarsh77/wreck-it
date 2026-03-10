@@ -1597,6 +1597,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         };
 
         let result = client.execute_task(&task).await;
@@ -1698,6 +1699,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         };
 
         // rounds=0 → no reflection loop; error comes from execute_task
@@ -1744,6 +1746,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         };
 
         // No precondition prompt → always eligible
@@ -1799,6 +1802,7 @@ mod tests {
             precondition_prompt: Some("Check if documentation is stale".to_string()),
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         };
 
         // Without a running Copilot server the session creation will fail
@@ -1885,6 +1889,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         };
 
         let result = client.execute_task(&task).await;
