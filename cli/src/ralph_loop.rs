@@ -2,6 +2,7 @@ use crate::agent::AgentClient;
 use crate::artefact_store;
 use crate::cost_tracker::{model_pricing, CostTracker};
 use crate::github_client;
+use crate::kanban::{self, KanbanClient, KanbanIssue};
 use crate::notifier;
 use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
@@ -115,6 +116,11 @@ pub struct RalphLoop {
     /// Maps task_id → GitHub issue number for open wreck-it issues.
     /// Populated when a task moves to `InProgress` and cleared on closure.
     github_issue_numbers: HashMap<String, u64>,
+    /// Maps task_id → external Kanban issue for open board items.
+    /// Populated when a task moves to `InProgress` and cleared on closure.
+    kanban_issues: HashMap<String, KanbanIssue>,
+    /// Optional Kanban provider constructed from config.
+    kanban_provider: Option<KanbanClient>,
     /// Shared cost tracker updated by every HTTP chat completion call.
     /// Cloned into per-task agents spawned for parallel execution.
     cost_tracker: Arc<Mutex<CostTracker>>,
@@ -153,11 +159,15 @@ impl RalphLoop {
         )
         .with_cost_tracker(Arc::clone(&cost_tracker));
 
+        let kanban_provider = kanban::provider_from_config(&config.kanban);
+
         Self {
             config,
             state: LoopState::new(max_iterations),
             agent,
             github_issue_numbers: HashMap::new(),
+            kanban_issues: HashMap::new(),
+            kanban_provider,
             cost_tracker,
         }
     }
@@ -401,6 +411,26 @@ impl RalphLoop {
             }
         }
 
+        // Create a Kanban board issue for this task when the integration is enabled.
+        if let Some(ref provider) = self.kanban_provider {
+            match provider.create_issue(&task_id, &task_desc).await {
+                Ok(kanban_issue) => {
+                    self.state.add_log(format!(
+                        "{} issue created for task {task_id}: {}",
+                        provider.provider_name(),
+                        kanban_issue.url
+                    ));
+                    self.kanban_issues.insert(task_id.clone(), kanban_issue);
+                }
+                Err(e) => {
+                    self.state.add_log(format!(
+                        "Warning: failed to create {} issue for task {task_id}: {e}",
+                        provider.provider_name()
+                    ));
+                }
+            }
+        }
+
         // Execute the task with reflection rounds; capture any error text for
         // potential use by the re-planner.
         let task = self.state.tasks[task_idx].clone();
@@ -543,6 +573,27 @@ impl RalphLoop {
                     } else {
                         self.state.add_log(format!(
                             "GitHub Issue #{issue_number} closed for task {task_id}"
+                        ));
+                    }
+                }
+            }
+
+            // Transition the Kanban board issue to the terminal status.
+            if let Some(kanban_issue) = self.kanban_issues.remove(&task_id) {
+                if let Some(ref provider) = self.kanban_provider {
+                    if let Err(e) = provider
+                        .transition_issue(&kanban_issue.external_id, final_status)
+                        .await
+                    {
+                        self.state.add_log(format!(
+                            "Warning: failed to transition {} issue for task {task_id}: {e}",
+                            provider.provider_name()
+                        ));
+                    } else {
+                        self.state.add_log(format!(
+                            "{} issue transitioned to {:?} for task {task_id}",
+                            provider.provider_name(),
+                            final_status
                         ));
                     }
                 }
@@ -756,6 +807,30 @@ impl RalphLoop {
             }
         }
 
+        // Create Kanban board issues for each parallel task when the integration is enabled.
+        for &idx in &eligible_indices {
+            let task_id = self.state.tasks[idx].id.clone();
+            let task_desc = self.state.tasks[idx].description.clone();
+            if let Some(ref provider) = self.kanban_provider {
+                match provider.create_issue(&task_id, &task_desc).await {
+                    Ok(kanban_issue) => {
+                        self.state.add_log(format!(
+                            "{} issue created for task {task_id}: {}",
+                            provider.provider_name(),
+                            kanban_issue.url
+                        ));
+                        self.kanban_issues.insert(task_id.clone(), kanban_issue);
+                    }
+                    Err(e) => {
+                        self.state.add_log(format!(
+                            "Warning: failed to create {} issue for task {task_id}: {e}",
+                            provider.provider_name()
+                        ));
+                    }
+                }
+            }
+        }
+
         // Spawn concurrent agent work (include per-task timestamp for provenance).
         let mut handles = Vec::new();
         for (idx, task, ts) in task_data {
@@ -949,6 +1024,27 @@ impl RalphLoop {
                         } else {
                             self.state.add_log(format!(
                                 "GitHub Issue #{issue_number} closed for task {task_id}"
+                            ));
+                        }
+                    }
+                }
+
+                // Transition the Kanban board issue to the terminal status.
+                if let Some(kanban_issue) = self.kanban_issues.remove(&task_id) {
+                    if let Some(ref provider) = self.kanban_provider {
+                        if let Err(e) = provider
+                            .transition_issue(&kanban_issue.external_id, final_status)
+                            .await
+                        {
+                            self.state.add_log(format!(
+                                "Warning: failed to transition {} issue for task {task_id}: {e}",
+                                provider.provider_name()
+                            ));
+                        } else {
+                            self.state.add_log(format!(
+                                "{} issue transitioned to {:?} for task {task_id}",
+                                provider.provider_name(),
+                                final_status
                             ));
                         }
                     }
