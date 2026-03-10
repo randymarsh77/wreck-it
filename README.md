@@ -41,6 +41,8 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 🧐 **Agent-Evaluated Preconditions**: Let an agent decide whether a task should run, enabling nuanced re-run criteria for recurring tasks in powerful ralph loops
 - 🏷️ **Epics & Sub-tasks**: Organize tasks into epics with hierarchical sub-tasks and progress tracking
 - 💡 **Per-Task Agent Memory**: Agents learn from prior attempts via persistent per-task memory files
+- 🔔 **Webhook Notifications**: HTTP POST alerts on task status transitions (`--notify-webhook <URL>`); failures are logged as warnings and never abort the loop
+- 🐛 **GitHub Issues Integration**: Automatically open a GitHub Issue when a task moves to `InProgress` and close it when the task reaches `Completed` or `Failed` (`--github-issues --github-repo owner/repo`)
 
 ## Installation
 
@@ -98,6 +100,7 @@ Options:
 - `-t, --task-file <PATH>`: Path to task file (default: `tasks.json`)
 - `-m, --max-iterations <NUM>`: Maximum iterations (default: `100`)
 - `-w, --work-dir <PATH>`: Working directory (default: `.`)
+- `--work-dir-map <ROLE_OR_ID=PATH>`: Override the working directory for tasks matching a role or ID (may be repeated; see `docs/multi-repo.md`)
 - `--model-provider <github-models|copilot|llama>`: Model provider
 - `--api-endpoint <URL>`: Provider endpoint (for local llama use `http://localhost:11434/v1`)
 - `--api-token <TOKEN>`: API token (can also be set via `COPILOT_API_TOKEN` env var)
@@ -110,6 +113,13 @@ Options:
 - `--replan-threshold <NUM>`: Consecutive failures before adaptive re-planning (default: `2`, `0` to disable)
 - `--ralph <NAME>`: Named ralph context from `.wreck-it/config.toml`; use `--ralph all` (headless only) to run every ralph sequentially
 - `--goal <TEXT>`: Generate a task plan from a natural-language goal before starting
+- `--github-issues`: Enable GitHub Issues integration — open an issue when a task moves to `InProgress` and close it when it reaches `Completed` or `Failed`
+- `--github-repo <OWNER/REPO>`: GitHub repository for the Issues integration (e.g. `acme/my-project`); required when `--github-issues` is set
+- `--github-token <TOKEN>`: GitHub personal-access token or fine-grained token with `issues: write` permission; falls back to the `GITHUB_TOKEN` environment variable when not provided
+- `--max-cost <USD>`: Maximum cumulative estimated API cost (USD) for the entire run.
+  When the tracked spend reaches this threshold the loop aborts before starting the next task.
+  Leave unset to impose no limit. Only costs reported by the GitHub Models HTTP path are metered
+  (Copilot SDK and Llama calls contribute $0.00 to the estimate).
 
 **Note**: When using `--model-provider copilot`, the Copilot CLI must be authenticated and available in your PATH. When using `--model-provider github-models`, set `GITHUB_TOKEN` in your environment.
 
@@ -132,7 +142,23 @@ wreck-it template list
 wreck-it template apply engineering-team
 ```
 
-The `engineering-team` template configures three ralph contexts (`docs`, `features`, `planner`) with recurring tasks and writes the corresponding task files into the state worktree. Ralph entries that already exist in `.wreck-it/config.toml` are left untouched (idempotent).
+The `engineering-team` template configures four ralph contexts (`docs`, `features`, `planner`, `feature-dev`) with recurring tasks and writes the corresponding task files into the state worktree. Ralph entries that already exist in `.wreck-it/config.toml` are left untouched (idempotent).
+
+### Install wreck-it into a Project
+
+Bootstrap a new project with the full `engineering-team` template and ready-to-use GitHub Actions workflows in a single step:
+
+```bash
+wreck-it install
+```
+
+This creates:
+- `.wreck-it/config.toml` — pre-populated with the four `engineering-team` ralphs (`docs`, `features`, `planner`, `feature-dev`)
+- `.wreck-it/plans/` — directory for cloud-agent plan files
+- `.github/workflows/ralph.yml` — the main cron-driven wreck-it workflow
+- `.github/workflows/plan.yml` — a workflow for running `wreck-it plan` on demand
+
+Existing files are never overwritten; the command is safe to re-run (idempotent).
 
 ### Inspect Provenance
 
@@ -143,6 +169,109 @@ wreck-it provenance --task impl-1
 # Export the full run as an openclaw-compatible JSON document
 wreck-it export-openclaw --task-file tasks.json --output run.openclaw.json
 ```
+
+### Export the Dependency Graph
+
+Visualize task dependencies as a Mermaid flowchart or GraphViz DOT diagram:
+
+```bash
+# Print Mermaid flowchart to stdout (default)
+wreck-it graph
+
+# Write Mermaid output to a file
+wreck-it graph --output graph.mmd
+
+# Generate a GraphViz DOT diagram
+wreck-it graph --format dot --output graph.dot
+
+# Use a non-default task file
+wreck-it graph --task-file .wreck-it/my-tasks.json
+```
+
+Paste the Mermaid output into [mermaid.live](https://mermaid.live) to render it interactively.  
+Nodes are colour-coded by status: **gray** = pending, **blue** = in-progress, **green** = completed, **red** = failed.  
+If circular dependencies are detected, a warning is printed to stderr before the graph is emitted.
+
+Options:
+- `-t, --task-file <PATH>`: Task file to read (default: `tasks.json`)
+- `-f, --format <mermaid|dot>`: Output format (default: `mermaid`)
+- `-o, --output <PATH>`: Write output to file instead of stdout
+
+### Manage Tasks from the CLI
+
+The `wreck-it tasks` family of sub-commands lets you inspect and edit task files without touching raw JSON.
+
+#### `tasks list` — list all tasks
+
+```bash
+# Print a table of all tasks
+wreck-it tasks list
+
+# Filter by status (pending | in-progress | completed | failed)
+wreck-it tasks list --status pending
+
+# Use a non-default task file
+wreck-it tasks list --task-file .wreck-it/my-tasks.json
+```
+
+Options:
+- `-t, --task-file <PATH>`: Task file to read (default: `tasks.json`)
+- `--status <STATUS>`: Show only tasks with this status (`pending`, `in-progress`, `completed`, `failed`)
+
+#### `tasks add` — append a new task
+
+```bash
+# Add a minimal task
+wreck-it tasks add --id my-task --description "Implement the widget"
+
+# Add a task with dependencies, phase, and priority
+wreck-it tasks add \
+  --id my-task \
+  --description "Implement the widget" \
+  --role implementer \
+  --phase 2 \
+  --priority 10 \
+  --depends-on setup,design
+```
+
+The command exits with an error if a task with the same `--id` already exists.
+
+Options:
+- `-t, --task-file <PATH>`: Task file to append to (default: `tasks.json`)
+- `--id <ID>`: Unique task identifier *(required)*
+- `-d, --description <TEXT>`: Human-readable task description *(required)*
+- `--role <ideas|implementer|evaluator>`: Agent role (default: `implementer`)
+- `--phase <N>`: Execution phase — lower phases run first (default: `1`)
+- `--priority <N>`: Scheduling priority — higher values run sooner (default: `0`)
+- `--depends-on <ID,...>`: Comma-separated list of task IDs this task depends on
+
+#### `tasks set-status` — update a task's status
+
+```bash
+wreck-it tasks set-status --id my-task --status completed
+```
+
+Exits with an error if no task with the given `--id` exists.
+
+Options:
+- `-t, --task-file <PATH>`: Task file to update (default: `tasks.json`)
+- `--id <ID>`: ID of the task to update *(required)*
+- `--status <STATUS>`: New status value (`pending`, `in-progress`, `completed`, `failed`) *(required)*
+
+#### `tasks validate` — check a task file for correctness
+
+```bash
+wreck-it tasks validate
+
+# Use a non-default task file
+wreck-it tasks validate --task-file .wreck-it/my-tasks.json
+```
+
+Checks for duplicate IDs, unresolved `depends_on` references, and circular dependencies.
+Prints each issue to stderr and **exits non-zero** when any issue is found, making it suitable for use in CI scripts.
+
+Options:
+- `-t, --task-file <PATH>`: Task file to validate (default: `tasks.json`)
 
 ### TUI Controls
 
@@ -182,7 +311,9 @@ A task with all available fields:
   ],
   "runtime": "local",
   "parent_id": "epic-auth",
-  "labels": ["backend", "api"]
+  "labels": ["backend", "api"],
+  "timeout_seconds": 300,
+  "max_retries": 2
 }
 ```
 
@@ -204,6 +335,8 @@ A task with all available fields:
 | `precondition_prompt` | Agent-evaluated precondition; task is skipped when the agent determines the condition is not met | *(none)* |
 | `parent_id` | ID of the parent task (epic); marks this task as a sub-task | *(none)* |
 | `labels` | Free-form labels for categorization (e.g. board columns, tags) | `[]` |
+| `timeout_seconds` | Maximum wall-clock seconds the agent may run; the task is marked failed if the limit is exceeded | *(none)* |
+| `max_retries` | Maximum number of automatic retries after failure (`N` means up to `N+1` total attempts); auto-retry is skipped when the adaptive re-planner takes over | *(none)* |
 
 ## GitHub Action
 

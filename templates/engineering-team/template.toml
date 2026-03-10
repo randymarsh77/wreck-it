@@ -35,3 +35,10 @@ state_file = ".planner-state.json"
 name = "feature-dev"
 task_file = "feature-dev-tasks.json"
 state_file = ".feature-dev-state.json"
+
+[[ralphs]]
+name = "merge"
+task_file = "merge-tasks.json"
+state_file = ".merge-state.json"
+command = "merge"
+backend = "cloud_agent"

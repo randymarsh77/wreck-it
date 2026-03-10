@@ -181,6 +181,9 @@ mod tests {
                     branch: None,
                     agent: None,
                     reviewers: None,
+                    command: None,
+                    brute_mode: None,
+                    backend: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -189,6 +192,9 @@ mod tests {
                     branch: None,
                     agent: None,
                     reviewers: None,
+                    command: None,
+                    brute_mode: None,
+                    backend: None,
                 },
             ],
         };
@@ -234,6 +240,9 @@ name = "docs"
                     branch: None,
                     agent: None,
                     reviewers: None,
+                    command: None,
+                    brute_mode: None,
+                    backend: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -242,6 +251,9 @@ name = "docs"
                     branch: None,
                     agent: None,
                     reviewers: None,
+                    command: None,
+                    brute_mode: None,
+                    backend: None,
                 },
             ],
             ..RepoConfig::default()
@@ -269,6 +281,9 @@ name = "docs"
                 branch: None,
                 agent: None,
                 reviewers: None,
+                command: None,
+                brute_mode: None,
+                backend: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -303,6 +318,9 @@ state_file = ".docs-state.json"
                 branch: Some("feature/my-branch".to_string()),
                 agent: None,
                 reviewers: None,
+                command: None,
+                brute_mode: None,
+                    backend: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -326,6 +344,9 @@ state_file = ".docs-state.json"
                 branch: None,
                 agent: None,
                 reviewers: None,
+                command: None,
+                brute_mode: None,
+                    backend: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -394,6 +415,9 @@ reviewers = ["alice", "bob"]
                 branch: None,
                 agent: Some("claude".to_string()),
                 reviewers: Some(vec!["reviewer1".to_string(), "reviewer2".to_string()]),
+                command: None,
+                brute_mode: None,
+                    backend: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -415,6 +439,9 @@ reviewers = ["alice", "bob"]
                 branch: None,
                 agent: None,
                 reviewers: None,
+                command: None,
+                brute_mode: None,
+                    backend: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -424,5 +451,117 @@ reviewers = ["alice", "bob"]
             .expect("TOML should contain a [[ralphs]] section");
         assert!(!ralph_section.contains("agent"));
         assert!(!ralph_section.contains("reviewers"));
+        assert!(!ralph_section.contains("command"));
+    }
+
+    #[test]
+    fn test_ralph_config_command_defaults_to_none() {
+        let toml_str = r#"
+[[ralphs]]
+name = "docs"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.ralphs[0].command.is_none());
+    }
+
+    #[test]
+    fn test_ralph_config_with_command() {
+        let toml_str = r#"
+[[ralphs]]
+name = "unstuck"
+command = "unstuck"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.ralphs[0].command.as_deref(), Some("unstuck"));
+    }
+
+    #[test]
+    fn test_ralph_config_command_roundtrip() {
+        let dir = tempdir().unwrap();
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![RalphConfig {
+                name: "unstuck".to_string(),
+                task_file: "tasks.json".to_string(),
+                state_file: ".wreck-it-state.json".to_string(),
+                branch: None,
+                agent: None,
+                reviewers: None,
+                command: Some("unstuck".to_string()),
+                brute_mode: None,
+                    backend: None,
+            }],
+        };
+        save_repo_config(dir.path(), &cfg).unwrap();
+        let loaded = load_repo_config(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ralphs[0].command.as_deref(), Some("unstuck"));
+    }
+
+    #[test]
+    fn test_ralph_config_brute_mode_roundtrip() {
+        let dir = tempdir().unwrap();
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![RalphConfig {
+                name: "brute".to_string(),
+                task_file: "tasks.json".to_string(),
+                state_file: ".wreck-it-state.json".to_string(),
+                branch: None,
+                agent: None,
+                reviewers: None,
+                command: None,
+                brute_mode: Some(true),
+                backend: None,
+            }],
+        };
+        save_repo_config(dir.path(), &cfg).unwrap();
+        let loaded = load_repo_config(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ralphs[0].brute_mode, Some(true));
+    }
+
+    #[test]
+    fn test_ralph_config_brute_mode_omitted_when_none() {
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![RalphConfig {
+                name: "docs".to_string(),
+                task_file: "docs-tasks.json".to_string(),
+                state_file: ".docs-state.json".to_string(),
+                branch: None,
+                agent: None,
+                reviewers: None,
+                command: None,
+                brute_mode: None,
+                backend: None,
+            }],
+        };
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        let ralph_section = toml_str
+            .split("[[ralphs]]")
+            .nth(1)
+            .expect("expected [[ralphs]] section");
+        assert!(
+            !ralph_section.contains("brute_mode"),
+            "brute_mode should be omitted when None, got: {}",
+            ralph_section,
+        );
+    }
+
+    #[test]
+    fn test_ralph_config_brute_mode_defaults_to_none() {
+        let toml_str = r#"
+state_branch = "wreck-it-state"
+state_root = ".wreck-it"
+
+[[ralphs]]
+name = "docs"
+task_file = "docs-tasks.json"
+state_file = ".docs-state.json"
+"#;
+        let loaded: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(loaded.ralphs[0].brute_mode, None);
     }
 }
