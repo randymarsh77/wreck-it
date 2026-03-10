@@ -546,6 +546,7 @@ async fn main() -> Result<()> {
                             prompt_with_default("State root directory", repo_config::CONFIG_DIR);
                         RepoConfig {
                             state_branch: branch,
+                            task_branch: None,
                             state_root: root,
                             ralphs: vec![],
                         }

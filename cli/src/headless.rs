@@ -849,7 +849,7 @@ async fn run_needs_trigger(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let reset_count = reset_recurring_tasks(&mut tasks, now);
+    let reset_count = reset_recurring_tasks(&mut tasks, state, now);
     if reset_count > 0 {
         println!(
             "[wreck-it] reset {} recurring task(s) back to pending",
@@ -1688,6 +1688,7 @@ mod tests {
             memory: vec![],
             tracked_prs: vec![],
             review_requested: None,
+            task_statuses: std::collections::HashMap::new(),
         };
 
         // Simulate the Completed branch of the loop.
@@ -1897,18 +1898,25 @@ mod tests {
 
         // Reload and immediately try to reset recurring tasks.
         let mut reloaded = load_tasks(&task_file).unwrap();
+        let mut state = HeadlessState::default();
+        state
+            .task_statuses
+            .insert("rec-1".into(), crate::types::TaskStatus::Completed);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let reset_count = reset_recurring_tasks(&mut reloaded, now);
+        let reset_count = reset_recurring_tasks(&mut reloaded, &mut state, now);
 
         // Cooldown of 3600s should prevent an immediate reset.
         assert_eq!(
             reset_count, 0,
             "recurring task should not reset before cooldown elapses"
         );
-        assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&reloaded[0], &state),
+            crate::types::TaskStatus::Completed,
+        );
     }
 
     #[test]
@@ -1926,6 +1934,7 @@ mod tests {
             memory: vec![],
             tracked_prs: vec![],
             review_requested: Some(true),
+            task_statuses: std::collections::HashMap::new(),
         };
 
         // Simulate the Completed branch of the loop.
