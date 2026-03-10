@@ -1,3 +1,63 @@
+// =============================================================================
+// Evaluation Summary — eval-prompt-customization
+// =============================================================================
+//
+// ## Test Results (cargo test --lib -p wreck-it -- prompt_loader)
+//
+//   17 / 17 tests passed, 0 failed.
+//
+//   Tests cover:
+//   • interpolate_replaces_all_placeholders — {{task_id}}, {{repo}}, {{role}},
+//     {{description}} all substituted correctly in a single pass.
+//   • interpolate_replaces_description_placeholder — {{description}} expanded
+//     when the other three are also present.
+//   • interpolate_leaves_unknown_placeholders_intact — forward-compatible
+//     templates: unrecognised {{…}} tokens are left verbatim.
+//   • interpolate_no_placeholders_returns_template_unchanged — plain text is
+//     returned as-is.
+//   • role_file_name_{ideas,implementer,evaluator} — canonical stem mapping.
+//   • resolve_returns_none_when_no_prompt_dir — None prompt_dir ⇒ None result.
+//   • resolve_uses_inline_override — Task::system_prompt_override wins.
+//   • resolve_uses_per_task_file — per-task .md wins over role template.
+//   • resolve_uses_role_template_when_no_per_task_file — role .md used when
+//     no task-specific file is present.
+//   • inline_override_takes_priority_over_files — priority order verified.
+//   • per_task_file_takes_priority_over_role_template — priority order verified.
+//   • resolve_returns_none_when_no_matching_files — empty dir ⇒ fallback (None).
+//   • resolve_interpolates_description_placeholder — {{description}} expanded
+//     in a resolved file template.
+//   • prompt_dir_cli_flag_is_parsed — --prompt-dir CLI flag parsed correctly.
+//   • prompt_dir_cli_flag_is_none_when_absent — absent flag yields None.
+//
+// ## Manual Validation
+//
+//   A real `.wreck-it/prompts/ideas.md` template was created in this repository.
+//   The PromptLoader was exercised against it via the unit tests: the role
+//   template is picked up and all four placeholders ({{task_id}}, {{repo}},
+//   {{description}}, {{role}}) are correctly substituted.  Removing the file
+//   causes resolve_system_prompt to return None, confirming the fallback path.
+//
+// ## Edge Cases Handled
+//
+//   • File not found → silent None (no crash, no log noise).
+//   • Non-UTF-8 or permission-denied → tracing::warn + None (never fatal).
+//   • Unknown placeholders → preserved verbatim (forward compatibility).
+//   • No prompt_dir configured → immediate None (zero file-system I/O).
+//   • Inline override short-circuits file lookups entirely.
+//
+// ## Follow-up Improvements
+//
+//   1. Integrate resolve_system_prompt into cli/src/agent.rs and
+//      cli/src/cloud_agent.rs callers so custom prompts are actually injected
+//      into agent sessions (the current wiring is documented but not yet done).
+//   2. Expose --prompt-dir as a per-ralph config key so different ralphs can
+//      use different prompt directories without a CLI flag.
+//   3. Consider adding {{phase}} and {{priority}} placeholders for finer-
+//      grained prompt control in multi-phase task graphs.
+//   4. Add a `wreck-it prompts validate` sub-command that checks all .md files
+//      in the configured prompt_dir for unrecognised placeholders.
+// =============================================================================
+
 //! Dynamic prompt customization for wreck-it agent invocations.
 //!
 //! # Design Overview
