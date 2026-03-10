@@ -1,16 +1,18 @@
 use crate::agent::AgentClient;
 use crate::artefact_store;
+use crate::cost_tracker::{model_pricing, CostTracker};
 use crate::github_client;
 use crate::notifier;
 use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{
-    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus,
+    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus, DEFAULT_AUTOPILOT_MODEL,
     DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Error message used when evaluation/tests fail without a prior agent error.
@@ -22,6 +24,7 @@ fn model_name(provider: &ModelProvider) -> String {
         ModelProvider::Copilot => "copilot".to_string(),
         ModelProvider::Llama => DEFAULT_LLAMA_MODEL.to_string(),
         ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL.to_string(),
+        ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL.to_string(),
     }
 }
 
@@ -112,12 +115,28 @@ pub struct RalphLoop {
     /// Maps task_id → GitHub issue number for open wreck-it issues.
     /// Populated when a task moves to `InProgress` and cleared on closure.
     github_issue_numbers: HashMap<String, u64>,
+    /// Shared cost tracker updated by every HTTP chat completion call.
+    /// Cloned into per-task agents spawned for parallel execution.
+    cost_tracker: Arc<Mutex<CostTracker>>,
 }
 
 impl RalphLoop {
     pub fn new(config: Config) -> Self {
         let max_iterations = config.max_iterations;
-        let agent = AgentClient::with_evaluation(
+
+        // Build per-model pricing from the configured model name, then create a
+        // shared cost tracker that the main agent and parallel task agents all
+        // write into.
+        let model_str = match config.model_provider {
+            ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL,
+            ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
+            ModelProvider::Copilot => "copilot",
+            ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL,
+        };
+        let (inp, out) = model_pricing(model_str);
+        let cost_tracker = Arc::new(Mutex::new(CostTracker::new(inp, out)));
+
+        let agent = AgentClient::with_evaluation_and_autopilot(
             config.model_provider.clone(),
             config.api_endpoint.clone(),
             config.api_token.clone(),
@@ -126,13 +145,20 @@ impl RalphLoop {
             config.evaluation_mode,
             config.completeness_prompt.clone(),
             config.completion_marker_file.to_string_lossy().to_string(),
-        );
+            config.max_autopilot_continues,
+        )
+        .with_prompt_dir(
+            config.prompt_dir.clone(),
+            config.github_repo.clone().unwrap_or_default(),
+        )
+        .with_cost_tracker(Arc::clone(&cost_tracker));
 
         Self {
             config,
             state: LoopState::new(max_iterations),
             agent,
             github_issue_numbers: HashMap::new(),
+            cost_tracker,
         }
     }
 
@@ -144,6 +170,42 @@ impl RalphLoop {
             self.config.github_repo.as_deref(),
             self.config.github_token.as_deref(),
         )
+    }
+
+    /// Resolve the effective working directory for a task.
+    ///
+    /// Lookup order:
+    /// 1. Exact match on `task.id` in [`Config::work_dirs`].
+    /// 2. Match on the task's `role` (serialised as a lowercase string).
+    /// 3. Fall back to the top-level [`Config::work_dir`].
+    ///
+    /// Relative paths in the map are resolved relative to [`Config::work_dir`].
+    fn resolve_work_dir(&self, task: &crate::types::Task) -> std::path::PathBuf {
+        // 1. Exact task-id match.
+        if let Some(p) = self.config.work_dirs.get(&task.id) {
+            let path = std::path::Path::new(p);
+            if path.is_absolute() {
+                return path.to_path_buf();
+            }
+            return self.config.work_dir.join(path);
+        }
+
+        // 2. Role match (AgentRole serialised to lowercase string via serde).
+        let role_str = serde_json::to_value(task.role)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        if let Some(role_key) = role_str {
+            if let Some(p) = self.config.work_dirs.get(&role_key) {
+                let path = std::path::Path::new(p);
+                if path.is_absolute() {
+                    return path.to_path_buf();
+                }
+                return self.config.work_dir.join(path);
+            }
+        }
+
+        // 3. Default.
+        self.config.work_dir.clone()
     }
 
     /// Initialize the loop by loading tasks
@@ -169,6 +231,23 @@ impl RalphLoop {
         if self.state.iteration > self.state.max_iterations {
             self.state.add_log("Max iterations reached".to_string());
             return Ok(false);
+        }
+
+        // Check the budget before starting a new task.
+        if let Ok(guard) = self.cost_tracker.lock() {
+            if guard.budget_exceeded(self.config.max_cost_usd) {
+                self.state.add_log(format!(
+                    "Budget limit reached – current cost ${:.4} >= limit ${:.4} – stopping",
+                    guard.total_estimated_cost_usd,
+                    self.config.max_cost_usd.unwrap_or(0.0)
+                ));
+                return Ok(false);
+            }
+        }
+
+        // Reset per-task cost counters at the start of each new iteration.
+        if let Ok(mut guard) = self.cost_tracker.lock() {
+            guard.reset_task();
         }
 
         // Re-read the task file so that tasks dynamically appended by agents
@@ -210,7 +289,9 @@ impl RalphLoop {
         // Determine whether we can run tasks in parallel.
         let ready = TaskScheduler::schedule(&self.state.tasks);
         if ready.len() > 1 {
-            return self.run_parallel_tasks(ready).await;
+            let result = self.run_parallel_tasks(ready).await;
+            self.emit_cost_summary();
+            return result;
         }
 
         // Single-task execution: use scheduler result when available, fall back
@@ -227,12 +308,37 @@ impl RalphLoop {
             }
         };
 
-        self.run_single_task(task_idx).await
+        let result = self.run_single_task(task_idx).await;
+        self.emit_cost_summary();
+        result
+    }
+
+    /// Append a one-line cost summary to the loop log.
+    ///
+    /// Called at the end of every iteration (both single-task and parallel
+    /// paths) so that both headless and TUI consumers see the same summary.
+    fn emit_cost_summary(&mut self) {
+        if let Ok(guard) = self.cost_tracker.lock() {
+            let summary = guard.iteration_summary();
+            self.state.add_log(summary);
+        }
     }
 
     /// Execute a single task by index, running evaluation & commit logic.
     async fn run_single_task(&mut self, task_idx: usize) -> Result<bool> {
         self.state.current_task = Some(task_idx);
+
+        // Resolve the effective working directory for this task and redirect the
+        // shared agent before any agent calls are made.
+        let effective_work_dir = self.resolve_work_dir(&self.state.tasks[task_idx]);
+        self.agent
+            .set_work_dir(effective_work_dir.to_string_lossy().to_string());
+        if effective_work_dir != self.config.work_dir {
+            self.state.add_log(format!(
+                "Using per-task work dir: {}",
+                effective_work_dir.display()
+            ));
+        }
 
         // Evaluate agent-based precondition before executing the task.
         if self.state.tasks[task_idx].precondition_prompt.is_some() {
@@ -622,7 +728,9 @@ impl RalphLoop {
         // Spawn concurrent agent work (include per-task timestamp for provenance).
         let mut handles = Vec::new();
         for (idx, task, ts) in task_data {
-            let mut agent = AgentClient::with_evaluation(
+            // Resolve per-task working directory for multi-repo orchestration.
+            let task_work_dir = self.resolve_work_dir(&task);
+            let mut agent = AgentClient::with_evaluation_and_autopilot(
                 self.config.model_provider.clone(),
                 self.config.api_endpoint.clone(),
                 self.config.api_token.clone(),
@@ -634,7 +742,10 @@ impl RalphLoop {
                     .completion_marker_file
                     .to_string_lossy()
                     .to_string(),
-            );
+                self.config.max_autopilot_continues,
+            )
+            .with_work_dir(task_work_dir.to_string_lossy().to_string())
+            .with_cost_tracker(Arc::clone(&self.cost_tracker));
             let handle = tokio::spawn(async move {
                 // Wrap execution in a per-task timeout when `timeout_seconds` is set.
                 let result = if let Some(timeout_secs) = task.timeout_seconds {
@@ -895,6 +1006,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }
     }
 
@@ -1009,6 +1121,7 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
             },
             Task {
                 id: "old".to_string(),
@@ -1031,6 +1144,7 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -1071,6 +1185,7 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -1307,5 +1422,141 @@ mod tests {
             TaskStatus::Failed,
             "when replan succeeded auto-retry must be skipped"
         );
+    }
+
+    // ---- resolve_work_dir tests (multi-repo orchestration) ----
+
+    fn make_config_with_work_dirs(
+        default_work_dir: &str,
+        overrides: &[(&str, &str)],
+    ) -> crate::types::Config {
+        let mut config = crate::types::Config::default();
+        config.work_dir = std::path::PathBuf::from(default_work_dir);
+        for &(k, v) in overrides {
+            config.work_dirs.insert(k.to_string(), v.to_string());
+        }
+        config
+    }
+
+    fn make_ralph_loop(config: crate::types::Config) -> RalphLoop {
+        RalphLoop::new(config)
+    }
+
+    #[test]
+    fn resolve_work_dir_falls_back_to_default() {
+        let config = make_config_with_work_dirs("/default", &[]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/default")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_matches_exact_task_id() {
+        let config = make_config_with_work_dirs("/default", &[("my-task", "/repo/my-task-dir")]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/repo/my-task-dir")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_matches_role() {
+        // AgentRole::Implementer serialises to "implementer" via serde.
+        let config = make_config_with_work_dirs("/default", &[("implementer", "/repo/impl-dir")]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("other-id", TaskStatus::Pending, 0, 1, 0, vec![]);
+        // default role is Implementer
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/repo/impl-dir")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_prefers_task_id_over_role() {
+        // Both id and role match — id must win.
+        let config = make_config_with_work_dirs(
+            "/default",
+            &[("my-task", "/by-id"), ("implementer", "/by-role")],
+        );
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/by-id")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_resolves_relative_path_against_default() {
+        let config = make_config_with_work_dirs("/projects", &[("my-task", "sub-repo")]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/projects/sub-repo")
+        );
+    }
+
+    // ---- multi-repo orchestration integration tests using real temp dirs ----
+
+    /// When `work_dirs` maps a task id to a secondary path, the agent receives
+    /// the correct (secondary) work_dir for that task while other tasks continue
+    /// to use the default work_dir.
+    #[test]
+    fn work_dirs_maps_task_to_secondary_with_temp_dirs() {
+        let default_dir = tempfile::tempdir().unwrap();
+        let secondary_dir = tempfile::tempdir().unwrap();
+
+        let config = make_config_with_work_dirs(
+            default_dir.path().to_str().unwrap(),
+            &[("special-task", secondary_dir.path().to_str().unwrap())],
+        );
+        let rl = make_ralph_loop(config);
+
+        // The mapped task should resolve to the secondary directory.
+        let mapped_task = make_task("special-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&mapped_task),
+            secondary_dir.path(),
+            "mapped task must receive the secondary work_dir"
+        );
+
+        // All other tasks should fall back to the default directory.
+        for id in &["task-a", "task-b", "unrelated"] {
+            let other_task = make_task(id, TaskStatus::Pending, 0, 1, 0, vec![]);
+            assert_eq!(
+                rl.resolve_work_dir(&other_task),
+                default_dir.path(),
+                "unmapped task '{}' must receive the default work_dir",
+                id
+            );
+        }
+    }
+
+    /// When `work_dirs` is empty (absent), every task uses the default work_dir,
+    /// which is identical to the current single-repository behavior.
+    #[test]
+    fn work_dirs_absent_is_identical_to_single_repo_behavior() {
+        let default_dir = tempfile::tempdir().unwrap();
+
+        // No overrides – equivalent to a config that never sets work_dirs.
+        let config = make_config_with_work_dirs(default_dir.path().to_str().unwrap(), &[]);
+        let rl = make_ralph_loop(config);
+
+        for id in &["impl-1", "test-2", "eval-3"] {
+            let task = make_task(id, TaskStatus::Pending, 0, 1, 0, vec![]);
+            assert_eq!(
+                rl.resolve_work_dir(&task),
+                default_dir.path(),
+                "task '{}' must use the default work_dir when work_dirs is empty",
+                id
+            );
+        }
     }
 }

@@ -51,6 +51,8 @@ pub enum PrMergeStatus {
     Mergeable,
     /// The PR has already been merged.
     AlreadyMerged,
+    /// The PR was closed without being merged.
+    ClosedNotMerged,
 }
 
 /// Summary of an open pull request, returned by [`CloudAgentClient::list_open_prs`].
@@ -85,7 +87,15 @@ pub(crate) fn build_issue_body(
     task_description: &str,
     memory: &[String],
     branch: Option<&str>,
+    system_prompt: Option<&str>,
 ) -> String {
+    let system_prompt_section = match system_prompt {
+        Some(sp) if !sp.is_empty() => format!(
+            "<!-- system-prompt -->\n```\n{}\n```\n<!-- /system-prompt -->\n\n",
+            sp
+        ),
+        _ => String::new(),
+    };
     let branch_section = match branch {
         Some(b) => format!(
             "\n\n## Branch\n\nBase your work on the `{}` branch and target your pull request to `{}`.",
@@ -104,8 +114,8 @@ pub(crate) fn build_issue_body(
         format!("\n\n## Previous Context\n\n{}", bullets)
     };
     format!(
-        "{}{}{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
-        task_description, branch_section, memory_section, task_id,
+        "{}{}{}{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
+        system_prompt_section, task_description, branch_section, memory_section, task_id,
     )
 }
 
@@ -298,8 +308,10 @@ impl CloudAgentClient {
         task_description: &str,
         memory_context: &[String],
         branch: Option<&str>,
+        system_prompt: Option<&str>,
     ) -> Result<TriggerResult> {
-        let issue_body = build_issue_body(task_id, task_description, memory_context, branch);
+        let issue_body =
+            build_issue_body(task_id, task_description, memory_context, branch, system_prompt);
 
         let create_body = serde_json::json!({
             "title": format!("[wreck-it] {} {}", ralph_name, task_id),
@@ -1192,7 +1204,7 @@ impl CloudAgentClient {
             return Ok(PrMergeStatus::AlreadyMerged);
         }
         if state != "open" {
-            return Ok(PrMergeStatus::NotMergeable);
+            return Ok(PrMergeStatus::ClosedNotMerged);
         }
         if draft {
             return Ok(PrMergeStatus::Draft);
@@ -2445,6 +2457,131 @@ impl CloudAgentClient {
 
         Ok(prs)
     }
+
+    /// Fetch the raw JSON representation of a pull request.
+    pub async fn fetch_pr_json(&self, pr_number: u64) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR JSON")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Failed to fetch PR #{} ({}): {}", pr_number, status, body);
+        }
+
+        Ok(resp.json().await?)
+    }
+
+    /// Fetch the most recent commit messages on a branch.
+    ///
+    /// Returns a newline-separated string of `<sha_short> <message>` lines.
+    pub async fn fetch_recent_commits(&self, branch: &str, count: u32) -> Result<String> {
+        let url = format!(
+            "{}/repos/{}/{}/commits?sha={}&per_page={}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, branch, count,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch recent commits")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch commits for branch {} ({}): {}",
+                branch,
+                status,
+                body,
+            );
+        }
+
+        let items: Vec<serde_json::Value> = resp.json().await?;
+        let lines: Vec<String> = items
+            .iter()
+            .filter_map(|c| {
+                let sha = c["sha"].as_str().unwrap_or("").get(..7).unwrap_or("");
+                let msg = c
+                    .pointer("/commit/message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let first_line = msg.lines().next().unwrap_or("");
+                if sha.is_empty() {
+                    None
+                } else {
+                    Some(format!("{} {}", sha, first_line))
+                }
+            })
+            .collect();
+
+        Ok(lines.join("\n"))
+    }
+
+    /// Fetch a summary of files changed in a pull request.
+    ///
+    /// Returns a newline-separated `<filename> | <changes> <status>` summary.
+    pub async fn fetch_pr_files_summary(&self, pr_number: u64) -> Result<String> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/files?per_page=100",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR files")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch files for PR #{} ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let items: Vec<serde_json::Value> = resp.json().await?;
+        let lines: Vec<String> = items
+            .iter()
+            .filter_map(|f| {
+                let filename = f["filename"].as_str().unwrap_or("");
+                let changes = f["changes"].as_u64().unwrap_or(0);
+                let status = f["status"].as_str().unwrap_or("modified");
+                if filename.is_empty() {
+                    None
+                } else {
+                    Some(format!("{} | {} {}", filename, changes, status))
+                }
+            })
+            .collect();
+
+        Ok(lines.join("\n"))
+    }
 }
 
 /// Parse a GitHub remote URL into (owner, repo).
@@ -2813,7 +2950,7 @@ mod tests {
 
     #[test]
     fn build_issue_body_without_memory() {
-        let body = build_issue_body("task-1", "Implement feature X", &[], None);
+        let body = build_issue_body("task-1", "Implement feature X", &[], None, None);
         assert!(body.contains("Implement feature X"));
         assert!(body.contains("task `task-1`"));
         assert!(!body.contains("Previous Context"));
@@ -2826,7 +2963,7 @@ mod tests {
             "iteration 1: triggered cloud agent for task setup (issue #10)".to_string(),
             "iteration 2: agent created PR #5 for task setup".to_string(),
         ];
-        let body = build_issue_body("task-2", "Add test coverage", &memory, None);
+        let body = build_issue_body("task-2", "Add test coverage", &memory, None, None);
         assert!(body.contains("Add test coverage"));
         assert!(body.contains("task `task-2`"));
         assert!(body.contains("Previous Context"));
@@ -2837,7 +2974,7 @@ mod tests {
     #[test]
     fn build_issue_body_memory_placed_before_footer() {
         let memory = vec!["some context".to_string()];
-        let body = build_issue_body("t", "desc", &memory, None);
+        let body = build_issue_body("t", "desc", &memory, None, None);
         let context_pos = body.find("Previous Context").unwrap();
         let footer_pos = body.find("Triggered by wreck-it").unwrap();
         assert!(
@@ -2853,6 +2990,7 @@ mod tests {
             "Implement feature X",
             &[],
             Some("feature/my-branch"),
+            None,
         );
         assert!(body.contains("Implement feature X"));
         assert!(body.contains("## Branch"));
@@ -2863,13 +3001,37 @@ mod tests {
     #[test]
     fn build_issue_body_with_branch_and_memory() {
         let memory = vec!["iteration 1: something".to_string()];
-        let body = build_issue_body("task-1", "desc", &memory, Some("dev"));
+        let body = build_issue_body("task-1", "desc", &memory, Some("dev"), None);
         // Branch section should come before memory section
         let branch_pos = body.find("## Branch").unwrap();
         let memory_pos = body.find("Previous Context").unwrap();
         let footer_pos = body.find("Triggered by wreck-it").unwrap();
         assert!(branch_pos < memory_pos);
         assert!(memory_pos < footer_pos);
+    }
+
+    #[test]
+    fn build_issue_body_with_system_prompt() {
+        let body = build_issue_body(
+            "task-1",
+            "Implement feature X",
+            &[],
+            None,
+            Some("You are a Rust expert."),
+        );
+        assert!(body.contains("<!-- system-prompt -->"));
+        assert!(body.contains("You are a Rust expert."));
+        assert!(body.contains("<!-- /system-prompt -->"));
+        // System prompt should appear before description
+        let sp_pos = body.find("<!-- system-prompt -->").unwrap();
+        let desc_pos = body.find("Implement feature X").unwrap();
+        assert!(sp_pos < desc_pos);
+    }
+
+    #[test]
+    fn build_issue_body_without_system_prompt_has_no_marker() {
+        let body = build_issue_body("task-1", "desc", &[], None, None);
+        assert!(!body.contains("<!-- system-prompt -->"));
     }
 
     #[test]

@@ -2,10 +2,36 @@
 //!
 //! This module contains the pure business logic that both the CLI headless
 //! runner and the Cloudflare Worker use when processing an iteration.
+//!
+//! ## Status resolution
+//!
+//! Task status can come from two sources:
+//!
+//! 1. **`HeadlessState::task_statuses`** — the authoritative runtime map,
+//!    keyed by task ID.  This is the preferred source when the state file is
+//!    available.
+//! 2. **`Task::status`** — the value embedded in the task definition file.
+//!    Used as a fallback when the task ID is absent from the state map (e.g.
+//!    for newly added tasks).
+//!
+//! All mutation functions in this module write to the state map so that task
+//! definition files remain stateless.
 
 use crate::state::{AgentPhase, HeadlessState};
 use crate::types::{Task, TaskKind, TaskStatus};
 use std::collections::HashSet;
+
+/// Resolve the effective status for a task.
+///
+/// Returns the status from `HeadlessState::task_statuses` if present,
+/// otherwise falls back to the `status` field on the task itself.
+pub fn effective_status(task: &Task, state: &HeadlessState) -> TaskStatus {
+    state
+        .task_statuses
+        .get(&task.id)
+        .copied()
+        .unwrap_or(task.status)
+}
 
 /// Select the next task to execute.
 ///
@@ -14,17 +40,17 @@ use std::collections::HashSet;
 /// 2. Within that phase, filter to tasks whose dependencies are all completed.
 /// 3. Sort candidates: higher priority first, then lower complexity first.
 /// 4. Return the index of the best candidate.
-pub fn select_next_task(tasks: &[Task], _state: &HeadlessState) -> Option<usize> {
+pub fn select_next_task(tasks: &[Task], state: &HeadlessState) -> Option<usize> {
     let completed_ids: HashSet<&str> = tasks
         .iter()
-        .filter(|t| t.status == TaskStatus::Completed)
+        .filter(|t| effective_status(t, state) == TaskStatus::Completed)
         .map(|t| t.id.as_str())
         .collect();
 
     // Find the lowest phase that has pending tasks.
     let min_phase = tasks
         .iter()
-        .filter(|t| t.status == TaskStatus::Pending)
+        .filter(|t| effective_status(t, state) == TaskStatus::Pending)
         .map(|t| t.phase)
         .min()?;
 
@@ -33,7 +59,7 @@ pub fn select_next_task(tasks: &[Task], _state: &HeadlessState) -> Option<usize>
         .iter()
         .enumerate()
         .filter(|(_, t)| {
-            t.status == TaskStatus::Pending
+            effective_status(t, state) == TaskStatus::Pending
                 && t.phase == min_phase
                 && t.depends_on
                     .iter()
@@ -55,26 +81,37 @@ pub fn select_next_task(tasks: &[Task], _state: &HeadlessState) -> Option<usize>
 /// `Pending` so that the scheduler picks them up again.
 ///
 /// - Tasks with `kind == Milestone` (the default) are never touched.
-/// - Tasks with `kind == Recurring` and `status == Completed` are reset
+/// - Tasks with `kind == Recurring` and effective status `Completed` are reset
 ///   to `Pending` when either no `cooldown_seconds` is set, or enough
 ///   time has passed since `last_attempt_at`.
 ///
+/// Status changes are written to `state.task_statuses` so the task definition
+/// files remain stateless.
+///
 /// Returns the number of tasks that were reset.
-pub fn reset_recurring_tasks(tasks: &mut [Task], now_secs: u64) -> usize {
+pub fn reset_recurring_tasks(
+    tasks: &mut [Task],
+    state: &mut HeadlessState,
+    now_secs: u64,
+) -> usize {
     let mut count = 0;
     for task in tasks.iter_mut() {
-        if task.kind != TaskKind::Recurring || task.status != TaskStatus::Completed {
+        if task.kind != TaskKind::Recurring
+            || effective_status(task, state) != TaskStatus::Completed
+        {
             continue;
         }
         let ready = match (task.cooldown_seconds, task.last_attempt_at) {
-            (Some(cd), Some(last)) => now_secs.saturating_sub(last) >= cd,
+            (Some(cd), Some(last_at)) => now_secs.saturating_sub(last_at) >= cd,
             // Cooldown set but no timestamp → treat as not ready yet.
             (Some(_), None) => false,
             // No cooldown → always eligible.
             _ => true,
         };
         if ready {
-            task.status = TaskStatus::Pending;
+            state
+                .task_statuses
+                .insert(task.id.clone(), TaskStatus::Pending);
             count += 1;
         }
     }
@@ -109,18 +146,23 @@ pub enum IterationOutcome {
 /// 3. Select the next eligible pending task.
 /// 4. Mark the selected task as `InProgress` and update `state`.
 ///
-/// The caller is responsible for loading tasks and state beforehand and
-/// persisting them afterward (via file I/O, API calls, etc.).
+/// Status changes are recorded in `state.task_statuses` so that task
+/// definition files remain stateless.  The caller is responsible for loading
+/// tasks and state beforehand and persisting them afterward (via file I/O,
+/// API calls, etc.).
 pub fn advance_iteration(
     tasks: &mut [Task],
     state: &mut HeadlessState,
     now_secs: u64,
 ) -> IterationOutcome {
     // Step 1: Reset completed recurring tasks.
-    reset_recurring_tasks(tasks, now_secs);
+    reset_recurring_tasks(tasks, state, now_secs);
 
     // Step 2: Check if all tasks are complete.
-    let all_done = !tasks.is_empty() && tasks.iter().all(|t| t.status == TaskStatus::Completed);
+    let all_done = !tasks.is_empty()
+        && tasks
+            .iter()
+            .all(|t| effective_status(t, state) == TaskStatus::Completed);
     if all_done {
         return IterationOutcome::AllComplete;
     }
@@ -134,7 +176,9 @@ pub fn advance_iteration(
     // Step 4: Advance state.
     let task_id = tasks[next_idx].id.clone();
     let task_desc = tasks[next_idx].description.clone();
-    tasks[next_idx].status = TaskStatus::InProgress;
+    state
+        .task_statuses
+        .insert(task_id.clone(), TaskStatus::InProgress);
     state.phase = AgentPhase::NeedsTrigger;
     state.current_task_id = Some(task_id.clone());
     state.iteration += 1;
@@ -172,6 +216,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }
     }
 
@@ -242,9 +287,13 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        let count = reset_recurring_tasks(&mut tasks, 200);
+        let mut state = HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 200);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::Pending);
     }
 
     #[test]
@@ -256,21 +305,26 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        let count = reset_recurring_tasks(&mut tasks, 200);
+        let mut state = HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 200);
         assert_eq!(count, 0);
-        assert_eq!(tasks[0].status, TaskStatus::Completed);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::Completed);
 
-        let count = reset_recurring_tasks(&mut tasks, 3800);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 3800);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::Pending);
     }
 
     #[test]
     fn reset_recurring_skips_milestone() {
         let mut tasks = vec![make_task("a", TaskStatus::Completed, 1, vec![])];
-        let count = reset_recurring_tasks(&mut tasks, 9999);
+        let mut state = HeadlessState::default();
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 9999);
         assert_eq!(count, 0);
-        assert_eq!(tasks[0].status, TaskStatus::Completed);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::Completed);
     }
 
     #[test]
@@ -281,9 +335,13 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        let count = reset_recurring_tasks(&mut tasks, 101);
+        let mut state = HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 101);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::Pending);
     }
 
     #[test]
@@ -300,7 +358,8 @@ mod tests {
                 t
             },
         ];
-        let count = reset_recurring_tasks(&mut tasks, 9999);
+        let mut state = HeadlessState::default();
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 9999);
         assert_eq!(count, 0);
     }
 
@@ -313,9 +372,13 @@ mod tests {
             // last_attempt_at is None — cooldown should still block reset.
             t
         }];
-        let count = reset_recurring_tasks(&mut tasks, 9999);
+        let mut state = HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 9999);
         assert_eq!(count, 0);
-        assert_eq!(tasks[0].status, TaskStatus::Completed);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::Completed);
     }
 
     // ---- advance_iteration tests ----
@@ -336,7 +399,7 @@ mod tests {
                 task_description: "task a".into(),
             }
         );
-        assert_eq!(tasks[0].status, TaskStatus::InProgress);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::InProgress);
         assert_eq!(state.current_task_id, Some("a".into()));
         assert_eq!(state.iteration, 1);
         assert_eq!(state.phase, AgentPhase::NeedsTrigger);
@@ -377,6 +440,9 @@ mod tests {
             t
         }];
         let mut state = HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
         let outcome = advance_iteration(&mut tasks, &mut state, 200);
         // The recurring task should have been reset to Pending, then selected.
         assert_eq!(
@@ -386,6 +452,35 @@ mod tests {
                 task_description: "task a".into(),
             }
         );
-        assert_eq!(tasks[0].status, TaskStatus::InProgress);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::InProgress);
+    }
+
+    // ---- effective_status tests ----
+
+    #[test]
+    fn effective_status_uses_state_map_when_present() {
+        let task = make_task("a", TaskStatus::Pending, 1, vec![]);
+        let mut state = HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        assert_eq!(effective_status(&task, &state), TaskStatus::Completed);
+    }
+
+    #[test]
+    fn effective_status_falls_back_to_task_field() {
+        let task = make_task("a", TaskStatus::Pending, 1, vec![]);
+        let state = HeadlessState::default();
+        assert_eq!(effective_status(&task, &state), TaskStatus::Pending);
+    }
+
+    #[test]
+    fn state_map_overrides_task_status() {
+        let task = make_task("x", TaskStatus::Completed, 1, vec![]);
+        let mut state = HeadlessState::default();
+        state
+            .task_statuses
+            .insert("x".into(), TaskStatus::InProgress);
+        assert_eq!(effective_status(&task, &state), TaskStatus::InProgress);
     }
 }

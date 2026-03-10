@@ -88,6 +88,7 @@ pub enum AgentRole {
 
 /// Status of an individual task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum TaskStatus {
     Pending,
@@ -205,6 +206,17 @@ pub struct Task {
     /// Free-form labels for categorization (e.g. board columns, tags).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
+
+    /// Optional system prompt override for this specific task.
+    ///
+    /// When set, the `prompt_loader` module uses this string verbatim as the
+    /// system prompt for the agent invocation, bypassing both the global
+    /// role-based template and any file found in `prompt_dir`.
+    ///
+    /// Supports variable interpolation with `{{task_id}}`, `{{repo}}`, and
+    /// `{{role}}` placeholders (see `prompt_loader::interpolate`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_prompt_override: Option<String>,
 }
 
 fn is_default_role(r: &AgentRole) -> bool {
@@ -523,6 +535,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }
     }
 
