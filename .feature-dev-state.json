@@ -3,6 +3,8 @@
   "iteration": 33,
   "current_task_id": "ideas-semantic-evaluation",
   "issue_number": 229,
+  "pr_number": 230,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/230",
   "last_prompt": "Research and design a semantic evaluation mode for wreck-it tasks. Currently evaluation is done via shell command exit codes (`command` evaluation) or agent-created marker files (`agent-file` evaluation). Design a new `semantic` evaluation mode where the agent is prompted to read the original task description alongside the git diff produced by the implementation and returns a structured verdict (`{ passed: bool, score: u8, rationale: String }`). Review `cli/src/agent.rs` and `core/src/types.rs` (the `EvaluationMode` enum and `Task.evaluation` field) to understand how to add the new variant. Consider: what context to include in the evaluation prompt (task description, acceptance criteria, diff summary), how to parse the structured JSON verdict, how to surface the rationale in TUI and logs, and what fallback behaviour applies if the agent returns malformed output. Document the design in inline comments in a new stub file `cli/src/semantic_eval.rs`.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -232,6 +234,14 @@
     "iteration 32: agent created PR #228 for task Some(\"eval-prompt-customization\")",
     "iteration 32: marked PR #228 as ready for review",
     "iteration 32: merged PR #228 for task Some(\"eval-prompt-customization\") (brute mode)",
-    "iteration 33: triggered cloud agent for task ideas-semantic-evaluation (issue #229)"
+    "iteration 33: triggered cloud agent for task ideas-semantic-evaluation (issue #229)",
+    "iteration 33: agent opened PR #230 for task Some(\"ideas-semantic-evaluation\") (still working)"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 230,
+      "task_id": "ideas-semantic-evaluation",
+      "issue_number": 229
+    }
   ]
 }
