@@ -345,18 +345,19 @@
   {
     "id": "test-prompt-customization",
     "description": "Write unit and integration tests for the prompt customization feature implemented in `impl-prompt-customization`. In `cli/src/prompt_loader.rs` add a `#[cfg(test)]` module covering: (1) loading a role-based prompt file and verifying it overrides the default, (2) loading a per-task prompt file and verifying it takes precedence over the role file, (3) variable interpolation of `{{task_id}}`, `{{repo}}`, and `{{description}}` placeholders, (4) graceful fallback to built-in defaults when no prompt files exist. Use `tempfile::tempdir()` to create isolated test directories. Also add a test that verifies the `--prompt-dir` CLI flag is parsed correctly and populates `Config.prompt_dir`. Ensure all tests pass with `cargo test --lib`.",
-    "status": "pending",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-prompt-customization"
     ],
     "priority": 4,
-    "complexity": 3
+    "complexity": 3,
+    "last_attempt_at": 1773178362
   },
   {
     "id": "eval-prompt-customization",
     "description": "Evaluate the prompt customization feature end-to-end. Create a minimal `.wreck-it/prompts/ideas.md` file containing a custom role prompt in this repository, run a dry-run or unit-level test to confirm `PromptLoader` picks it up and substitutes variables correctly. Verify that the fallback path works when the file is absent. Review the implementation in `cli/src/prompt_loader.rs` for correctness of variable substitution logic and confirm no regressions in existing agent behaviour by running `cargo test --lib`. Write a brief evaluation summary as a comment block at the top of `cli/src/prompt_loader.rs` noting test results, edge cases handled, and any follow-up improvements.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
