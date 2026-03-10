@@ -20,13 +20,18 @@ mod artefact_store;
 mod cli;
 mod cloud_agent;
 mod config_manager;
+mod cost_tracker;
 mod gastown_client;
 mod github_auth;
+mod github_client;
+mod graph;
 mod headless;
 mod headless_config;
 mod headless_state;
+mod install;
 #[cfg(test)]
 mod integration_eval;
+mod notifier;
 mod openclaw;
 mod plan_migration;
 mod plan_wizard;
@@ -36,6 +41,7 @@ mod ralph_loop;
 mod replanner;
 mod repo_config;
 mod state_worktree;
+mod task_cli;
 mod templates;
 mod tui;
 

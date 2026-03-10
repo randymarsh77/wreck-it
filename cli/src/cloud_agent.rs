@@ -653,7 +653,7 @@ impl CloudAgentClient {
             variables["agentAssignment"] = serde_json::json!({ "baseRef": base_ref });
         }
         let query = serde_json::json!({
-            "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!, $agentAssignment: CopilotAgentAssignmentInput) {
+            "query": r#"mutation($assignableId: ID!, $assigneeIds: [ID!]!, $agentAssignment: AgentAssignmentInput) {
                 addAssigneesToAssignable(input: {
                     assignableId: $assignableId,
                     assigneeIds: $assigneeIds,
@@ -1331,10 +1331,12 @@ impl CloudAgentClient {
 
     /// Approve any pending workflow runs for a pull request.
     ///
-    /// When a repo requires approval for Actions (e.g. first-time contributors
-    /// or fork PRs), workflow runs sit in `action_required` status until
-    /// explicitly approved.  This method fetches the PR's head SHA, lists
-    /// workflow runs for that commit, and approves every run that is waiting.
+    /// When a repo requires approval for Actions (e.g. first-time contributors,
+    /// outside collaborators, or fork PRs), workflow runs may sit in
+    /// `action_required`, `pending`, or `waiting` status until explicitly
+    /// approved.  This method fetches the PR's head SHA, lists workflow runs
+    /// for that commit across all three statuses, and approves every run that
+    /// is waiting.
     pub async fn approve_pending_workflow_runs(&self, pr_number: u64) -> Result<()> {
         // Fetch the PR to obtain the head SHA.
         let pr_url = format!(
@@ -1369,49 +1371,96 @@ impl CloudAgentClient {
             .and_then(|v| v.as_str())
             .context("Missing head SHA in PR response")?;
 
-        // List workflow runs for the head SHA that need approval.
-        let runs_url = format!(
-            "{}/repos/{}/{}/actions/runs?head_sha={}&status=action_required",
-            GITHUB_API_BASE, self.repo_owner, self.repo_name, head_sha,
-        );
+        // Query workflow runs across all statuses that may indicate a run is
+        // waiting for approval.  Depending on the repository configuration,
+        // GitHub may place pending runs in `action_required` (fork PRs),
+        // `pending` (first-time contributors), or `waiting` (outside
+        // collaborators / deployment protection rules).
+        let mut all_run_ids: Vec<u64> = Vec::new();
 
-        let runs_resp = self
-            .http
-            .get(&runs_url)
-            .header("Authorization", format!("Bearer {}", self.github_token))
-            .header("User-Agent", "wreck-it")
-            .header("Accept", "application/vnd.github+json")
-            .send()
-            .await
-            .context("Failed to list workflow runs")?;
-
-        if !runs_resp.status().is_success() {
-            tracing::warn!(
-                "Failed to list workflow runs for PR #{} ({})",
-                pr_number,
-                runs_resp.status(),
+        for status_filter in &["action_required", "pending", "waiting"] {
+            let runs_url = format!(
+                "{}/repos/{}/{}/actions/runs?head_sha={}&status={}",
+                GITHUB_API_BASE, self.repo_owner, self.repo_name, head_sha, status_filter,
             );
-            return Ok(());
+
+            let runs_resp = match self
+                .http
+                .get(&runs_url)
+                .header("Authorization", format!("Bearer {}", self.github_token))
+                .header("User-Agent", "wreck-it")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to list {} workflow runs for PR #{}: {}",
+                        status_filter,
+                        pr_number,
+                        e,
+                    );
+                    continue;
+                }
+            };
+
+            if !runs_resp.status().is_success() {
+                let status = runs_resp.status();
+                let body = runs_resp.text().await.unwrap_or_default();
+                tracing::warn!(
+                    "Failed to list {} workflow runs for PR #{} ({}): {}",
+                    status_filter,
+                    pr_number,
+                    status,
+                    body,
+                );
+                continue;
+            }
+
+            let runs: serde_json::Value = match runs_resp.json().await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to parse {} workflow runs response for PR #{}: {}",
+                        status_filter,
+                        pr_number,
+                        e,
+                    );
+                    continue;
+                }
+            };
+
+            if let Some(arr) = runs["workflow_runs"].as_array() {
+                for run in arr {
+                    if let Some(id) = run["id"].as_u64() {
+                        if !all_run_ids.contains(&id) {
+                            let name = run["name"].as_str().unwrap_or("unknown");
+                            tracing::info!(
+                                "Found {} workflow run {} (name={}) for PR #{}",
+                                status_filter,
+                                id,
+                                name,
+                                pr_number,
+                            );
+                            all_run_ids.push(id);
+                        }
+                    }
+                }
+            }
         }
 
-        let runs: serde_json::Value = runs_resp.json().await?;
-        let run_ids: Vec<u64> = match runs["workflow_runs"].as_array() {
-            Some(arr) => arr.iter().filter_map(|r| r["id"].as_u64()).collect(),
-            None => {
-                tracing::warn!(
-                    "Unexpected workflow runs response for PR #{}: missing workflow_runs array",
-                    pr_number,
-                );
-                return Ok(());
-            }
-        };
-
-        if run_ids.is_empty() {
+        if all_run_ids.is_empty() {
             tracing::debug!("No workflow runs awaiting approval for PR #{}", pr_number);
             return Ok(());
         }
 
-        for run_id in &run_ids {
+        let mut approved_count: usize = 0;
+
+        for run_id in &all_run_ids {
+            // Attempt the REST approval endpoint.  This is the standard
+            // mechanism for approving workflow runs that require manual
+            // approval (fork PRs, first-time contributors, etc.).
             let approve_url = format!(
                 "{}/repos/{}/{}/actions/runs/{}/approve",
                 GITHUB_API_BASE, self.repo_owner, self.repo_name, run_id,
@@ -1427,33 +1476,171 @@ impl CloudAgentClient {
                 .await
             {
                 Ok(resp) if resp.status().is_success() => {
-                    tracing::info!("Approved workflow run {} for PR #{}", run_id, pr_number,);
-                }
-                Ok(resp) => {
-                    tracing::warn!(
-                        "Failed to approve workflow run {} for PR #{} ({})",
+                    tracing::info!(
+                        "Approved workflow run {} via REST for PR #{}",
                         run_id,
                         pr_number,
-                        resp.status(),
+                    );
+                    approved_count += 1;
+                    continue;
+                }
+                Ok(resp) => {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    tracing::debug!(
+                        "REST approve returned {} for workflow run {} on PR #{}: {}",
+                        status,
+                        run_id,
+                        pr_number,
+                        body,
                     );
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "HTTP error approving workflow run {} for PR #{}: {}",
+                        "HTTP error on REST approve for workflow run {} on PR #{}: {}",
                         run_id,
                         pr_number,
                         e,
                     );
                 }
             }
+
+            // Fall back to the pending_deployments endpoint.  This handles
+            // runs in `waiting` status (deployment protection rules) as well
+            // as other cases where the `/approve` endpoint is not sufficient.
+            if self.approve_pending_deployments(*run_id, pr_number).await {
+                approved_count += 1;
+            }
         }
 
-        tracing::info!(
-            "Approved {} pending workflow run(s) for PR #{}",
-            run_ids.len(),
-            pr_number,
-        );
+        if approved_count > 0 {
+            tracing::info!(
+                "Approved {} of {} pending workflow run(s) for PR #{}",
+                approved_count,
+                all_run_ids.len(),
+                pr_number,
+            );
+        } else {
+            tracing::warn!(
+                "Found {} pending workflow run(s) for PR #{} but could not approve any",
+                all_run_ids.len(),
+                pr_number,
+            );
+        }
         Ok(())
+    }
+
+    /// Attempt to approve pending deployments for a workflow run.
+    ///
+    /// When a workflow run is in `waiting` status due to deployment protection
+    /// rules, the standard `/approve` endpoint does not work.  Instead we
+    /// must query the pending deployments and approve each environment.
+    async fn approve_pending_deployments(&self, run_id: u64, pr_number: u64) -> bool {
+        let pending_url = format!(
+            "{}/repos/{}/{}/actions/runs/{}/pending_deployments",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, run_id,
+        );
+
+        let pending_resp = match self
+            .http
+            .get(&pending_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to fetch pending deployments for run {} (PR #{}): {}",
+                    run_id,
+                    pr_number,
+                    e,
+                );
+                return false;
+            }
+        };
+
+        if !pending_resp.status().is_success() {
+            tracing::debug!(
+                "Pending deployments request failed for run {} (PR #{}) ({})",
+                run_id,
+                pr_number,
+                pending_resp.status(),
+            );
+            return false;
+        }
+
+        let deployments: serde_json::Value = match pending_resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to parse pending deployments for run {} (PR #{}): {}",
+                    run_id,
+                    pr_number,
+                    e,
+                );
+                return false;
+            }
+        };
+
+        let env_ids: Vec<u64> = deployments
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|d| d.pointer("/environment/id").and_then(|v| v.as_u64()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if env_ids.is_empty() {
+            return false;
+        }
+
+        let approve_body = serde_json::json!({
+            "environment_ids": env_ids,
+            "state": "approved",
+            "comment": "Approved by wreck-it",
+        });
+
+        match self
+            .http
+            .post(&pending_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&approve_body)
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                tracing::info!(
+                    "Approved pending deployments for workflow run {} (PR #{})",
+                    run_id,
+                    pr_number,
+                );
+                true
+            }
+            Ok(resp) => {
+                tracing::warn!(
+                    "Failed to approve pending deployments for run {} (PR #{}) ({})",
+                    run_id,
+                    pr_number,
+                    resp.status(),
+                );
+                false
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "HTTP error approving pending deployments for run {} (PR #{}): {}",
+                    run_id,
+                    pr_number,
+                    e,
+                );
+                false
+            }
+        }
     }
 
     /// Merge a pull request using a squash merge.
@@ -1522,7 +1709,7 @@ impl CloudAgentClient {
             .and_then(|v| v.as_str())
             .unwrap_or("main");
 
-        // Check branch protection for required status checks.
+        // Check legacy branch protection for required status checks.
         let protection_url = format!(
             "{}/repos/{}/{}/branches/{}/protection/required_status_checks",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, base_branch,
@@ -1538,17 +1725,106 @@ impl CloudAgentClient {
             .await
             .context("Failed to check branch protection")?;
 
-        // 404 means no branch protection or no required status checks.
-        if resp.status().as_u16() == 404 {
-            return Ok(false);
+        if resp.status().is_success() {
+            // Legacy branch protection has required status checks.
+            return Ok(true);
         }
-        if !resp.status().is_success() {
-            // Treat unexpected errors as "no required checks" to avoid blocking.
+
+        // Legacy branch protection didn't report required checks.  Fall back
+        // to the repository rulesets API which covers the newer GitHub
+        // rulesets that are not reflected by the legacy endpoint.
+        let rules_url = format!(
+            "{}/repos/{}/{}/rules/branches/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, base_branch,
+        );
+
+        let rules_resp = self
+            .http
+            .get(&rules_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to check repository rulesets")?;
+
+        if !rules_resp.status().is_success() {
             return Ok(false);
         }
 
-        // If the endpoint returns successfully, required status checks exist.
-        Ok(true)
+        let rules: serde_json::Value = rules_resp.json().await?;
+        if let Some(arr) = rules.as_array() {
+            for rule in arr {
+                if rule["type"].as_str() == Some("required_status_checks") {
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Check whether the head commit of a pull request has any check runs
+    /// that are still queued or in progress.
+    ///
+    /// Returns `true` when at least one check run is pending (not yet
+    /// completed), `false` otherwise.
+    pub async fn has_pending_checks_for_pr(&self, pr_number: u64) -> Result<bool> {
+        // Fetch the PR to obtain the head SHA.
+        let pr_url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let pr_resp = self
+            .http
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for head SHA")?;
+
+        if !pr_resp.status().is_success() {
+            return Ok(false);
+        }
+
+        let pr: serde_json::Value = pr_resp.json().await?;
+        let head_sha = pr
+            .pointer("/head/sha")
+            .and_then(|v| v.as_str())
+            .context("Missing head SHA in PR response")?;
+
+        // Check for queued check runs.
+        for status in &["queued", "in_progress"] {
+            let checks_url = format!(
+                "{}/repos/{}/{}/commits/{}/check-runs?status={}&per_page=1",
+                GITHUB_API_BASE, self.repo_owner, self.repo_name, head_sha, status,
+            );
+
+            let resp = self
+                .http
+                .get(&checks_url)
+                .header("Authorization", format!("Bearer {}", self.github_token))
+                .header("User-Agent", "wreck-it")
+                .header("Accept", "application/vnd.github+json")
+                .send()
+                .await
+                .context("Failed to list check runs")?;
+
+            if !resp.status().is_success() {
+                continue;
+            }
+
+            let body: serde_json::Value = resp.json().await?;
+            let count = body["total_count"].as_u64().unwrap_or(0);
+            if count > 0 {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     /// Check whether the head commit of a pull request has any failing
@@ -1739,6 +2015,97 @@ impl CloudAgentClient {
         }
 
         tracing::info!("Enabled auto-merge for PR #{}", pr_number);
+        Ok(())
+    }
+
+    /// Disable auto-merge on a pull request.
+    ///
+    /// Uses the GraphQL `disablePullRequestAutoMerge` mutation so that
+    /// GitHub stops waiting for checks to pass before merging.  This is
+    /// used in "brute mode" to clear any previously-enabled auto-merge
+    /// before performing a direct merge.
+    pub async fn disable_auto_merge(&self, pr_number: u64) -> Result<()> {
+        // Fetch the PR to obtain the GraphQL node_id.
+        let pr_url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let pr_resp = self
+            .http
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR for node_id")?;
+
+        if !pr_resp.status().is_success() {
+            let status = pr_resp.status();
+            let body = pr_resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch PR #{} for node_id ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let pr: serde_json::Value = pr_resp.json().await?;
+        let node_id = pr["node_id"]
+            .as_str()
+            .context("Missing node_id in PR response")?;
+
+        // Use the GraphQL API to disable auto-merge.
+        let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let query = serde_json::json!({
+            "query": concat!(
+                "mutation($prId: ID!) { ",
+                  "disablePullRequestAutoMerge(input: { ",
+                    "pullRequestId: $prId ",
+                  "}) { ",
+                    "pullRequest { autoMergeRequest { enabledAt } } ",
+                  "} ",
+                "}"
+            ),
+            "variables": { "prId": node_id },
+        });
+
+        let resp = self
+            .http
+            .post(&graphql_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .json(&query)
+            .send()
+            .await
+            .context("Failed to call GraphQL disablePullRequestAutoMerge")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "GraphQL request failed for PR #{} ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let gql_resp: serde_json::Value = resp.json().await?;
+
+        // Check for GraphQL-level errors.
+        if let Some(errors) = gql_resp.get("errors") {
+            bail!(
+                "GraphQL errors disabling auto-merge for PR #{}: {}",
+                pr_number,
+                errors,
+            );
+        }
+
+        tracing::info!("Disabled auto-merge for PR #{}", pr_number);
         Ok(())
     }
 
@@ -2029,7 +2396,6 @@ impl CloudAgentClient {
     }
 
     /// List all open pull requests in the repository.
-    #[allow(dead_code)]
     pub async fn list_open_prs(&self) -> Result<Vec<OpenPr>> {
         let mut prs = Vec::new();
         let mut page = 1u32;
@@ -2078,6 +2444,135 @@ impl CloudAgentClient {
         }
 
         Ok(prs)
+    }
+
+    /// Fetch the raw JSON representation of a pull request.
+    pub async fn fetch_pr_json(&self, pr_number: u64) -> Result<serde_json::Value> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR JSON")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Failed to fetch PR #{} ({}): {}", pr_number, status, body);
+        }
+
+        Ok(resp.json().await?)
+    }
+
+    /// Fetch the most recent commit messages on a branch.
+    ///
+    /// Returns a newline-separated string of `<sha_short> <message>` lines.
+    pub async fn fetch_recent_commits(
+        &self,
+        branch: &str,
+        count: u32,
+    ) -> Result<String> {
+        let url = format!(
+            "{}/repos/{}/{}/commits?sha={}&per_page={}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, branch, count,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch recent commits")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch commits for branch {} ({}): {}",
+                branch,
+                status,
+                body,
+            );
+        }
+
+        let items: Vec<serde_json::Value> = resp.json().await?;
+        let lines: Vec<String> = items
+            .iter()
+            .filter_map(|c| {
+                let sha = c["sha"].as_str().unwrap_or("").get(..7).unwrap_or("");
+                let msg = c
+                    .pointer("/commit/message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let first_line = msg.lines().next().unwrap_or("");
+                if sha.is_empty() {
+                    None
+                } else {
+                    Some(format!("{} {}", sha, first_line))
+                }
+            })
+            .collect();
+
+        Ok(lines.join("\n"))
+    }
+
+    /// Fetch a summary of files changed in a pull request.
+    ///
+    /// Returns a newline-separated `<filename> | <changes> <status>` summary.
+    pub async fn fetch_pr_files_summary(&self, pr_number: u64) -> Result<String> {
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}/files?per_page=100",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to fetch PR files")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!(
+                "Failed to fetch files for PR #{} ({}): {}",
+                pr_number,
+                status,
+                body,
+            );
+        }
+
+        let items: Vec<serde_json::Value> = resp.json().await?;
+        let lines: Vec<String> = items
+            .iter()
+            .filter_map(|f| {
+                let filename = f["filename"].as_str().unwrap_or("");
+                let changes = f["changes"].as_u64().unwrap_or(0);
+                let status = f["status"].as_str().unwrap_or("modified");
+                if filename.is_empty() {
+                    None
+                } else {
+                    Some(format!("{} | {} {}", filename, changes, status))
+                }
+            })
+            .collect();
+
+        Ok(lines.join("\n"))
     }
 }
 

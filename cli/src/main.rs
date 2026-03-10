@@ -4,13 +4,18 @@ mod artefact_store;
 mod cli;
 mod cloud_agent;
 mod config_manager;
+mod cost_tracker;
 mod gastown_client;
 mod github_auth;
+mod github_client;
+mod graph;
 mod headless;
 mod headless_config;
 mod headless_state;
+mod install;
 #[cfg(test)]
 mod integration_eval;
+mod notifier;
 mod openclaw;
 mod plan_migration;
 mod plan_wizard;
@@ -20,14 +25,17 @@ mod ralph_loop;
 mod replanner;
 mod repo_config;
 mod state_worktree;
+mod task_cli;
 mod task_manager;
 mod templates;
 mod tui;
 mod types;
+mod merge;
+mod unstuck;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands};
+use cli::{Cli, Commands, TasksAction};
 use config_manager::{load_user_config, save_user_config};
 use ralph_loop::RalphLoop;
 use repo_config::{
@@ -71,6 +79,12 @@ async fn main() -> Result<()> {
             reflection_rounds,
             replan_threshold,
             max_autopilot_continues,
+            notify_webhooks,
+            github_issues,
+            github_repo,
+            github_token,
+            max_cost_usd,
+            work_dir_map,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -189,6 +203,38 @@ async fn main() -> Result<()> {
                     .or_else(|| env::var("GITHUB_TOKEN").ok());
 
                 config
+                    .notify_webhooks
+                    .extend(notify_webhooks.iter().cloned());
+
+                if github_issues {
+                    config.github_issues_enabled = true;
+                }
+                if let Some(repo) = &github_repo {
+                    config.github_repo = Some(repo.clone());
+                }
+                if let Some(token) = &github_token {
+                    config.github_token = Some(token.clone());
+                }
+                if let Some(cost) = max_cost_usd {
+                    config.max_cost_usd = Some(cost);
+                }
+
+                // Parse `KEY=PATH` pairs from --work-dir-map into the config map.
+                for entry in &work_dir_map {
+                    if let Some((key, path)) = entry.split_once('=') {
+                        config
+                            .work_dirs
+                            .insert(key.to_string(), path.to_string());
+                    } else {
+                        eprintln!(
+                            "Warning: ignoring malformed --work-dir-map entry '{}' \
+                             (expected ROLE_OR_ID=PATH)",
+                            entry
+                        );
+                    }
+                }
+
+                config
             };
 
             if ralph_list.is_empty() {
@@ -231,7 +277,23 @@ async fn main() -> Result<()> {
                     let config = build_config(Some(rc));
                     save_user_config(&config)?;
 
-                    if headless {
+                    if rc.command.as_deref() == Some("unstuck") {
+                        if let Err(e) = unstuck::run_unstuck(&config).await {
+                            println!(
+                                "[wreck-it] ralph '{}' (unstuck) failed: {}. Continuing…",
+                                rc.name, e
+                            );
+                        }
+                    } else if rc.command.as_deref() == Some("merge") {
+                        if let Err(e) =
+                            merge::run_merge(&config, rc.backend.as_deref()).await
+                        {
+                            println!(
+                                "[wreck-it] ralph '{}' (merge) failed: {}. Continuing…",
+                                rc.name, e
+                            );
+                        }
+                    } else if headless {
                         if let Err(e) = headless::run_headless(config, Some(rc)).await {
                             println!("[wreck-it] ralph '{}' failed: {}. Continuing…", rc.name, e);
                         }
@@ -352,6 +414,9 @@ async fn main() -> Result<()> {
                         branch: None,
                         agent: None,
                         reviewers: None,
+                        command: None,
+                        brute_mode: None,
+                        backend: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -447,6 +512,9 @@ async fn main() -> Result<()> {
                         branch: None,
                         agent: None,
                         reviewers: None,
+                        command: None,
+                        brute_mode: None,
+                        backend: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -553,6 +621,8 @@ async fn main() -> Result<()> {
                     depends_on: vec![],
                     priority: 0,
                     complexity: 1,
+                    timeout_seconds: None,
+                    max_retries: None,
                     failed_attempts: 0,
                     last_attempt_at: None,
                     inputs: vec![],
@@ -573,6 +643,8 @@ async fn main() -> Result<()> {
                     depends_on: vec![],
                     priority: 0,
                     complexity: 1,
+                    timeout_seconds: None,
+                    max_retries: None,
                     failed_attempts: 0,
                     last_attempt_at: None,
                     inputs: vec![],
@@ -593,6 +665,8 @@ async fn main() -> Result<()> {
                     depends_on: vec!["1".to_string(), "2".to_string()],
                     priority: 0,
                     complexity: 1,
+                    timeout_seconds: None,
+                    max_retries: None,
                     failed_attempts: 0,
                     last_attempt_at: None,
                     inputs: vec![],
@@ -754,6 +828,202 @@ async fn main() -> Result<()> {
                 None => println!("{}", json),
             }
         }
+
+        Commands::Install { work_dir } => {
+            let target = work_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            let result = install::install(&target)?;
+
+            if !result.written.is_empty() {
+                println!("Created:");
+                for f in &result.written {
+                    println!("  {}", f);
+                }
+            }
+            if !result.skipped.is_empty() {
+                println!("Skipped (already exist):");
+                for f in &result.skipped {
+                    println!("  {}", f);
+                }
+            }
+            if !result.ralphs_added.is_empty() {
+                println!("Added ralph contexts:");
+                for r in &result.ralphs_added {
+                    println!("  {}", r);
+                }
+            }
+            if result.written.is_empty() && result.ralphs_added.is_empty() {
+                println!("wreck-it is already installed.");
+            } else {
+                println!(
+                    "\nInstallation complete! Configure PAT_TOKEN secret and enable workflows."
+                );
+            }
+        }
+
+        Commands::Unstuck { work_dir } => {
+            let resolved_work_dir =
+                work_dir.unwrap_or_else(|| env::current_dir().unwrap_or_default());
+
+            let mut config = load_user_config().unwrap_or_default();
+            config.work_dir = resolved_work_dir;
+            config.api_token = config.api_token.or_else(|| env::var("GITHUB_TOKEN").ok());
+
+            unstuck::run_unstuck(&config).await?;
+        }
+
+        Commands::Merge { work_dir, backend } => {
+            let resolved_work_dir =
+                work_dir.unwrap_or_else(|| env::current_dir().unwrap_or_default());
+
+            let mut config = load_user_config().unwrap_or_default();
+            config.work_dir = resolved_work_dir;
+            config.api_token = config.api_token.or_else(|| env::var("GITHUB_TOKEN").ok());
+
+            merge::run_merge(&config, Some(&backend)).await?;
+        }
+
+        Commands::Graph {
+            task_file,
+            format,
+            output,
+        } => {
+            let tasks = task_manager::load_tasks(&task_file)
+                .with_context(|| format!("Failed to load task file: {}", task_file.display()))?;
+            // Warn about circular dependencies before rendering.
+            let cycles = graph::detect_cycles(&tasks);
+            for cycle in &cycles {
+                tracing::warn!("Circular dependency detected: {}", cycle.join(" -> "));
+            }
+            let content = match format {
+                graph::GraphFormat::Mermaid => graph::generate_mermaid(&tasks),
+                graph::GraphFormat::Dot => graph::generate_dot(&tasks),
+            };
+            match output {
+                Some(path) => {
+                    std::fs::write(&path, &content)
+                        .with_context(|| format!("Failed to write graph to {}", path.display()))?;
+                    println!("Graph written to {}", path.display());
+                }
+                None => print!("{content}"),
+            }
+        }
+
+        Commands::Tasks { action } => match action {
+            // ── tasks list ───────────────────────────────────────────────
+            TasksAction::List { task_file, status } => {
+                let tasks = task_manager::load_tasks(&task_file).with_context(|| {
+                    format!("Failed to load task file: {}", task_file.display())
+                })?;
+
+                let filtered = task_cli::filter_tasks_by_status(&tasks, status);
+
+                if filtered.is_empty() {
+                    println!("No tasks found.");
+                } else {
+                    // Column widths (minimum header width, grow to content).
+                    let id_w = filtered
+                        .iter()
+                        .map(|t| t.id.len())
+                        .max()
+                        .unwrap_or(2)
+                        .max(2);
+                    let status_w = 11; // "in-progress"
+                    let role_w = 11; // "implementer"
+
+                    println!(
+                        "{:<id_w$}  {:<status_w$}  {:<role_w$}  {:>5}  {:>8}  DEPENDS_ON",
+                        "ID",
+                        "STATUS",
+                        "ROLE",
+                        "PHASE",
+                        "PRIORITY",
+                        id_w = id_w,
+                        status_w = status_w,
+                        role_w = role_w,
+                    );
+                    println!("{}", "-".repeat(id_w + status_w + role_w + 30));
+                    for t in &filtered {
+                        println!(
+                            "{}",
+                            task_cli::format_task_row(t, id_w, status_w, role_w)
+                        );
+                    }
+                    println!("\n{} task(s) listed.", filtered.len());
+                }
+            }
+
+            // ── tasks add ────────────────────────────────────────────────
+            TasksAction::Add {
+                task_file,
+                id,
+                description,
+                role,
+                phase,
+                priority,
+                depends_on,
+            } => {
+                let new_task = Task {
+                    id: id.clone(),
+                    description,
+                    status: types::TaskStatus::Pending,
+                    role,
+                    kind: types::TaskKind::default(),
+                    cooldown_seconds: None,
+                    phase,
+                    depends_on,
+                    priority,
+                    complexity: 1,
+                    timeout_seconds: None,
+                    max_retries: None,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
+                    inputs: vec![],
+                    outputs: vec![],
+                    runtime: types::TaskRuntime::default(),
+                    precondition_prompt: None,
+                    parent_id: None,
+                    labels: vec![],
+                };
+                task_manager::append_task(&task_file, new_task)?;
+                println!("Task '{}' added to {}.", id, task_file.display());
+            }
+
+            // ── tasks set-status ─────────────────────────────────────────
+            TasksAction::SetStatus {
+                task_file,
+                id,
+                status,
+            } => {
+                task_manager::set_task_status(&task_file, &id, status)?;
+                println!("Task '{}' status updated.", id);
+            }
+
+            // ── tasks validate ───────────────────────────────────────────
+            TasksAction::Validate { task_file } => {
+                let tasks = task_manager::load_tasks(&task_file).with_context(|| {
+                    format!("Failed to load task file: {}", task_file.display())
+                })?;
+
+                let issues = task_manager::validate_tasks(&tasks);
+
+                if issues.is_empty() {
+                    println!(
+                        "Task file '{}' is valid ({} task(s)).",
+                        task_file.display(),
+                        tasks.len()
+                    );
+                } else {
+                    for issue in &issues {
+                        eprintln!("error: {}", issue);
+                    }
+                    anyhow::bail!(
+                        "{} validation error(s) found in '{}'",
+                        issues.len(),
+                        task_file.display()
+                    );
+                }
+            }
+        },
     }
 
     Ok(())

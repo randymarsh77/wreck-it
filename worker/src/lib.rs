@@ -57,6 +57,28 @@ fn is_trusted_pr_author(pr: &types::PullRequest, authenticated_login: Option<&st
     wreck_it_core::types::is_trusted_pr_author(login, authenticated_login)
 }
 
+/// Determine whether a pull request webhook event should be processed.
+///
+/// Returns `true` for:
+///   - `closed` + `merged == true` (task completion signal)
+///   - `opened`, `ready_for_review`, `synchronize` (workflow approval)
+///
+/// In all cases the PR must be from a trusted author.
+fn should_process_pr_event(
+    action: &str,
+    pr: &types::PullRequest,
+    authenticated_login: Option<&str>,
+) -> bool {
+    if !is_trusted_pr_author(pr, authenticated_login) {
+        return false;
+    }
+    let merged = pr.merged.unwrap_or(false);
+    // Workflow-approval actions (approve pending runs + enable auto-merge).
+    ["opened", "ready_for_review", "synchronize"].contains(&action)
+        // Task-completion action (merged PR).
+        || (action == "closed" && merged)
+}
+
 #[event(fetch)]
 async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     // Only accept POST requests at the webhook endpoint.
@@ -164,22 +186,12 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
             true
         }
         WebhookEvent::PullRequest => {
-            // Process when a PR is merged (task completion signal), but
-            // only if the PR was opened by a known coding agent or the
-            // authenticated user.  This prevents an attacker from marking
-            // tasks as complete by getting an unauthorized PR merged.
             let action = payload.action.as_deref().unwrap_or("");
-            let merged = payload
+            payload
                 .pull_request
                 .as_ref()
-                .and_then(|pr| pr.merged)
-                .unwrap_or(false);
-            let trusted = payload
-                .pull_request
-                .as_ref()
-                .map(|pr| is_trusted_pr_author(pr, auth_login_ref))
-                .unwrap_or(false);
-            action == "closed" && merged && trusted
+                .map(|pr| should_process_pr_event(action, pr, auth_login_ref))
+                .unwrap_or(false)
         }
         _ => false,
     };
@@ -201,20 +213,66 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return Response::ok("no wreck-it configuration found; skipping");
     }
 
-    // For merged PR events, handle task completion and PR management.
-    // Note: the `should_process` check above already filters PullRequest events
-    // to only those with action == "closed" && merged == true.
+    // For PR events from trusted authors, approve pending workflow runs
+    // and enable auto-merge when required checks are detected.  This
+    // handles the case where workflow runs need explicit approval before
+    // they can execute (e.g. first-time contributors, outside
+    // collaborators, or fork PRs).
     if event == WebhookEvent::PullRequest {
         if let Some(pr) = &payload.pull_request {
-            match processor::process_merged_pr(&client, default_branch, pr.number).await {
-                Ok(result) => {
-                    let status = if result.changed { "processed" } else { "no-op" };
-                    return Response::ok(format!("pr-merged {status}: {}", result.summary));
+            let action = payload.action.as_deref().unwrap_or("");
+            let merged = pr.merged.unwrap_or(false);
+
+            if action == "closed" && merged {
+                // Merged PR — handle task completion.
+                match processor::process_merged_pr(&client, default_branch, pr.number).await {
+                    Ok(result) => {
+                        let status = if result.changed { "processed" } else { "no-op" };
+                        return Response::ok(format!("pr-merged {status}: {}", result.summary));
+                    }
+                    Err(e) => {
+                        console_error!("PR merge handling failed: {e}");
+                        // Fall through to the normal iteration processing.
+                    }
                 }
-                Err(e) => {
-                    console_error!("PR merge handling failed: {e}");
-                    // Fall through to the normal iteration processing.
+            } else {
+                // Non-merged PR event (opened, ready_for_review, synchronize)
+                // — approve pending workflow runs so required checks can
+                // execute, then enable auto-merge.
+                let pr_number = pr.number;
+                if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                    console_warn!(
+                        "Failed to approve workflow runs for PR #{}: {}",
+                        pr_number,
+                        e,
+                    );
                 }
+
+                // Enable auto-merge when the base branch has required checks.
+                match client.has_required_checks_for_pr(pr_number).await {
+                    Ok(true) => {
+                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                            console_warn!(
+                                "Failed to enable auto-merge for PR #{}: {}",
+                                pr_number,
+                                e,
+                            );
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(e) => {
+                        console_warn!(
+                            "Failed to check required checks for PR #{}: {}",
+                            pr_number,
+                            e,
+                        );
+                    }
+                }
+
+                return Response::ok(format!(
+                    "pr-workflow-approval: processed PR #{} ({})",
+                    pr_number, action,
+                ));
             }
         }
     }
@@ -504,5 +562,79 @@ mod tests {
     fn untrusted_pr_author_login_mismatch() {
         let pr = make_pr("attacker", "User");
         assert!(!is_trusted_pr_author(&pr, Some("my-user")));
+    }
+
+    // ---- should_process_pr_event ----
+
+    #[test]
+    fn process_pr_merged_trusted() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.merged = Some(true);
+        assert!(should_process_pr_event("closed", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_closed_not_merged_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(!should_process_pr_event("closed", &pr, None));
+    }
+
+    #[test]
+    fn process_pr_opened_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(should_process_pr_event("opened", &pr, None));
+    }
+
+    #[test]
+    fn process_pr_ready_for_review_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(should_process_pr_event("ready_for_review", &pr, None));
+    }
+
+    #[test]
+    fn process_pr_synchronize_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(should_process_pr_event("synchronize", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_opened_untrusted() {
+        let pr = make_pr("attacker", "User");
+        assert!(!should_process_pr_event("opened", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_ready_for_review_untrusted() {
+        let pr = make_pr("attacker", "User");
+        assert!(!should_process_pr_event("ready_for_review", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_synchronize_untrusted() {
+        let pr = make_pr("attacker", "User");
+        assert!(!should_process_pr_event("synchronize", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_unknown_action_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(!should_process_pr_event("edited", &pr, None));
+    }
+
+    #[test]
+    fn process_pr_opened_authenticated_user() {
+        let pr = make_pr("my-user", "User");
+        assert!(should_process_pr_event("opened", &pr, Some("my-user")));
+    }
+
+    #[test]
+    fn reject_pr_no_user() {
+        let pr = types::PullRequest {
+            number: 1,
+            state: "open".into(),
+            merged: None,
+            user: None,
+        };
+        assert!(!should_process_pr_event("opened", &pr, None));
     }
 }

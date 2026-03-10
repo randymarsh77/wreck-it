@@ -87,6 +87,36 @@ pub struct RalphConfig {
     /// omitted, the PR proceeds directly to merge without review.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewers: Option<Vec<String>>,
+
+    /// Optional command override for this ralph context.
+    ///
+    /// When set to `"unstuck"`, the headless runner skips the normal task
+    /// state machine and instead scans all open PRs for failing CI checks,
+    /// commenting `@copilot` to request fixes.  If omitted, the default
+    /// headless loop runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+
+    /// When `true`, enables "brute mode" for this ralph context.
+    ///
+    /// In brute mode the headless runner disables auto-merge (if it was
+    /// previously enabled) and merges pull requests directly instead of
+    /// waiting for GitHub's auto-merge to kick in once checks pass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brute_mode: Option<bool>,
+
+    /// Backend to use for this ralph context.
+    ///
+    /// Supported values:
+    /// - `"cloud_agent"` – creates a GitHub issue describing the work and
+    ///   assigns a coding agent to resolve it remotely.
+    /// - `"cli"` – performs the work locally (e.g. git merge) and pushes the
+    ///   result directly.
+    ///
+    /// When omitted, the backend defaults to `"cloud_agent"` for commands
+    /// that support it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
 }
 
 fn default_state_branch() -> String {

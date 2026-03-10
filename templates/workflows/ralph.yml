@@ -1,0 +1,48 @@
+# wreck-it ralph workflow: run wreck-it in headless mode on a schedule.
+#
+# wreck-it keeps all its artefacts (task files, state) on an orphan
+# "wreck-it-state" branch via a git worktree. The workflow checks out the
+# default branch; wreck-it automatically sets up the worktree.
+#
+# Required secrets:
+#   PAT_TOKEN – Personal Access Token with repo and models:read scopes.
+#               A PAT is required because wreck-it assigns coding agents to
+#               issues and merges agent-produced PRs — operations the default
+#               GITHUB_TOKEN cannot perform.
+name: Ralph
+
+on:
+  schedule:
+    # Run every 30 minutes
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      max_iterations:
+        description: 'Override max iterations for this run'
+        required: false
+        default: '5'
+
+concurrency:
+  group: ralph
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  models: read
+
+jobs:
+  ralph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          fetch-depth: 0
+
+      - name: Run wreck-it
+        uses: randymarsh77/wreck-it/action@main
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          INPUT_MAX_ITERATIONS: ${{ inputs.max_iterations || '100' }}

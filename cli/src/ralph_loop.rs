@@ -1,5 +1,8 @@
 use crate::agent::AgentClient;
 use crate::artefact_store;
+use crate::cost_tracker::{model_pricing, CostTracker};
+use crate::github_client;
+use crate::notifier;
 use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
@@ -8,7 +11,8 @@ use crate::types::{
     DEFAULT_AUTOPILOT_MODEL, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Error message used when evaluation/tests fail without a prior agent error.
@@ -108,11 +112,30 @@ pub struct RalphLoop {
     config: Config,
     state: LoopState,
     agent: AgentClient,
+    /// Maps task_id → GitHub issue number for open wreck-it issues.
+    /// Populated when a task moves to `InProgress` and cleared on closure.
+    github_issue_numbers: HashMap<String, u64>,
+    /// Shared cost tracker updated by every HTTP chat completion call.
+    /// Cloned into per-task agents spawned for parallel execution.
+    cost_tracker: Arc<Mutex<CostTracker>>,
 }
 
 impl RalphLoop {
     pub fn new(config: Config) -> Self {
         let max_iterations = config.max_iterations;
+
+        // Build per-model pricing from the configured model name, then create a
+        // shared cost tracker that the main agent and parallel task agents all
+        // write into.
+        let model_str = match config.model_provider {
+            ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL,
+            ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
+            ModelProvider::Copilot => "copilot",
+            ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL,
+        };
+        let (inp, out) = model_pricing(model_str);
+        let cost_tracker = Arc::new(Mutex::new(CostTracker::new(inp, out)));
+
         let agent = AgentClient::with_evaluation_and_autopilot(
             config.model_provider.clone(),
             config.api_endpoint.clone(),
@@ -123,13 +146,62 @@ impl RalphLoop {
             config.completeness_prompt.clone(),
             config.completion_marker_file.to_string_lossy().to_string(),
             config.max_autopilot_continues,
-        );
+        )
+        .with_cost_tracker(Arc::clone(&cost_tracker));
 
         Self {
             config,
             state: LoopState::new(max_iterations),
             agent,
+            github_issue_numbers: HashMap::new(),
+            cost_tracker,
         }
+    }
+
+    /// Build a [`github_client::GitHubIssueClient`] from the current config when
+    /// GitHub Issues integration is enabled, returning `None` otherwise.
+    fn make_github_client(&self) -> Option<github_client::GitHubIssueClient> {
+        github_client::client_from_config(
+            self.config.github_issues_enabled,
+            self.config.github_repo.as_deref(),
+            self.config.github_token.as_deref(),
+        )
+    }
+
+    /// Resolve the effective working directory for a task.
+    ///
+    /// Lookup order:
+    /// 1. Exact match on `task.id` in [`Config::work_dirs`].
+    /// 2. Match on the task's `role` (serialised as a lowercase string).
+    /// 3. Fall back to the top-level [`Config::work_dir`].
+    ///
+    /// Relative paths in the map are resolved relative to [`Config::work_dir`].
+    fn resolve_work_dir(&self, task: &crate::types::Task) -> std::path::PathBuf {
+        // 1. Exact task-id match.
+        if let Some(p) = self.config.work_dirs.get(&task.id) {
+            let path = std::path::Path::new(p);
+            if path.is_absolute() {
+                return path.to_path_buf();
+            }
+            return self.config.work_dir.join(path);
+        }
+
+        // 2. Role match (AgentRole serialised to lowercase string via serde).
+        let role_str = serde_json::to_value(task.role)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        if let Some(role_key) = role_str {
+            if let Some(p) = self.config.work_dirs.get(&role_key) {
+                let path = std::path::Path::new(p);
+                if path.is_absolute() {
+                    return path.to_path_buf();
+                }
+                return self.config.work_dir.join(path);
+            }
+        }
+
+        // 3. Default.
+        self.config.work_dir.clone()
     }
 
     /// Initialize the loop by loading tasks
@@ -155,6 +227,23 @@ impl RalphLoop {
         if self.state.iteration > self.state.max_iterations {
             self.state.add_log("Max iterations reached".to_string());
             return Ok(false);
+        }
+
+        // Check the budget before starting a new task.
+        if let Ok(guard) = self.cost_tracker.lock() {
+            if guard.budget_exceeded(self.config.max_cost_usd) {
+                self.state.add_log(format!(
+                    "Budget limit reached – current cost ${:.4} >= limit ${:.4} – stopping",
+                    guard.total_estimated_cost_usd,
+                    self.config.max_cost_usd.unwrap_or(0.0)
+                ));
+                return Ok(false);
+            }
+        }
+
+        // Reset per-task cost counters at the start of each new iteration.
+        if let Ok(mut guard) = self.cost_tracker.lock() {
+            guard.reset_task();
         }
 
         // Re-read the task file so that tasks dynamically appended by agents
@@ -196,7 +285,9 @@ impl RalphLoop {
         // Determine whether we can run tasks in parallel.
         let ready = TaskScheduler::schedule(&self.state.tasks);
         if ready.len() > 1 {
-            return self.run_parallel_tasks(ready).await;
+            let result = self.run_parallel_tasks(ready).await;
+            self.emit_cost_summary();
+            return result;
         }
 
         // Single-task execution: use scheduler result when available, fall back
@@ -213,12 +304,37 @@ impl RalphLoop {
             }
         };
 
-        self.run_single_task(task_idx).await
+        let result = self.run_single_task(task_idx).await;
+        self.emit_cost_summary();
+        result
+    }
+
+    /// Append a one-line cost summary to the loop log.
+    ///
+    /// Called at the end of every iteration (both single-task and parallel
+    /// paths) so that both headless and TUI consumers see the same summary.
+    fn emit_cost_summary(&mut self) {
+        if let Ok(guard) = self.cost_tracker.lock() {
+            let summary = guard.iteration_summary();
+            self.state.add_log(summary);
+        }
     }
 
     /// Execute a single task by index, running evaluation & commit logic.
     async fn run_single_task(&mut self, task_idx: usize) -> Result<bool> {
         self.state.current_task = Some(task_idx);
+
+        // Resolve the effective working directory for this task and redirect the
+        // shared agent before any agent calls are made.
+        let effective_work_dir = self.resolve_work_dir(&self.state.tasks[task_idx]);
+        self.agent
+            .set_work_dir(effective_work_dir.to_string_lossy().to_string());
+        if effective_work_dir != self.config.work_dir {
+            self.state.add_log(format!(
+                "Using per-task work dir: {}",
+                effective_work_dir.display()
+            ));
+        }
 
         // Evaluate agent-based precondition before executing the task.
         if self.state.tasks[task_idx].precondition_prompt.is_some() {
@@ -250,19 +366,65 @@ impl RalphLoop {
         let invocation_timestamp = provenance::now_timestamp();
         self.state.tasks[task_idx].last_attempt_at = Some(invocation_timestamp);
 
+        let task_id = self.state.tasks[task_idx].id.clone();
         let task_desc = self.state.tasks[task_idx].description.clone();
         self.state.add_log(format!("Starting task: {}", task_desc));
+
+        notifier::notify(
+            &self.config.notify_webhooks,
+            &task_id,
+            TaskStatus::InProgress,
+            invocation_timestamp,
+            &task_desc,
+        )
+        .await;
+
+        // Open a GitHub Issue for this task when the integration is enabled.
+        if let Some(gh_client) = self.make_github_client() {
+            match gh_client.create_issue(&task_id, &task_desc).await {
+                Ok(issue_number) => {
+                    self.github_issue_numbers
+                        .insert(task_id.clone(), issue_number);
+                    self.state.add_log(format!(
+                        "GitHub Issue #{issue_number} opened for task {task_id}"
+                    ));
+                }
+                Err(e) => {
+                    self.state.add_log(format!(
+                        "Warning: failed to open GitHub Issue for task {task_id}: {e}"
+                    ));
+                }
+            }
+        }
 
         // Execute the task with reflection rounds; capture any error text for
         // potential use by the re-planner.
         let task = self.state.tasks[task_idx].clone();
         let reflection_rounds = self.config.reflection_rounds;
         let mut task_error = String::new();
-        match self
-            .agent
-            .execute_task_with_reflection(&task, reflection_rounds)
+
+        // Wrap execution in a per-task timeout when `timeout_seconds` is set.
+        let execution_result = if let Some(timeout_secs) = task.timeout_seconds {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(timeout_secs),
+                self.agent
+                    .execute_task_with_reflection(&task, reflection_rounds),
+            )
             .await
-        {
+            {
+                Ok(result) => result,
+                Err(_) => Err(anyhow::anyhow!(
+                    "Task timed out after {} seconds",
+                    timeout_secs
+                )),
+            }
+        } else {
+            self.agent
+                .execute_task_with_reflection(&task, reflection_rounds)
+                .await
+        };
+
+        match execution_result {
             Ok(()) => {
                 self.state.add_log("Task completed".to_string());
                 self.state.tasks[task_idx].status = TaskStatus::Completed;
@@ -353,7 +515,40 @@ impl RalphLoop {
         // Save task state to filesystem
         save_tasks(&self.config.task_file, &self.state.tasks).context("Failed to save tasks")?;
 
+        // Notify webhooks with the final task status.
+        let final_status = self.state.tasks[task_idx].status;
+        let notify_ts = provenance::now_timestamp();
+        notifier::notify(
+            &self.config.notify_webhooks,
+            &task_id,
+            final_status,
+            notify_ts,
+            &task_desc,
+        )
+        .await;
+
+        // Close the GitHub Issue when the task has reached a terminal state.
+        if final_status == TaskStatus::Completed || final_status == TaskStatus::Failed {
+            if let Some(issue_number) = self.github_issue_numbers.remove(&task_id) {
+                if let Some(gh_client) = self.make_github_client() {
+                    if let Err(e) = gh_client.close_issue(issue_number).await {
+                        self.state.add_log(format!(
+                            "Warning: failed to close GitHub Issue #{issue_number} \
+                             for task {task_id}: {e}"
+                        ));
+                    } else {
+                        self.state.add_log(format!(
+                            "GitHub Issue #{issue_number} closed for task {task_id}"
+                        ));
+                    }
+                }
+            }
+        }
+
         // Update consecutive failure counter and optionally invoke re-planner.
+        // Track whether the re-planner ran and succeeded so that the auto-retry
+        // block below can defer to the re-planner's decision in that case.
+        let mut replan_succeeded = false;
         if self.state.tasks[task_idx].status == TaskStatus::Failed {
             self.state.consecutive_failures += 1;
             let threshold = self.config.replan_threshold;
@@ -381,6 +576,7 @@ impl RalphLoop {
                     Ok(updated) => {
                         self.state.tasks = updated;
                         self.state.consecutive_failures = 0;
+                        replan_succeeded = true;
                         self.state.add_log("Re-planning succeeded".to_string());
                     }
                     Err(e) => {
@@ -390,6 +586,31 @@ impl RalphLoop {
             }
         } else {
             self.state.consecutive_failures = 0;
+        }
+
+        // Auto-retry: if the task is still Failed and has remaining retries,
+        // reset it to Pending so it is picked up again on the next iteration.
+        // The `failed_attempts` field acts as the retry counter – no extra
+        // state is needed.  With `max_retries = N` the task may run at most
+        // N + 1 times (one initial attempt plus up to N retries).
+        //
+        // When the re-planner succeeded it has already decided how to recover
+        // (by restructuring the task list), so auto-retry is skipped to avoid
+        // conflicting with the re-planner's changes.
+        if !replan_succeeded && self.state.tasks[task_idx].status == TaskStatus::Failed {
+            let failed = self.state.tasks[task_idx].failed_attempts;
+            if let Some(max_retries) = self.state.tasks[task_idx].max_retries {
+                if failed <= max_retries {
+                    self.state.add_log(format!(
+                        "Task failed (attempt {}/{}) – resetting to pending for retry",
+                        failed,
+                        max_retries + 1,
+                    ));
+                    self.state.tasks[task_idx].status = TaskStatus::Pending;
+                    save_tasks(&self.config.task_file, &self.state.tasks)
+                        .context("Failed to save tasks after retry reset")?;
+                }
+            }
         }
 
         Ok(true)
@@ -465,9 +686,46 @@ impl RalphLoop {
             task_data.push((idx, self.state.tasks[idx].clone(), ts));
         }
 
+        // Notify webhooks that tasks are now in progress.
+        for &idx in &eligible_indices {
+            let t = &self.state.tasks[idx];
+            notifier::notify(
+                &self.config.notify_webhooks,
+                &t.id,
+                TaskStatus::InProgress,
+                provenance::now_timestamp(),
+                &t.description,
+            )
+            .await;
+        }
+
+        // Open GitHub Issues for each parallel task when the integration is enabled.
+        for &idx in &eligible_indices {
+            let task_id = self.state.tasks[idx].id.clone();
+            let task_desc = self.state.tasks[idx].description.clone();
+            if let Some(gh_client) = self.make_github_client() {
+                match gh_client.create_issue(&task_id, &task_desc).await {
+                    Ok(issue_number) => {
+                        self.github_issue_numbers
+                            .insert(task_id.clone(), issue_number);
+                        self.state.add_log(format!(
+                            "GitHub Issue #{issue_number} opened for task {task_id}"
+                        ));
+                    }
+                    Err(e) => {
+                        self.state.add_log(format!(
+                            "Warning: failed to open GitHub Issue for task {task_id}: {e}"
+                        ));
+                    }
+                }
+            }
+        }
+
         // Spawn concurrent agent work (include per-task timestamp for provenance).
         let mut handles = Vec::new();
         for (idx, task, ts) in task_data {
+            // Resolve per-task working directory for multi-repo orchestration.
+            let task_work_dir = self.resolve_work_dir(&task);
             let mut agent = AgentClient::with_evaluation_and_autopilot(
                 self.config.model_provider.clone(),
                 self.config.api_endpoint.clone(),
@@ -481,9 +739,27 @@ impl RalphLoop {
                     .to_string_lossy()
                     .to_string(),
                 self.config.max_autopilot_continues,
-            );
+            )
+            .with_work_dir(task_work_dir.to_string_lossy().to_string())
+            .with_cost_tracker(Arc::clone(&self.cost_tracker));
             let handle = tokio::spawn(async move {
-                let result = agent.execute_task(&task).await;
+                // Wrap execution in a per-task timeout when `timeout_seconds` is set.
+                let result = if let Some(timeout_secs) = task.timeout_seconds {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(timeout_secs),
+                        agent.execute_task(&task),
+                    )
+                    .await
+                    {
+                        Ok(r) => r,
+                        Err(_) => Err(anyhow::anyhow!(
+                            "Task timed out after {} seconds",
+                            timeout_secs
+                        )),
+                    }
+                } else {
+                    agent.execute_task(&task).await
+                };
                 (idx, task, ts, result)
             });
             handles.push(handle);
@@ -583,6 +859,68 @@ impl RalphLoop {
         }
 
         save_tasks(&self.config.task_file, &self.state.tasks).context("Failed to save tasks")?;
+
+        // Auto-retry failed tasks in this batch that still have remaining retries.
+        let mut retried = false;
+        for &idx in &eligible_indices {
+            if self.state.tasks[idx].status == TaskStatus::Failed {
+                let failed = self.state.tasks[idx].failed_attempts;
+                if let Some(max_retries) = self.state.tasks[idx].max_retries {
+                    if failed <= max_retries {
+                        self.state.add_log(format!(
+                            "Task [{}] failed (attempt {}/{}) – resetting to pending for retry",
+                            self.state.tasks[idx].id,
+                            failed,
+                            max_retries + 1,
+                        ));
+                        self.state.tasks[idx].status = TaskStatus::Pending;
+                        retried = true;
+                    }
+                }
+            }
+        }
+        if retried {
+            save_tasks(&self.config.task_file, &self.state.tasks)
+                .context("Failed to save tasks after retry reset")?;
+        }
+
+        // Notify webhooks with the final task statuses after evaluation.
+        for &idx in &eligible_indices {
+            let t = &self.state.tasks[idx];
+            if t.status == TaskStatus::Completed || t.status == TaskStatus::Failed {
+                notifier::notify(
+                    &self.config.notify_webhooks,
+                    &t.id,
+                    t.status,
+                    provenance::now_timestamp(),
+                    &t.description,
+                )
+                .await;
+            }
+        }
+
+        // Close GitHub Issues for tasks that have reached a terminal state.
+        for &idx in &eligible_indices {
+            let task_id = self.state.tasks[idx].id.clone();
+            let final_status = self.state.tasks[idx].status;
+            if final_status == TaskStatus::Completed || final_status == TaskStatus::Failed {
+                if let Some(issue_number) = self.github_issue_numbers.remove(&task_id) {
+                    if let Some(gh_client) = self.make_github_client() {
+                        if let Err(e) = gh_client.close_issue(issue_number).await {
+                            self.state.add_log(format!(
+                                "Warning: failed to close GitHub Issue #{issue_number} \
+                                 for task {task_id}: {e}"
+                            ));
+                        } else {
+                            self.state.add_log(format!(
+                                "GitHub Issue #{issue_number} closed for task {task_id}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(true)
     }
 
@@ -654,6 +992,8 @@ mod tests {
             depends_on: depends_on.into_iter().map(String::from).collect(),
             priority,
             complexity,
+            timeout_seconds: None,
+            max_retries: None,
             failed_attempts,
             last_attempt_at: None,
             inputs: vec![],
@@ -766,6 +1106,8 @@ mod tests {
                 depends_on: vec![],
                 priority: 0,
                 complexity: 1,
+                timeout_seconds: None,
+                max_retries: None,
                 failed_attempts: 0,
                 last_attempt_at: Some(recent_ts),
                 inputs: vec![],
@@ -786,6 +1128,8 @@ mod tests {
                 depends_on: vec![],
                 priority: 0,
                 complexity: 1,
+                timeout_seconds: None,
+                max_retries: None,
                 failed_attempts: 0,
                 last_attempt_at: Some(old_ts),
                 inputs: vec![],
@@ -824,6 +1168,8 @@ mod tests {
                 depends_on: vec![],
                 priority: 0,
                 complexity: 1,
+                timeout_seconds: None,
+                max_retries: None,
                 failed_attempts: 0,
                 last_attempt_at: Some(old_ts),
                 inputs: vec![],
@@ -851,5 +1197,364 @@ mod tests {
             make_task("b", TaskStatus::Failed, 0, 1, 3, vec![]),
         ];
         assert!(TaskScheduler::schedule(&tasks).is_empty());
+    }
+
+    // ---- timeout_seconds / max_retries field tests ----
+
+    #[test]
+    fn task_timeout_seconds_defaults_to_none() {
+        let t = make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert!(t.timeout_seconds.is_none());
+    }
+
+    #[test]
+    fn task_max_retries_defaults_to_none() {
+        let t = make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert!(t.max_retries.is_none());
+    }
+
+    #[test]
+    fn task_timeout_and_retries_roundtrip_via_serde() {
+        let mut t = make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]);
+        t.timeout_seconds = Some(30);
+        t.max_retries = Some(3);
+
+        let json = serde_json::to_string(&t).expect("serialise");
+        let back: Task = serde_json::from_str(&json).expect("deserialise");
+        assert_eq!(back.timeout_seconds, Some(30));
+        assert_eq!(back.max_retries, Some(3));
+    }
+
+    /// When `max_retries` is absent the fields are omitted from the serialised
+    /// JSON (skip_serializing_if = "Option::is_none").
+    #[test]
+    fn task_absent_timeout_and_retries_omitted_from_json() {
+        let t = make_task("a", TaskStatus::Pending, 0, 1, 0, vec![]);
+        let json = serde_json::to_string(&t).expect("serialise");
+        assert!(
+            !json.contains("timeout_seconds"),
+            "unexpected key in {json}"
+        );
+        assert!(!json.contains("max_retries"), "unexpected key in {json}");
+    }
+
+    /// Verify the retry guard logic: a failed task with `failed_attempts <= max_retries`
+    /// should be considered retriable; once `failed_attempts > max_retries` it is not.
+    #[test]
+    fn retry_guard_logic() {
+        let mut t = make_task("a", TaskStatus::Failed, 0, 1, 0, vec![]);
+        t.max_retries = Some(2);
+
+        // Simulate first failure: failed_attempts = 1, max_retries = 2 → retry
+        t.failed_attempts = 1;
+        let should_retry = t.max_retries.is_some_and(|m| t.failed_attempts <= m);
+        assert!(should_retry, "attempt 1 of 3 should trigger retry");
+
+        // Simulate second failure: failed_attempts = 2, max_retries = 2 → retry
+        t.failed_attempts = 2;
+        let should_retry = t.max_retries.is_some_and(|m| t.failed_attempts <= m);
+        assert!(should_retry, "attempt 2 of 3 should trigger retry");
+
+        // Simulate third failure: failed_attempts = 3, max_retries = 2 → no retry
+        t.failed_attempts = 3;
+        let should_retry = t.max_retries.is_some_and(|m| t.failed_attempts <= m);
+        assert!(!should_retry, "attempt 3 of 3 should NOT trigger retry");
+    }
+
+    // ---- behavioral tests matching issue requirements ----
+
+    /// (1) A task with `timeout_seconds: 1` whose execution takes longer than 1 second
+    /// must be marked as failed with a timeout error message.
+    ///
+    /// Short real durations (10 ms timeout vs 500 ms sleep) are used so the test
+    /// completes quickly while still exercising the timeout-wrapping logic from
+    /// `run_single_task`.
+    #[tokio::test]
+    async fn task_exceeding_timeout_produces_timeout_error() {
+        const TIMEOUT_SECS: u64 = 1;
+
+        // A future that takes 500 ms – far longer than the 10 ms deadline used below.
+        let slow_future = async {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            Ok::<(), anyhow::Error>(())
+        };
+
+        // Mirror the wrapping logic used in `run_single_task`, but use a 10 ms
+        // deadline so the test runs quickly.
+        let execution_result: anyhow::Result<()> =
+            match tokio::time::timeout(std::time::Duration::from_millis(10), slow_future).await {
+                Ok(r) => r,
+                Err(_) => Err(anyhow::anyhow!(
+                    "Task timed out after {} seconds",
+                    TIMEOUT_SECS
+                )),
+            };
+
+        assert!(execution_result.is_err(), "timed-out task must be an error");
+        let msg = execution_result.unwrap_err().to_string();
+        assert!(
+            msg.contains("timed out after 1 seconds"),
+            "error message must mention the timeout; got: {msg}"
+        );
+    }
+
+    /// (2) A task with `max_retries: 2` that fails is reset to `Pending` on each
+    /// attempt until `failed_attempts` exceeds `max_retries`, at which point the
+    /// status stays `Failed`.
+    #[test]
+    fn task_with_max_retries_resets_to_pending_until_limit_exceeded() {
+        let mut t = make_task("r", TaskStatus::Failed, 0, 1, 0, vec![]);
+        t.max_retries = Some(2);
+
+        // Helper that mirrors the auto-retry state mutation in `run_single_task`.
+        let apply_retry = |task: &mut Task| {
+            if task.status == TaskStatus::Failed {
+                if let Some(max) = task.max_retries {
+                    if task.failed_attempts <= max {
+                        task.status = TaskStatus::Pending;
+                    }
+                }
+            }
+        };
+
+        // Attempt 1 → failed_attempts = 1 ≤ 2 → reset to Pending.
+        t.failed_attempts = 1;
+        apply_retry(&mut t);
+        assert_eq!(
+            t.status,
+            TaskStatus::Pending,
+            "after 1st failure should reset to Pending"
+        );
+
+        // Attempt 2 → failed_attempts = 2 ≤ 2 → reset to Pending.
+        t.status = TaskStatus::Failed;
+        t.failed_attempts = 2;
+        apply_retry(&mut t);
+        assert_eq!(
+            t.status,
+            TaskStatus::Pending,
+            "after 2nd failure should reset to Pending"
+        );
+
+        // Attempt 3 → failed_attempts = 3 > 2 → stays Failed.
+        t.status = TaskStatus::Failed;
+        t.failed_attempts = 3;
+        apply_retry(&mut t);
+        assert_eq!(
+            t.status,
+            TaskStatus::Failed,
+            "after exceeding retry limit should stay Failed"
+        );
+    }
+
+    /// (3) A task with neither `timeout_seconds` nor `max_retries` behaves exactly
+    /// as before: it is scheduled normally and a failure is never auto-retried.
+    #[test]
+    fn task_without_timeout_or_retries_behaves_as_before() {
+        // The task has no special fields set.
+        let task = make_task("plain", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert!(task.timeout_seconds.is_none());
+        assert!(task.max_retries.is_none());
+
+        // Scheduler picks it up as a normal pending task.
+        let ready = TaskScheduler::schedule(&[task]);
+        assert_eq!(ready, vec![0], "plain task must be scheduled");
+
+        // After a failure the task is NOT auto-retried (max_retries is None).
+        let mut failed = make_task("plain", TaskStatus::Failed, 0, 1, 1, vec![]);
+        // Mirror the auto-retry guard from `run_single_task`.
+        if failed.status == TaskStatus::Failed {
+            if let Some(max) = failed.max_retries {
+                if failed.failed_attempts <= max {
+                    failed.status = TaskStatus::Pending;
+                }
+            }
+        }
+        assert_eq!(
+            failed.status,
+            TaskStatus::Failed,
+            "task without max_retries must stay Failed"
+        );
+    }
+
+    /// (4) When the adaptive re-planner succeeds, auto-retry must be suppressed
+    /// so that the two recovery mechanisms do not conflict with each other.
+    /// This test mirrors the guard added to `run_single_task`: auto-retry is
+    /// skipped whenever `replan_succeeded` is true.
+    #[test]
+    fn replan_success_suppresses_auto_retry() {
+        let apply_retry_with_replan_flag = |task: &mut Task, replan_succeeded: bool| {
+            if !replan_succeeded && task.status == TaskStatus::Failed {
+                if let Some(max) = task.max_retries {
+                    if task.failed_attempts <= max {
+                        task.status = TaskStatus::Pending;
+                    }
+                }
+            }
+        };
+
+        // Task has max_retries = 2, failed_attempts = 1 (would normally retry).
+        let mut t = make_task("retryable", TaskStatus::Failed, 0, 1, 0, vec![]);
+        t.max_retries = Some(2);
+        t.failed_attempts = 1;
+
+        // Without a successful replan the task IS reset to Pending.
+        apply_retry_with_replan_flag(&mut t, false);
+        assert_eq!(
+            t.status,
+            TaskStatus::Pending,
+            "without replan the task should be reset to Pending"
+        );
+
+        // Reset and simulate a successful replan: retry must be suppressed.
+        t.status = TaskStatus::Failed;
+        apply_retry_with_replan_flag(&mut t, true);
+        assert_eq!(
+            t.status,
+            TaskStatus::Failed,
+            "when replan succeeded auto-retry must be skipped"
+        );
+    }
+
+    // ---- resolve_work_dir tests (multi-repo orchestration) ----
+
+    fn make_config_with_work_dirs(
+        default_work_dir: &str,
+        overrides: &[(&str, &str)],
+    ) -> crate::types::Config {
+        let mut config = crate::types::Config::default();
+        config.work_dir = std::path::PathBuf::from(default_work_dir);
+        for &(k, v) in overrides {
+            config.work_dirs.insert(k.to_string(), v.to_string());
+        }
+        config
+    }
+
+    fn make_ralph_loop(config: crate::types::Config) -> RalphLoop {
+        RalphLoop::new(config)
+    }
+
+    #[test]
+    fn resolve_work_dir_falls_back_to_default() {
+        let config = make_config_with_work_dirs("/default", &[]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/default")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_matches_exact_task_id() {
+        let config =
+            make_config_with_work_dirs("/default", &[("my-task", "/repo/my-task-dir")]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/repo/my-task-dir")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_matches_role() {
+        // AgentRole::Implementer serialises to "implementer" via serde.
+        let config =
+            make_config_with_work_dirs("/default", &[("implementer", "/repo/impl-dir")]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("other-id", TaskStatus::Pending, 0, 1, 0, vec![]);
+        // default role is Implementer
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/repo/impl-dir")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_prefers_task_id_over_role() {
+        // Both id and role match — id must win.
+        let config = make_config_with_work_dirs(
+            "/default",
+            &[("my-task", "/by-id"), ("implementer", "/by-role")],
+        );
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/by-id")
+        );
+    }
+
+    #[test]
+    fn resolve_work_dir_resolves_relative_path_against_default() {
+        let config = make_config_with_work_dirs("/projects", &[("my-task", "sub-repo")]);
+        let rl = make_ralph_loop(config);
+        let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&task),
+            std::path::PathBuf::from("/projects/sub-repo")
+        );
+    }
+
+    // ---- multi-repo orchestration integration tests using real temp dirs ----
+
+    /// When `work_dirs` maps a task id to a secondary path, the agent receives
+    /// the correct (secondary) work_dir for that task while other tasks continue
+    /// to use the default work_dir.
+    #[test]
+    fn work_dirs_maps_task_to_secondary_with_temp_dirs() {
+        let default_dir = tempfile::tempdir().unwrap();
+        let secondary_dir = tempfile::tempdir().unwrap();
+
+        let config = make_config_with_work_dirs(
+            default_dir.path().to_str().unwrap(),
+            &[(
+                "special-task",
+                secondary_dir.path().to_str().unwrap(),
+            )],
+        );
+        let rl = make_ralph_loop(config);
+
+        // The mapped task should resolve to the secondary directory.
+        let mapped_task = make_task("special-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert_eq!(
+            rl.resolve_work_dir(&mapped_task),
+            secondary_dir.path(),
+            "mapped task must receive the secondary work_dir"
+        );
+
+        // All other tasks should fall back to the default directory.
+        for id in &["task-a", "task-b", "unrelated"] {
+            let other_task = make_task(id, TaskStatus::Pending, 0, 1, 0, vec![]);
+            assert_eq!(
+                rl.resolve_work_dir(&other_task),
+                default_dir.path(),
+                "unmapped task '{}' must receive the default work_dir",
+                id
+            );
+        }
+    }
+
+    /// When `work_dirs` is empty (absent), every task uses the default work_dir,
+    /// which is identical to the current single-repository behavior.
+    #[test]
+    fn work_dirs_absent_is_identical_to_single_repo_behavior() {
+        let default_dir = tempfile::tempdir().unwrap();
+
+        // No overrides – equivalent to a config that never sets work_dirs.
+        let config =
+            make_config_with_work_dirs(default_dir.path().to_str().unwrap(), &[]);
+        let rl = make_ralph_loop(config);
+
+        for id in &["impl-1", "test-2", "eval-3"] {
+            let task = make_task(id, TaskStatus::Pending, 0, 1, 0, vec![]);
+            assert_eq!(
+                rl.resolve_work_dir(&task),
+                default_dir.path(),
+                "task '{}' must use the default work_dir when work_dirs is empty",
+                id
+            );
+        }
     }
 }

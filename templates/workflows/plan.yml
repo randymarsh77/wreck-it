@@ -1,0 +1,80 @@
+# wreck-it plan workflow: generate a structured task plan via workflow dispatch.
+#
+# Dispatches the wreck-it plan command with configurable inputs. The plan is
+# written to the state branch and picked up by the next ralph iteration.
+#
+# Required secrets:
+#   PAT_TOKEN – Personal Access Token with repo and models:read scopes.
+name: Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      goal:
+        description: 'Natural-language goal to plan tasks for'
+        required: true
+        type: string
+      ralph:
+        description: 'Name for the ralph context (defaults to slug from goal)'
+        required: false
+        type: string
+      cloud:
+        description: 'Use a cloud agent to build the plan'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  models: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "wreck-it[bot]"
+          git config user.email "wreck-it[bot]@users.noreply.github.com"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build wreck-it
+        run: cargo build --release
+
+      - name: Run plan
+        run: |
+          set -- --goal "$GOAL"
+          if [ -n "$RALPH" ]; then
+            set -- "$@" --ralph "$RALPH"
+          fi
+          if [ "$CLOUD" = "true" ]; then
+            set -- "$@" --cloud
+          fi
+          ./target/release/wreck-it plan "$@"
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GOAL: ${{ inputs.goal }}
+          RALPH: ${{ inputs.ralph }}
+          CLOUD: ${{ inputs.cloud }}
+
+      - name: Push state branch
+        run: |
+          STATE_BRANCH="wreck-it-state"
+          if git rev-parse --verify "refs/heads/${STATE_BRANCH}" >/dev/null 2>&1; then
+            echo "Pushing state branch '${STATE_BRANCH}'"
+            git push origin "${STATE_BRANCH}"
+          else
+            echo "State branch '${STATE_BRANCH}' does not exist (nothing to push)"
+          fi

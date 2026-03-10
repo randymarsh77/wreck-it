@@ -5,18 +5,29 @@ state_root = ".wreck-it"
 name = "docs"
 task_file = "docs-tasks.json"
 state_file = ".docs-state.json"
+brute_mode = true
 
 [[ralphs]]
 name = "features"
 task_file = "features-tasks.json"
 state_file = ".features-state.json"
+brute_mode = true
 
 [[ralphs]]
 name = "planner"
 task_file = "planner-tasks.json"
 state_file = ".planner-state.json"
+brute_mode = true
 
 [[ralphs]]
 name = "feature-dev"
 task_file = "feature-dev-tasks.json"
 state_file = ".feature-dev-state.json"
+brute_mode = true
+
+[[ralphs]]
+name = "merge"
+task_file = "merge-tasks.json"
+state_file = ".merge-state.json"
+command = "merge"
+backend = "cloud_agent"

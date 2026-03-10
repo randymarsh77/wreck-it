@@ -69,3 +69,5 @@ The Ralph Wiggum Loop is a continuous execution pattern designed for AI agent wo
 - 🧐 **Agent-Evaluated Preconditions** — Let an agent decide whether a task should run, for nuanced recurring task control in powerful ralph loops
 - 🏷️ **Epics & Sub-tasks** — Organize tasks into epics with hierarchical sub-tasks and progress tracking
 - 💡 **Per-Task Agent Memory** — Agents learn from prior attempts via persistent per-task memory files
+- 🔔 **Webhook Notifications** — HTTP POST alerts on task status transitions; failures are logged as warnings and never abort the loop
+- 🐙 **GitHub Issues Integration** — Automatically open/close GitHub Issues as tasks start and finish for in-repo progress tracking
