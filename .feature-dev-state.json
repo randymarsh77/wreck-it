@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 29,
-  "current_task_id": "ideas-prompt-customization",
-  "issue_number": 215,
-  "last_prompt": "Research and design a dynamic prompt customization system for wreck-it. The system should allow users to place per-role system prompt templates in a `.wreck-it/prompts/` directory (e.g. `ideas.md`, `implementer.md`, `evaluator.md`, plus per-task overrides like `impl-my-task.md`). Review the existing agent invocation path in `cli/src/agent.rs` and `cli/src/cloud_agent.rs` to identify where system prompts are constructed and how they could be replaced or augmented with user-supplied content. Also review `core/src/types.rs` (Task and Config structs) to identify any new fields needed (e.g. `prompt_dir: Option<String>` on Config, `system_prompt_override: Option<String>` on Task). Document a design that supports: (1) global role-based prompt templates, (2) per-task prompt overrides, (3) variable interpolation (e.g. `{{task_id}}`, `{{repo}}`). Write a design document as inline comments in a new stub file `cli/src/prompt_loader.rs`.",
+  "iteration": 30,
+  "current_task_id": "impl-prompt-customization",
+  "issue_number": 221,
+  "last_prompt": "Implement the dynamic prompt customization system designed in `ideas-prompt-customization`. Create `cli/src/prompt_loader.rs` with a `PromptLoader` struct that: (1) reads `.wreck-it/prompts/<role>.md` for global role overrides, (2) reads `.wreck-it/prompts/<task_id>.md` for per-task overrides (per-task takes precedence), (3) performs variable substitution for `{{task_id}}`, `{{repo}}`, `{{description}}` placeholders, and (4) falls back to the built-in default prompts when no file is found. Add a `prompt_dir: Option<String>` field to `Config` in `core/src/types.rs` (defaulting to `.wreck-it/prompts`). Wire `PromptLoader::load()` into `cli/src/agent.rs` and `cli/src/cloud_agent.rs` at the system prompt construction point so that custom prompts replace the default role prompt. Add a `--prompt-dir <PATH>` CLI flag in `cli/src/cli.rs` that overrides the config value.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -216,6 +216,10 @@
     "iteration 28: agent created PR #200 for task Some(\"eval-multi-repo-orchestration\")",
     "iteration 28: marked PR #200 as ready for review",
     "iteration 28: merged PR #200 for task Some(\"eval-multi-repo-orchestration\") (brute mode)",
-    "iteration 29: triggered cloud agent for task ideas-prompt-customization (issue #215)"
+    "iteration 29: triggered cloud agent for task ideas-prompt-customization (issue #215)",
+    "iteration 29: agent created PR #217 for task Some(\"ideas-prompt-customization\")",
+    "iteration 29: marked PR #217 as ready for review",
+    "iteration 29: merged PR #217 for task Some(\"ideas-prompt-customization\") (brute mode)",
+    "iteration 30: triggered cloud agent for task impl-prompt-customization (issue #221)"
   ]
 }
