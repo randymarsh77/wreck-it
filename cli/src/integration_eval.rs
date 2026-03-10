@@ -50,6 +50,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }
     }
 
@@ -253,6 +254,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         };
 
         let impl_task = Task {
@@ -276,6 +278,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         };
 
         let review = make_task(

@@ -1002,6 +1002,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }
     }
 
@@ -1116,6 +1117,7 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
             },
             Task {
                 id: "old".to_string(),
@@ -1138,6 +1140,7 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -1178,6 +1181,7 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);

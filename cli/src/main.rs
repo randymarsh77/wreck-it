@@ -413,6 +413,8 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
+
+                        prompt_dir: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -511,6 +513,8 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
+
+                        prompt_dir: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }

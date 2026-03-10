@@ -1844,6 +1844,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
@@ -1879,6 +1880,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
@@ -1915,6 +1917,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
@@ -1954,6 +1957,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
@@ -2092,6 +2096,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
@@ -2127,6 +2132,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
@@ -2163,6 +2169,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }];
         save_tasks(&task_file, &tasks).unwrap();
 

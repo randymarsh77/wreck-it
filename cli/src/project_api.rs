@@ -113,6 +113,7 @@ impl ProjectManager {
             precondition_prompt: None,
             parent_id: None,
             labels,
+            system_prompt_override: None,
         };
         task_manager::append_task(&self.task_file, task.clone())?;
         Ok(task)
@@ -153,6 +154,7 @@ impl ProjectManager {
             precondition_prompt: None,
             parent_id: Some(parent_id.to_string()),
             labels,
+            system_prompt_override: None,
         };
         task_manager::append_task(&self.task_file, task.clone())?;
         Ok(task)
