@@ -117,33 +117,41 @@ pub fn resolve_system_prompt(
 
     // Priority 1: inline override on the task itself.
     if let Some(tpl) = &task.system_prompt_override {
-        return Some(interpolate(tpl, &task.id, repo_slug, task.role));
+        return Some(interpolate(tpl, &task.id, repo_slug, &task.description, task.role));
     }
 
     // Priority 2: per-task file override (e.g. `impl-my-task.md`).
     let per_task_file = dir.join(format!("{}.md", task.id));
     if let Some(content) = try_read_file(&per_task_file) {
-        return Some(interpolate(&content, &task.id, repo_slug, task.role));
+        return Some(interpolate(&content, &task.id, repo_slug, &task.description, task.role));
     }
 
     // Priority 3: global role template (e.g. `implementer.md`).
     let role_name = role_file_name(task.role);
     let role_file = dir.join(format!("{role_name}.md"));
     if let Some(content) = try_read_file(&role_file) {
-        return Some(interpolate(&content, &task.id, repo_slug, task.role));
+        return Some(interpolate(&content, &task.id, repo_slug, &task.description, task.role));
     }
 
     // No custom template found — caller falls back to built-in default.
     None
 }
 
-/// Expand `{{task_id}}`, `{{repo}}`, and `{{role}}` placeholders in `template`.
+/// Expand `{{task_id}}`, `{{repo}}`, `{{description}}`, and `{{role}}`
+/// placeholders in `template`.
 ///
 /// Unknown placeholders are preserved unchanged.
-pub fn interpolate(template: &str, task_id: &str, repo: &str, role: AgentRole) -> String {
+pub fn interpolate(
+    template: &str,
+    task_id: &str,
+    repo: &str,
+    description: &str,
+    role: AgentRole,
+) -> String {
     template
         .replace("{{task_id}}", task_id)
         .replace("{{repo}}", repo)
+        .replace("{{description}}", description)
         .replace("{{role}}", role_file_name(role))
 }
 
@@ -217,22 +225,44 @@ mod tests {
 
     #[test]
     fn interpolate_replaces_all_placeholders() {
-        let tpl = "Task {{task_id}} in {{repo}} by {{role}}";
-        let result = interpolate(tpl, "impl-foo", "owner/repo", AgentRole::Implementer);
-        assert_eq!(result, "Task impl-foo in owner/repo by implementer");
+        let tpl = "Task {{task_id}} in {{repo}} by {{role}} — {{description}}";
+        let result = interpolate(
+            tpl,
+            "impl-foo",
+            "owner/repo",
+            "add login",
+            AgentRole::Implementer,
+        );
+        assert_eq!(
+            result,
+            "Task impl-foo in owner/repo by implementer — add login"
+        );
+    }
+
+    #[test]
+    fn interpolate_replaces_description_placeholder() {
+        let tpl = "Work on {{description}} (task {{task_id}}) in {{repo}}";
+        let result = interpolate(
+            tpl,
+            "impl-foo",
+            "owner/repo",
+            "add login support",
+            AgentRole::Implementer,
+        );
+        assert_eq!(result, "Work on add login support (task impl-foo) in owner/repo");
     }
 
     #[test]
     fn interpolate_leaves_unknown_placeholders_intact() {
-        let tpl = "Hello {{unknown}} world";
-        let result = interpolate(tpl, "t1", "o/r", AgentRole::Ideas);
-        assert_eq!(result, "Hello {{unknown}} world");
+        let tpl = "Task {{task_id}} has {{unknown}} in {{repo}}";
+        let result = interpolate(tpl, "t1", "o/r", "my desc", AgentRole::Ideas);
+        assert_eq!(result, "Task t1 has {{unknown}} in o/r");
     }
 
     #[test]
     fn interpolate_no_placeholders_returns_template_unchanged() {
         let tpl = "No placeholders here.";
-        let result = interpolate(tpl, "t1", "o/r", AgentRole::Evaluator);
+        let result = interpolate(tpl, "t1", "o/r", "", AgentRole::Evaluator);
         assert_eq!(result, tpl);
     }
 
@@ -325,5 +355,54 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let task = make_task("impl-foo", AgentRole::Implementer);
         assert!(resolve_system_prompt(Some(tmp.path()), &task, "owner/repo").is_none());
+    }
+
+    // ---- description interpolation in resolved prompts ----
+
+    #[test]
+    fn resolve_interpolates_description_placeholder() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("impl-task.md"),
+            "Implement: {{description}} for repo {{repo}} (id={{task_id}})",
+        )
+        .unwrap();
+        let mut task = make_task("impl-task", AgentRole::Implementer);
+        task.description = "add OAuth login".to_string();
+        let result = resolve_system_prompt(Some(tmp.path()), &task, "owner/repo");
+        assert_eq!(
+            result,
+            Some("Implement: add OAuth login for repo owner/repo (id=impl-task)".to_string())
+        );
+    }
+
+    // ---- --prompt-dir CLI flag parsing ----
+
+    #[test]
+    fn prompt_dir_cli_flag_is_parsed() {
+        use crate::cli::{Cli, Commands};
+        use clap::Parser;
+
+        let args = ["wreck-it", "run", "--prompt-dir", "/tmp/my-prompts"];
+        let cli = Cli::try_parse_from(args).expect("CLI parse failed");
+        if let Commands::Run { prompt_dir, .. } = cli.command {
+            assert_eq!(prompt_dir, Some("/tmp/my-prompts".to_string()));
+        } else {
+            panic!("Expected Commands::Run");
+        }
+    }
+
+    #[test]
+    fn prompt_dir_cli_flag_is_none_when_absent() {
+        use crate::cli::{Cli, Commands};
+        use clap::Parser;
+
+        let args = ["wreck-it", "run"];
+        let cli = Cli::try_parse_from(args).expect("CLI parse failed");
+        if let Commands::Run { prompt_dir, .. } = cli.command {
+            assert!(prompt_dir.is_none());
+        } else {
+            panic!("Expected Commands::Run");
+        }
     }
 }
