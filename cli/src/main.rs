@@ -26,6 +26,7 @@ mod provenance;
 mod ralph_loop;
 mod replanner;
 mod repo_config;
+mod semantic_eval;
 mod state_worktree;
 mod task_cli;
 mod task_manager;
