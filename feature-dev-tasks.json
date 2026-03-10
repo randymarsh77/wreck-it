@@ -333,7 +333,7 @@
   {
     "id": "impl-prompt-customization",
     "description": "Implement the dynamic prompt customization system designed in `ideas-prompt-customization`. Create `cli/src/prompt_loader.rs` with a `PromptLoader` struct that: (1) reads `.wreck-it/prompts/<role>.md` for global role overrides, (2) reads `.wreck-it/prompts/<task_id>.md` for per-task overrides (per-task takes precedence), (3) performs variable substitution for `{{task_id}}`, `{{repo}}`, `{{description}}` placeholders, and (4) falls back to the built-in default prompts when no file is found. Add a `prompt_dir: Option<String>` field to `Config` in `core/src/types.rs` (defaulting to `.wreck-it/prompts`). Wire `PromptLoader::load()` into `cli/src/agent.rs` and `cli/src/cloud_agent.rs` at the system prompt construction point so that custom prompts replace the default role prompt. Add a `--prompt-dir <PATH>` CLI flag in `cli/src/cli.rs` that overrides the config value.",
-    "status": "inprogress",
+    "status": "pending",
     "phase": 2,
     "depends_on": [
       "ideas-prompt-customization"
