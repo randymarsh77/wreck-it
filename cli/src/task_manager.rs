@@ -459,17 +459,28 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        let count = reset_recurring_tasks(&mut tasks, 200);
+        let mut state = wreck_it_core::state::HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 200);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&tasks[0], &state),
+            TaskStatus::Pending,
+        );
     }
 
     #[test]
     fn reset_recurring_skips_milestone_tasks() {
         let mut tasks = vec![make_task("a", TaskStatus::Completed, vec![])];
-        let count = reset_recurring_tasks(&mut tasks, 200);
+        let mut state = wreck_it_core::state::HeadlessState::default();
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 200);
         assert_eq!(count, 0);
-        assert_eq!(tasks[0].status, TaskStatus::Completed);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&tasks[0], &state),
+            TaskStatus::Completed,
+        );
     }
 
     #[test]
@@ -481,15 +492,25 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
+        let mut state = wreck_it_core::state::HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
         // Only 100 seconds have passed, cooldown is 3600.
-        let count = reset_recurring_tasks(&mut tasks, 200);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 200);
         assert_eq!(count, 0);
-        assert_eq!(tasks[0].status, TaskStatus::Completed);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&tasks[0], &state),
+            TaskStatus::Completed,
+        );
 
         // Now enough time has passed.
-        let count = reset_recurring_tasks(&mut tasks, 3800);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 3800);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&tasks[0], &state),
+            TaskStatus::Pending,
+        );
     }
 
     #[test]
@@ -500,9 +521,16 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        let count = reset_recurring_tasks(&mut tasks, 101);
+        let mut state = wreck_it_core::state::HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 101);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(
+            wreck_it_core::iteration::effective_status(&tasks[0], &state),
+            TaskStatus::Pending,
+        );
     }
 
     #[test]
@@ -519,7 +547,8 @@ mod tests {
                 t
             },
         ];
-        let count = reset_recurring_tasks(&mut tasks, 9999);
+        let mut state = wreck_it_core::state::HeadlessState::default();
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 9999);
         assert_eq!(count, 0);
     }
 

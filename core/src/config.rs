@@ -28,6 +28,20 @@ pub struct RepoConfig {
     #[serde(default = "default_state_branch")]
     pub state_branch: String,
 
+    /// Git branch used to read task definition files.
+    ///
+    /// Task definitions are treated as stateless documents: they describe
+    /// *what* needs to be done but do not carry runtime status.  Runtime
+    /// status for each task is tracked by ID inside the state files on the
+    /// [`state_branch`].
+    ///
+    /// When omitted, task files are read from the state branch for backward
+    /// compatibility.  Set this to the repository's default branch (e.g.
+    /// `"master"` or `"main"`) to keep task definitions alongside the code
+    /// where agents can work with them directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_branch: Option<String>,
+
     /// Root directory for state files (inside the state worktree).
     #[serde(default = "default_state_root")]
     pub state_root: String,
@@ -139,9 +153,20 @@ impl Default for RepoConfig {
     fn default() -> Self {
         Self {
             state_branch: default_state_branch(),
+            task_branch: None,
             state_root: default_state_root(),
             ralphs: Vec::new(),
         }
+    }
+}
+
+impl RepoConfig {
+    /// Return the effective branch from which task files are read.
+    ///
+    /// When `task_branch` is set, returns that value.  Otherwise falls back to
+    /// the `state_branch` for backward compatibility.
+    pub fn effective_task_branch(&self) -> &str {
+        self.task_branch.as_deref().unwrap_or(&self.state_branch)
     }
 }
 
@@ -150,4 +175,60 @@ impl Default for RepoConfig {
 /// Returns `None` if the config has no `[[ralphs]]` entry with the given name.
 pub fn find_ralph<'a>(config: &'a RepoConfig, name: &str) -> Option<&'a RalphConfig> {
     config.ralphs.iter().find(|r| r.name == name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_has_no_task_branch() {
+        let cfg = RepoConfig::default();
+        assert!(cfg.task_branch.is_none());
+    }
+
+    #[test]
+    fn effective_task_branch_falls_back_to_state_branch() {
+        let cfg = RepoConfig::default();
+        assert_eq!(cfg.effective_task_branch(), DEFAULT_STATE_BRANCH);
+    }
+
+    #[test]
+    fn effective_task_branch_uses_explicit_value() {
+        let cfg = RepoConfig {
+            task_branch: Some("main".to_string()),
+            ..RepoConfig::default()
+        };
+        assert_eq!(cfg.effective_task_branch(), "main");
+    }
+
+    #[test]
+    fn task_branch_roundtrips_via_toml() {
+        let toml_str = r#"
+task_branch = "master"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.task_branch.as_deref(), Some("master"));
+        assert_eq!(cfg.effective_task_branch(), "master");
+    }
+
+    #[test]
+    fn task_branch_omitted_from_toml_when_none() {
+        let cfg = RepoConfig::default();
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            !toml_str.contains("task_branch"),
+            "task_branch should be absent: {toml_str}"
+        );
+    }
+
+    #[test]
+    fn task_branch_absent_in_toml_defaults_to_none() {
+        let toml_str = r#"
+state_branch = "my-state"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.task_branch.is_none());
+        assert_eq!(cfg.effective_task_branch(), "my-state");
+    }
 }
