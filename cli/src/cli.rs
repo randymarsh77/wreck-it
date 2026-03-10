@@ -86,6 +86,12 @@ pub enum Commands {
         #[arg(long)]
         goal: Option<String>,
 
+        /// Maximum number of autonomous continuation steps when using
+        /// `--model-provider copilot-autopilot`.  Maps to Copilot CLI's
+        /// `--max-autopilot-continues` flag.  Default is unlimited.
+        #[arg(long)]
+        max_autopilot_continues: Option<u32>,
+
         /// Webhook URLs to notify on task status transitions (can be specified
         /// multiple times).
         #[arg(long = "notify-webhook", value_name = "URL")]
@@ -119,8 +125,20 @@ pub enum Commands {
         /// instead of the top-level --work-dir.  Example:
         ///   --work-dir-map frontend=/home/user/my-frontend
         ///   --work-dir-map backend=/home/user/my-backend
-        #[arg(long = "work-dir-map", value_name = "ROLE_OR_ID=PATH", number_of_values = 1)]
+        #[arg(
+            long = "work-dir-map",
+            value_name = "ROLE_OR_ID=PATH",
+            number_of_values = 1
+        )]
         work_dir_map: Vec<String>,
+
+        /// Path to the directory containing per-role and per-task system prompt
+        /// template files (e.g. `ideas.md`, `implementer.md`, `impl-my-task.md`).
+        /// Overrides the `prompt_dir` value from the ralph config.
+        /// When not specified, downstream code uses `.wreck-it/prompts` as the
+        /// conventional default location (only active when explicitly set).
+        #[arg(long = "prompt-dir", value_name = "PATH")]
+        prompt_dir: Option<String>,
     },
 
     /// Generate a structured task plan from a natural-language goal using the

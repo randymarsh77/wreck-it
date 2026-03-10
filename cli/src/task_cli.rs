@@ -81,6 +81,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }
     }
 
@@ -186,6 +187,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         };
         task_manager::append_task(&path, new_task).unwrap();
 
@@ -226,7 +228,11 @@ mod tests {
         let alpha = tasks.iter().find(|t| t.id == "alpha").unwrap();
         let beta = tasks.iter().find(|t| t.id == "beta").unwrap();
         let gamma = tasks.iter().find(|t| t.id == "gamma").unwrap();
-        assert_eq!(alpha.status, TaskStatus::Pending, "alpha should be unchanged");
+        assert_eq!(
+            alpha.status,
+            TaskStatus::Pending,
+            "alpha should be unchanged"
+        );
         assert_eq!(beta.status, TaskStatus::Completed, "beta should be updated");
         assert_eq!(
             gamma.status,

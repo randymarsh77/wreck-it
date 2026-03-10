@@ -23,6 +23,7 @@ pub const DEFAULT_COMPLETION_MARKER: &str = ".task-complete";
 pub const DEFAULT_PRECONDITION_MARKER: &str = ".task-precondition-met";
 pub const DEFAULT_REFLECTION_ROUNDS: u8 = 2;
 pub const DEFAULT_REPLAN_THRESHOLD: u32 = 2;
+pub const DEFAULT_AUTOPILOT_MODEL: &str = "copilot-autopilot";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -30,6 +31,14 @@ pub enum ModelProvider {
     Copilot,
     Llama,
     GithubModels,
+    /// Use the Copilot CLI in autopilot mode (`copilot --autopilot --yolo -p`).
+    ///
+    /// This invokes the `copilot` binary as a subprocess with full autonomous
+    /// permissions, letting it execute multi-step tasks (file edits, shell
+    /// commands, git operations) without per-tool approval prompts.
+    #[serde(alias = "copilot-autopilot")]
+    #[value(alias = "copilot-autopilot")]
+    CopilotAutopilot,
 }
 
 /// How task completeness is evaluated after the agent finishes work.
@@ -126,6 +135,12 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
 
+    /// Maximum number of autonomous continuation steps the Copilot CLI agent
+    /// may take per task when using the `CopilotAutopilot` model provider.
+    /// Maps to `--max-autopilot-continues`.  `None` means unlimited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_autopilot_continues: Option<u32>,
+
     /// List of URLs to notify via HTTP POST when a task changes status.
     /// Failures are logged as warnings and do not abort the loop.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -179,6 +194,18 @@ pub struct Config {
     /// See [`KanbanConfig`] for the available settings.
     #[serde(default, skip_serializing_if = "is_default_kanban")]
     pub kanban: KanbanConfig,
+
+    /// Optional path to a directory containing per-role system prompt template
+    /// files and per-task overrides.  When set, the `prompt_loader` module
+    /// resolves and injects custom prompts before each agent invocation,
+    /// falling back to built-in defaults when no matching file is found.
+    ///
+    /// When `None`, downstream code uses `.wreck-it/prompts` as the conventional
+    /// default directory (i.e. no automatic directory creation occurs; it only
+    /// takes effect if the directory is present and the value is explicitly set).
+    /// The value may be overridden at runtime via the `--prompt-dir` CLI flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_dir: Option<String>,
 }
 
 fn default_max_iterations() -> usize {
@@ -235,12 +262,14 @@ impl Default for Config {
             gastown_endpoint: None,
             gastown_token: None,
             github_token: None,
+            max_autopilot_continues: None,
             notify_webhooks: Vec::new(),
             github_issues_enabled: false,
             github_repo: None,
             max_cost_usd: None,
             work_dirs: HashMap::new(),
             kanban: KanbanConfig::default(),
+            prompt_dir: None,
         }
     }
 }
@@ -356,6 +385,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }
     }
 
@@ -473,6 +503,34 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.model_provider, ModelProvider::GithubModels);
+    }
+
+    #[test]
+    fn model_provider_copilot_autopilot_roundtrip() {
+        let config = Config {
+            model_provider: ModelProvider::CopilotAutopilot,
+            max_autopilot_continues: Some(10),
+            ..Config::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("copilotautopilot"));
+        let loaded: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.model_provider, ModelProvider::CopilotAutopilot);
+        assert_eq!(loaded.max_autopilot_continues, Some(10));
+    }
+
+    #[test]
+    fn max_autopilot_continues_defaults_to_none() {
+        let json = r#"{"max_iterations":10}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.max_autopilot_continues.is_none());
+    }
+
+    #[test]
+    fn max_autopilot_continues_omitted_when_none() {
+        let config = Config::default();
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("max_autopilot_continues"));
     }
 
     // ---- AgentRole tests ----
@@ -876,12 +934,22 @@ mod tests {
     #[test]
     fn config_work_dirs_roundtrip() {
         let mut config = Config::default();
-        config.work_dirs.insert("frontend".to_string(), "/repos/frontend".to_string());
-        config.work_dirs.insert("backend".to_string(), "/repos/backend".to_string());
+        config
+            .work_dirs
+            .insert("frontend".to_string(), "/repos/frontend".to_string());
+        config
+            .work_dirs
+            .insert("backend".to_string(), "/repos/backend".to_string());
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.work_dirs.get("frontend").map(String::as_str), Some("/repos/frontend"));
-        assert_eq!(loaded.work_dirs.get("backend").map(String::as_str), Some("/repos/backend"));
+        assert_eq!(
+            loaded.work_dirs.get("frontend").map(String::as_str),
+            Some("/repos/frontend")
+        );
+        assert_eq!(
+            loaded.work_dirs.get("backend").map(String::as_str),
+            Some("/repos/backend")
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@ use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{
-    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus,
+    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus, DEFAULT_AUTOPILOT_MODEL,
     DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
@@ -25,6 +25,7 @@ fn model_name(provider: &ModelProvider) -> String {
         ModelProvider::Copilot => "copilot".to_string(),
         ModelProvider::Llama => DEFAULT_LLAMA_MODEL.to_string(),
         ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL.to_string(),
+        ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL.to_string(),
     }
 }
 
@@ -136,11 +137,12 @@ impl RalphLoop {
             ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL,
             ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
             ModelProvider::Copilot => "copilot",
+            ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL,
         };
         let (inp, out) = model_pricing(model_str);
         let cost_tracker = Arc::new(Mutex::new(CostTracker::new(inp, out)));
 
-        let agent = AgentClient::with_evaluation(
+        let agent = AgentClient::with_evaluation_and_autopilot(
             config.model_provider.clone(),
             config.api_endpoint.clone(),
             config.api_token.clone(),
@@ -149,6 +151,11 @@ impl RalphLoop {
             config.evaluation_mode,
             config.completeness_prompt.clone(),
             config.completion_marker_file.to_string_lossy().to_string(),
+            config.max_autopilot_continues,
+        )
+        .with_prompt_dir(
+            config.prompt_dir.clone(),
+            config.github_repo.clone().unwrap_or_default(),
         )
         .with_cost_tracker(Arc::clone(&cost_tracker));
 
@@ -798,7 +805,7 @@ impl RalphLoop {
         for (idx, task, ts) in task_data {
             // Resolve per-task working directory for multi-repo orchestration.
             let task_work_dir = self.resolve_work_dir(&task);
-            let agent = AgentClient::with_evaluation(
+            let mut agent = AgentClient::with_evaluation_and_autopilot(
                 self.config.model_provider.clone(),
                 self.config.api_endpoint.clone(),
                 self.config.api_token.clone(),
@@ -810,10 +817,10 @@ impl RalphLoop {
                     .completion_marker_file
                     .to_string_lossy()
                     .to_string(),
+                self.config.max_autopilot_continues,
             )
             .with_work_dir(task_work_dir.to_string_lossy().to_string())
             .with_cost_tracker(Arc::clone(&self.cost_tracker));
-            let mut agent = agent;
             let handle = tokio::spawn(async move {
                 // Wrap execution in a per-task timeout when `timeout_seconds` is set.
                 let result = if let Some(timeout_secs) = task.timeout_seconds {
@@ -1095,6 +1102,7 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
         }
     }
 
@@ -1209,6 +1217,7 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
             },
             Task {
                 id: "old".to_string(),
@@ -1231,6 +1240,7 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -1271,6 +1281,7 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -1540,8 +1551,7 @@ mod tests {
 
     #[test]
     fn resolve_work_dir_matches_exact_task_id() {
-        let config =
-            make_config_with_work_dirs("/default", &[("my-task", "/repo/my-task-dir")]);
+        let config = make_config_with_work_dirs("/default", &[("my-task", "/repo/my-task-dir")]);
         let rl = make_ralph_loop(config);
         let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
         assert_eq!(
@@ -1553,8 +1563,7 @@ mod tests {
     #[test]
     fn resolve_work_dir_matches_role() {
         // AgentRole::Implementer serialises to "implementer" via serde.
-        let config =
-            make_config_with_work_dirs("/default", &[("implementer", "/repo/impl-dir")]);
+        let config = make_config_with_work_dirs("/default", &[("implementer", "/repo/impl-dir")]);
         let rl = make_ralph_loop(config);
         let task = make_task("other-id", TaskStatus::Pending, 0, 1, 0, vec![]);
         // default role is Implementer
@@ -1602,10 +1611,7 @@ mod tests {
 
         let config = make_config_with_work_dirs(
             default_dir.path().to_str().unwrap(),
-            &[(
-                "special-task",
-                secondary_dir.path().to_str().unwrap(),
-            )],
+            &[("special-task", secondary_dir.path().to_str().unwrap())],
         );
         let rl = make_ralph_loop(config);
 
@@ -1636,8 +1642,7 @@ mod tests {
         let default_dir = tempfile::tempdir().unwrap();
 
         // No overrides – equivalent to a config that never sets work_dirs.
-        let config =
-            make_config_with_work_dirs(default_dir.path().to_str().unwrap(), &[]);
+        let config = make_config_with_work_dirs(default_dir.path().to_str().unwrap(), &[]);
         let rl = make_ralph_loop(config);
 
         for id in &["impl-1", "test-2", "eval-3"] {
