@@ -217,6 +217,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         }
     }
 

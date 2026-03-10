@@ -621,14 +621,35 @@ impl RalphLoop {
     }
 
     /// Evaluate a task using the configured evaluation mode.
+    ///
+    /// The evaluation mode is resolved in the following priority order:
+    /// 1. Per-task `evaluation.mode` from the task JSON.
+    /// 2. Global evaluation mode from the agent configuration.
     async fn evaluate_task(&mut self, task_idx: usize) -> Result<bool> {
-        if self.agent.evaluation_mode() == EvaluationMode::AgentFile {
-            let task = self.state.tasks[task_idx].clone();
+        let task = self.state.tasks[task_idx].clone();
+
+        // Resolve the effective evaluation mode (per-task overrides global).
+        let effective_mode = task
+            .evaluation
+            .as_ref()
+            .and_then(|e| {
+                // Parse the mode string as a JSON-quoted string so the serde
+                // snake_case representation ("command", "agent_file", "semantic")
+                // matches the EvaluationMode enum's serde serialization format.
+                let quoted = format!("\"{}\"", e.mode);
+                serde_json::from_str::<EvaluationMode>(&quoted).ok()
+            })
+            .unwrap_or_else(|| self.agent.evaluation_mode());
+
+        if effective_mode == EvaluationMode::AgentFile {
             return self.agent.evaluate_completeness(&task).await;
         }
-        if self.agent.evaluation_mode() == EvaluationMode::Semantic {
-            let task = self.state.tasks[task_idx].clone();
+        if effective_mode == EvaluationMode::Semantic {
             let verdict = self.agent.evaluate_task_semantically(&task).await?;
+            // Persist the score for the TUI task detail view.
+            self.state
+                .semantic_scores
+                .insert(task.id.clone(), verdict.score);
             // Surface the rationale in the loop log so it appears in the TUI.
             self.state.add_log(format!(
                 "Semantic verdict for [{}]: passed={}, score={}, rationale={}",
@@ -1017,6 +1038,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         }
     }
 
@@ -1132,6 +1155,8 @@ mod tests {
                 parent_id: None,
                 labels: vec![],
                 system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
             },
             Task {
                 id: "old".to_string(),
@@ -1155,6 +1180,8 @@ mod tests {
                 parent_id: None,
                 labels: vec![],
                 system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -1196,6 +1223,8 @@ mod tests {
                 parent_id: None,
                 labels: vec![],
                 system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);

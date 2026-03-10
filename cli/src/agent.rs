@@ -1723,6 +1723,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         };
 
         let result = client.execute_task(&task).await;
@@ -1825,6 +1827,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         };
 
         // rounds=0 → no reflection loop; error comes from execute_task
@@ -1872,6 +1876,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         };
 
         // No precondition prompt → always eligible
@@ -1928,6 +1934,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         };
 
         // Without a running Copilot server the session creation will fail
@@ -2015,6 +2023,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         };
 
         let result = client.execute_task(&task).await;
