@@ -2,6 +2,7 @@ use crate::agent_memory::AgentMemory;
 use crate::artefact_store;
 use crate::cost_tracker::{CostTracker, TokenUsage};
 use crate::prompt_loader;
+use crate::semantic_eval::{self, SemanticVerdict};
 use crate::types::{
     CriticResult, EvaluationMode, ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL,
     DEFAULT_LLAMA_MODEL, DEFAULT_PRECONDITION_MARKER, LLAMA_PROVIDER_TYPE,
@@ -880,6 +881,13 @@ impl AgentClient {
             return Ok(true);
         }
 
+        // When using semantic evaluation, delegate to evaluate_semantically().
+        if self.evaluation_mode == EvaluationMode::Semantic {
+            // The caller should use evaluate_semantically() instead.
+            // Returning true here so the normal flow does not block.
+            return Ok(true);
+        }
+
         if let Some(command) = self.verification_command.as_deref() {
             tracing::info!(
                 "Running custom verification command '{}' in {}",
@@ -1023,6 +1031,52 @@ impl AgentClient {
         }
 
         Ok(complete)
+    }
+
+    /// Evaluate task completeness using semantic (LLM diff-reading) evaluation.
+    ///
+    /// Collects the current `git diff HEAD` in the work directory, builds an
+    /// evaluation prompt that includes the task description, acceptance
+    /// criteria, and the diff, then asks the configured LLM to return a
+    /// structured JSON verdict `{ passed: bool, score: u8, rationale: String }`.
+    ///
+    /// Returns `Ok(verdict)` on success.  The verdict uses a conservative
+    /// fallback when the model returns malformed JSON (see [`semantic_eval`]).
+    pub async fn evaluate_task_semantically(&mut self, task: &Task) -> Result<SemanticVerdict> {
+        self.validate_work_dir()?;
+
+        // Collect the current diff using the existing helper.
+        let diff = self.get_git_diff()?;
+
+        // Build the evaluation prompt.
+        let prompt_str = semantic_eval::build_semantic_eval_prompt(
+            task,
+            self.completeness_prompt.as_deref(),
+            &diff,
+        );
+
+        // Route to the appropriate LLM backend.
+        let response = if self.model_provider == ModelProvider::GithubModels
+            || self.model_provider == ModelProvider::CopilotAutopilot
+        {
+            self.chat_via_http(&prompt_str).await?
+        } else {
+            self.critique_via_copilot(&prompt_str).await?
+        };
+
+        tracing::info!("Semantic evaluation raw response: {}", response);
+
+        let verdict = semantic_eval::parse_semantic_verdict(&response);
+
+        tracing::info!(
+            "Semantic verdict for task [{}]: passed={}, score={}, rationale={}",
+            task.id,
+            verdict.passed,
+            verdict.score,
+            verdict.rationale
+        );
+
+        Ok(verdict)
     }
 
     /// Evaluate whether a task's precondition is satisfied using an agent.
@@ -1560,6 +1614,26 @@ mod tests {
     }
 
     #[test]
+    fn run_tests_returns_true_in_semantic_mode() {
+        let dir = tempdir().unwrap();
+        init_git_repo(dir.path());
+        let client = AgentClient::with_evaluation(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            dir.path().to_string_lossy().to_string(),
+            None,
+            EvaluationMode::Semantic,
+            Some("check diff and task description".to_string()),
+            ".task-complete".to_string(),
+        );
+
+        // In semantic mode, run_tests() short-circuits to true so the caller
+        // can use evaluate_task_semantically() for the real verdict.
+        assert!(client.run_tests().unwrap());
+    }
+
+    #[test]
     fn evaluation_mode_accessor() {
         let client = AgentClient::new(
             ModelProvider::Copilot,
@@ -1581,6 +1655,18 @@ mod tests {
             ".done".to_string(),
         );
         assert_eq!(client2.evaluation_mode(), EvaluationMode::AgentFile);
+
+        let client3 = AgentClient::with_evaluation(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            ".".to_string(),
+            None,
+            EvaluationMode::Semantic,
+            None,
+            ".done".to_string(),
+        );
+        assert_eq!(client3.evaluation_mode(), EvaluationMode::Semantic);
     }
 
     #[test]
