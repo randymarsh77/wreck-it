@@ -1,9 +1,6 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_trigger",
   "iteration": 3,
-  "current_task_id": "feature-assessor",
-  "issue_number": 209,
-  "last_prompt": "Assess the state of feature implementation tasks. Read the current feature-dev-tasks.json on the wreck-it state branch (or check if it is empty). If all current feature tasks are completed (or none exist), research the codebase, open issues, and project roadmap to identify 3-5 new features to implement. Write the new tasks as a JSON array to `.wreck-it/plans/feature-dev-tasks.json--assessor.json` on the main branch. Each task must be a valid wreck-it task object with id, description, status (pending), role, phase, depends_on, priority, and complexity fields. New features should include implementation tasks, test tasks, and evaluation tasks following the ideas/implementer/evaluator pattern. The wreck-it headless runner will automatically migrate the plan into the feature-dev-tasks.json task file on the state branch.",
   "memory": [
     "iteration 1: triggered cloud agent for task feature-assessor (issue #98)",
     "iteration 1: agent created PR #99 for task Some(\"feature-assessor\")",
@@ -183,6 +180,9 @@
     "iteration 2: PR #105 not yet mergeable",
     "iteration 2: PR #105 not yet mergeable",
     "iteration 2: PR #105 not yet mergeable",
-    "iteration 3: triggered cloud agent for task feature-assessor (issue #209)"
+    "iteration 3: triggered cloud agent for task feature-assessor (issue #209)",
+    "iteration 3: agent created PR #211 for task Some(\"feature-assessor\")",
+    "iteration 3: marked PR #211 as ready for review",
+    "iteration 3: merged PR #211 for task Some(\"feature-assessor\") (brute mode)"
   ]
 }
