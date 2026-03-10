@@ -139,7 +139,7 @@ mod tests {
         let tmpl = find_template("engineering-team").expect("template should exist");
         assert_eq!(tmpl.manifest.name, "engineering-team");
         assert!(!tmpl.manifest.description.is_empty());
-        assert_eq!(tmpl.manifest.ralphs.len(), 5);
+        assert_eq!(tmpl.manifest.ralphs.len(), 6);
 
         let names: Vec<&str> = tmpl
             .manifest
@@ -152,6 +152,7 @@ mod tests {
         assert!(names.contains(&"planner"));
         assert!(names.contains(&"cohesiveness"));
         assert!(names.contains(&"feature-dev"));
+        assert!(names.contains(&"merge"));
     }
 
     #[test]
@@ -189,8 +190,8 @@ mod tests {
 
         assert!(!result.written.is_empty());
         assert!(result.skipped.is_empty());
-        assert_eq!(result.ralphs_added.len(), 5);
-        assert_eq!(config.ralphs.len(), 5);
+        assert_eq!(result.ralphs_added.len(), 6);
+        assert_eq!(config.ralphs.len(), 6);
 
         // Verify files exist on disk.
         for name in &result.written {
@@ -231,6 +232,7 @@ mod tests {
                 reviewers: None,
                 command: None,
                 brute_mode: None,
+                backend: None,
             }],
             ..RepoConfig::default()
         };
@@ -243,11 +245,12 @@ mod tests {
         assert_eq!(config.ralphs[0].task_file, "custom-docs.json");
 
         // "features", "planner", and "feature-dev" should be added.
-        assert_eq!(result.ralphs_added.len(), 4);
+        assert_eq!(result.ralphs_added.len(), 5);
         assert!(result.ralphs_added.contains(&"features".to_string()));
         assert!(result.ralphs_added.contains(&"planner".to_string()));
         assert!(result.ralphs_added.contains(&"cohesiveness".to_string()));
         assert!(result.ralphs_added.contains(&"feature-dev".to_string()));
+        assert!(result.ralphs_added.contains(&"merge".to_string()));
     }
 
     #[test]
@@ -266,6 +269,6 @@ mod tests {
         assert!(result.written.is_empty());
         assert!(!result.skipped.is_empty());
         assert!(result.ralphs_added.is_empty());
-        assert_eq!(config.ralphs.len(), 5);
+        assert_eq!(config.ralphs.len(), 6);
     }
 }

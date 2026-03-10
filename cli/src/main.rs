@@ -380,6 +380,7 @@ async fn main() -> Result<()> {
                         reviewers: None,
                         command: None,
                         brute_mode: None,
+                        backend: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -477,6 +478,7 @@ async fn main() -> Result<()> {
                         reviewers: None,
                         command: None,
                         brute_mode: None,
+                        backend: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
