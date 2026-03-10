@@ -67,6 +67,16 @@ pub enum KanbanBackend {
     Trello,
 }
 
+impl std::fmt::Display for KanbanBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Linear => write!(f, "Linear"),
+            Self::Jira => write!(f, "Jira"),
+            Self::Trello => write!(f, "Trello"),
+        }
+    }
+}
+
 /// Provider-agnostic configuration for the Kanban integration.
 ///
 /// These fields live in the wreck-it `Config` and are used by
@@ -276,7 +286,7 @@ pub fn provider_from_config(cfg: &KanbanConfig) -> Option<KanbanClient> {
         Some(t) if !t.is_empty() => t.clone(),
         _ => {
             tracing::warn!(
-                "kanban provider {:?} selected but kanban.api_token is not set; \
+                "kanban provider {} selected but kanban.api_token is not set; \
                  Kanban integration disabled",
                 backend
             );
@@ -288,7 +298,7 @@ pub fn provider_from_config(cfg: &KanbanConfig) -> Option<KanbanClient> {
         Some(p) if !p.is_empty() => p.clone(),
         _ => {
             tracing::warn!(
-                "kanban provider {:?} selected but kanban.project_id is not set; \
+                "kanban provider {} selected but kanban.project_id is not set; \
                  Kanban integration disabled",
                 backend
             );
