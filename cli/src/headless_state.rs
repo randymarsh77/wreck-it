@@ -230,4 +230,110 @@ mod tests {
         assert_eq!(loaded.phase, AgentPhase::AwaitingReview);
         assert_eq!(loaded.review_requested, Some(true));
     }
+
+    #[test]
+    fn test_tracked_pr_merge_method_backward_compat() {
+        // Existing state files without merge_method should load fine.
+        let json = r#"{"pr_number":10,"task_id":"impl-1"}"#;
+        let loaded: TrackedPr = serde_json::from_str(json).unwrap();
+        assert_eq!(loaded.pr_number, 10);
+        assert_eq!(loaded.task_id, "impl-1");
+        assert_eq!(loaded.merge_method, None);
+    }
+
+    #[test]
+    fn test_tracked_pr_merge_method_roundtrip() {
+        let pr = TrackedPr {
+            pr_number: 50,
+            task_id: "merge-pr-42".to_string(),
+            issue_number: Some(100),
+            review_requested: None,
+            merge_method: Some("merge".to_string()),
+        };
+        let json = serde_json::to_string(&pr).unwrap();
+        assert!(json.contains("\"merge_method\":\"merge\""));
+        let loaded: TrackedPr = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.merge_method, Some("merge".to_string()));
+    }
+
+    #[test]
+    fn test_tracked_pr_merge_method_none_omitted_from_json() {
+        let pr = TrackedPr {
+            pr_number: 5,
+            task_id: "eval-1".to_string(),
+            issue_number: None,
+            review_requested: None,
+            merge_method: None,
+        };
+        let json = serde_json::to_string(&pr).unwrap();
+        assert!(!json.contains("merge_method"));
+    }
+
+    #[test]
+    fn test_pending_issue_roundtrip() {
+        let pi = PendingIssue {
+            issue_number: 42,
+            task_id: "merge-pr-10".to_string(),
+            merge_method: Some("merge".to_string()),
+        };
+        let json = serde_json::to_string(&pi).unwrap();
+        let loaded: PendingIssue = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, pi);
+    }
+
+    #[test]
+    fn test_pending_issue_merge_method_none_omitted() {
+        let pi = PendingIssue {
+            issue_number: 42,
+            task_id: "merge-pr-10".to_string(),
+            merge_method: None,
+        };
+        let json = serde_json::to_string(&pi).unwrap();
+        assert!(!json.contains("merge_method"));
+    }
+
+    #[test]
+    fn test_pending_issues_backward_compat() {
+        // Existing state files without pending_issues should load fine.
+        let dir = tempdir().unwrap();
+        let state_file = dir.path().join(".wreck-it-state.json");
+        fs::write(&state_file, r#"{"phase":"needs_trigger","iteration":5}"#).unwrap();
+
+        let loaded = load_headless_state(&state_file).unwrap();
+        assert!(loaded.pending_issues.is_empty());
+    }
+
+    #[test]
+    fn test_pending_issues_roundtrip_in_state() {
+        let dir = tempdir().unwrap();
+        let state_file = dir.path().join(".wreck-it-state.json");
+        let state = HeadlessState {
+            phase: AgentPhase::NeedsTrigger,
+            iteration: 1,
+            current_task_id: None,
+            issue_number: None,
+            pr_number: None,
+            pr_url: None,
+            last_prompt: None,
+            memory: vec![],
+            tracked_prs: vec![],
+            pending_issues: vec![PendingIssue {
+                issue_number: 55,
+                task_id: "merge-pr-10".to_string(),
+                merge_method: Some("merge".to_string()),
+            }],
+            review_requested: None,
+            task_statuses: std::collections::HashMap::new(),
+        };
+
+        save_headless_state(&state_file, &state).unwrap();
+        let loaded = load_headless_state(&state_file).unwrap();
+        assert_eq!(loaded.pending_issues.len(), 1);
+        assert_eq!(loaded.pending_issues[0].issue_number, 55);
+        assert_eq!(loaded.pending_issues[0].task_id, "merge-pr-10");
+        assert_eq!(
+            loaded.pending_issues[0].merge_method,
+            Some("merge".to_string()),
+        );
+    }
 }
