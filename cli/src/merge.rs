@@ -229,6 +229,7 @@ async fn resolve_via_cloud_agent(client: &CloudAgentClient, detail: &PrDetail) -
             &issue_body,
             &[],
             Some(&detail.head_ref),
+            None,
         )
         .await?;
 
