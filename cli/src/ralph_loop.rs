@@ -7,8 +7,8 @@ use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{
-    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus,
-    DEFAULT_AUTOPILOT_MODEL, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
+    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus, DEFAULT_AUTOPILOT_MODEL,
+    DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
@@ -1447,8 +1447,7 @@ mod tests {
 
     #[test]
     fn resolve_work_dir_matches_exact_task_id() {
-        let config =
-            make_config_with_work_dirs("/default", &[("my-task", "/repo/my-task-dir")]);
+        let config = make_config_with_work_dirs("/default", &[("my-task", "/repo/my-task-dir")]);
         let rl = make_ralph_loop(config);
         let task = make_task("my-task", TaskStatus::Pending, 0, 1, 0, vec![]);
         assert_eq!(
@@ -1460,8 +1459,7 @@ mod tests {
     #[test]
     fn resolve_work_dir_matches_role() {
         // AgentRole::Implementer serialises to "implementer" via serde.
-        let config =
-            make_config_with_work_dirs("/default", &[("implementer", "/repo/impl-dir")]);
+        let config = make_config_with_work_dirs("/default", &[("implementer", "/repo/impl-dir")]);
         let rl = make_ralph_loop(config);
         let task = make_task("other-id", TaskStatus::Pending, 0, 1, 0, vec![]);
         // default role is Implementer
@@ -1509,10 +1507,7 @@ mod tests {
 
         let config = make_config_with_work_dirs(
             default_dir.path().to_str().unwrap(),
-            &[(
-                "special-task",
-                secondary_dir.path().to_str().unwrap(),
-            )],
+            &[("special-task", secondary_dir.path().to_str().unwrap())],
         );
         let rl = make_ralph_loop(config);
 
@@ -1543,8 +1538,7 @@ mod tests {
         let default_dir = tempfile::tempdir().unwrap();
 
         // No overrides – equivalent to a config that never sets work_dirs.
-        let config =
-            make_config_with_work_dirs(default_dir.path().to_str().unwrap(), &[]);
+        let config = make_config_with_work_dirs(default_dir.path().to_str().unwrap(), &[]);
         let rl = make_ralph_loop(config);
 
         for id in &["impl-1", "test-2", "eval-3"] {

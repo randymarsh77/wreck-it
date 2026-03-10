@@ -72,9 +72,9 @@ impl TaskPlanner {
 
     async fn call_llm(&self, prompt: &str, model_override: Option<&str>) -> Result<String> {
         match self.model_provider {
-            ModelProvider::GithubModels | ModelProvider::Llama | ModelProvider::CopilotAutopilot => {
-                self.call_via_http(prompt, model_override).await
-            }
+            ModelProvider::GithubModels
+            | ModelProvider::Llama
+            | ModelProvider::CopilotAutopilot => self.call_via_http(prompt, model_override).await,
             ModelProvider::Copilot => self.call_via_copilot_sdk(prompt).await,
         }
     }

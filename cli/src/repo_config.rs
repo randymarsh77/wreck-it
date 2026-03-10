@@ -325,7 +325,7 @@ state_file = ".docs-state.json"
                 reviewers: None,
                 command: None,
                 brute_mode: None,
-                    backend: None,
+                backend: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -352,7 +352,7 @@ state_file = ".docs-state.json"
                 reviewers: None,
                 command: None,
                 brute_mode: None,
-                    backend: None,
+                backend: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -424,7 +424,7 @@ reviewers = ["alice", "bob"]
                 reviewers: Some(vec!["reviewer1".to_string(), "reviewer2".to_string()]),
                 command: None,
                 brute_mode: None,
-                    backend: None,
+                backend: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -449,7 +449,7 @@ reviewers = ["alice", "bob"]
                 reviewers: None,
                 command: None,
                 brute_mode: None,
-                    backend: None,
+                backend: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -499,7 +499,7 @@ command = "unstuck"
                 reviewers: None,
                 command: Some("unstuck".to_string()),
                 brute_mode: None,
-                    backend: None,
+                backend: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
