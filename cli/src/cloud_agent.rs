@@ -2495,11 +2495,7 @@ impl CloudAgentClient {
     /// Fetch the most recent commit messages on a branch.
     ///
     /// Returns a newline-separated string of `<sha_short> <message>` lines.
-    pub async fn fetch_recent_commits(
-        &self,
-        branch: &str,
-        count: u32,
-    ) -> Result<String> {
+    pub async fn fetch_recent_commits(&self, branch: &str, count: u32) -> Result<String> {
         let url = format!(
             "{}/repos/{}/{}/commits?sha={}&per_page={}",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, branch, count,

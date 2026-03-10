@@ -89,7 +89,11 @@ pub fn select_next_task(tasks: &[Task], state: &HeadlessState) -> Option<usize> 
 /// files remain stateless.
 ///
 /// Returns the number of tasks that were reset.
-pub fn reset_recurring_tasks(tasks: &mut [Task], state: &mut HeadlessState, now_secs: u64) -> usize {
+pub fn reset_recurring_tasks(
+    tasks: &mut [Task],
+    state: &mut HeadlessState,
+    now_secs: u64,
+) -> usize {
     let mut count = 0;
     for task in tasks.iter_mut() {
         if task.kind != TaskKind::Recurring

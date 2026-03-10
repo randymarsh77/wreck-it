@@ -216,6 +216,7 @@ impl AgentClient {
 
     /// Create a new client with full configuration including evaluation settings.
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     pub fn with_evaluation(
         model_provider: ModelProvider,
         api_endpoint: String,
