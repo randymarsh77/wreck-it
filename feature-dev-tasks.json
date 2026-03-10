@@ -324,7 +324,7 @@
   {
     "id": "ideas-prompt-customization",
     "description": "Research and design a dynamic prompt customization system for wreck-it. The system should allow users to place per-role system prompt templates in a `.wreck-it/prompts/` directory (e.g. `ideas.md`, `implementer.md`, `evaluator.md`, plus per-task overrides like `impl-my-task.md`). Review the existing agent invocation path in `cli/src/agent.rs` and `cli/src/cloud_agent.rs` to identify where system prompts are constructed and how they could be replaced or augmented with user-supplied content. Also review `core/src/types.rs` (Task and Config structs) to identify any new fields needed (e.g. `prompt_dir: Option<String>` on Config, `system_prompt_override: Option<String>` on Task). Document a design that supports: (1) global role-based prompt templates, (2) per-task prompt overrides, (3) variable interpolation (e.g. `{{task_id}}`, `{{repo}}`). Write a design document as inline comments in a new stub file `cli/src/prompt_loader.rs`.",
-    "status": "inprogress",
+    "status": "pending",
     "role": "ideas",
     "priority": 4,
     "complexity": 2
