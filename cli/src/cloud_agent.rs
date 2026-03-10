@@ -1980,10 +1980,19 @@ impl CloudAgentClient {
 
         // Use the GraphQL API to enable auto-merge.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
-        let gql_merge_method = match merge_method.unwrap_or("squash") {
+        let method = merge_method.unwrap_or("squash");
+        let gql_merge_method = match method {
             "merge" => "MERGE",
             "rebase" => "REBASE",
-            _ => "SQUASH",
+            "squash" => "SQUASH",
+            other => {
+                tracing::warn!(
+                    "Unknown merge method {:?} for PR #{}, defaulting to SQUASH",
+                    other,
+                    pr_number,
+                );
+                "SQUASH"
+            }
         };
         let mutation = format!(
             "mutation($prId: ID!) {{ \
