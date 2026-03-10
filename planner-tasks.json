@@ -2,7 +2,7 @@
   {
     "id": "feature-planner",
     "description": "Research the project's domain and developer tools space to identify emerging trends, novel approaches, and opportunities. Review recent developments in related areas and compare findings against the project's current capabilities and roadmap. Propose novel feature combinations that leverage the project's unique capabilities to create differentiated features. Write the proposed feature tasks as a JSON array to `.wreck-it/plans/feature-dev-tasks.json--planner.json` on the main branch. Each task must be a valid wreck-it task object with id, description, status (pending), role, phase, depends_on, priority, and complexity fields. The wreck-it headless runner will automatically migrate the plan into the feature-dev-tasks.json task file on the state branch.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "ideas",
     "kind": "recurring",
     "cooldown_seconds": 172800,
