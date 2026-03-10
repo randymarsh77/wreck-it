@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 2,
+  "phase": "agent_working",
+  "iteration": 3,
   "current_task_id": "feature-assessor",
-  "issue_number": 104,
-  "pr_number": 105,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/105",
-  "last_prompt": "Assess the state of feature implementation tasks in feature-dev-tasks.json. Check if all current feature tasks are completed. If all features are complete, research the codebase, open issues, and project roadmap to identify 3-5 new features to implement. Create new task entries in feature-dev-tasks.json with proper phases, dependencies, and descriptions. New features should include implementation tasks, test tasks, and evaluation tasks following the ideas/implementer/evaluator pattern.",
+  "issue_number": 209,
+  "last_prompt": "Assess the state of feature implementation tasks. Read the current feature-dev-tasks.json on the wreck-it state branch (or check if it is empty). If all current feature tasks are completed (or none exist), research the codebase, open issues, and project roadmap to identify 3-5 new features to implement. Write the new tasks as a JSON array to `.wreck-it/plans/feature-dev-tasks.json--assessor.json` on the main branch. Each task must be a valid wreck-it task object with id, description, status (pending), role, phase, depends_on, priority, and complexity fields. New features should include implementation tasks, test tasks, and evaluation tasks following the ideas/implementer/evaluator pattern. The wreck-it headless runner will automatically migrate the plan into the feature-dev-tasks.json task file on the state branch.",
   "memory": [
     "iteration 1: triggered cloud agent for task feature-assessor (issue #98)",
     "iteration 1: agent created PR #99 for task Some(\"feature-assessor\")",
@@ -184,13 +182,7 @@
     "iteration 2: PR #105 not yet mergeable",
     "iteration 2: PR #105 not yet mergeable",
     "iteration 2: PR #105 not yet mergeable",
-    "iteration 2: PR #105 not yet mergeable"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 105,
-      "task_id": "feature-assessor",
-      "issue_number": 104
-    }
+    "iteration 2: PR #105 not yet mergeable",
+    "iteration 3: triggered cloud agent for task feature-assessor (issue #209)"
   ]
 }
