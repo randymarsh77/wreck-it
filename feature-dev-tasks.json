@@ -357,7 +357,7 @@
   {
     "id": "eval-prompt-customization",
     "description": "Evaluate the prompt customization feature end-to-end. Create a minimal `.wreck-it/prompts/ideas.md` file containing a custom role prompt in this repository, run a dry-run or unit-level test to confirm `PromptLoader` picks it up and substitutes variables correctly. Verify that the fallback path works when the file is absent. Review the implementation in `cli/src/prompt_loader.rs` for correctness of variable substitution logic and confirm no regressions in existing agent behaviour by running `cargo test --lib`. Write a brief evaluation summary as a comment block at the top of `cli/src/prompt_loader.rs` noting test results, edge cases handled, and any follow-up improvements.",
-    "status": "inprogress",
+    "status": "pending",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
