@@ -1,11 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 33,
-  "current_task_id": "ideas-semantic-evaluation",
-  "issue_number": 229,
-  "pr_number": 230,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/230",
-  "last_prompt": "Research and design a semantic evaluation mode for wreck-it tasks. Currently evaluation is done via shell command exit codes (`command` evaluation) or agent-created marker files (`agent-file` evaluation). Design a new `semantic` evaluation mode where the agent is prompted to read the original task description alongside the git diff produced by the implementation and returns a structured verdict (`{ passed: bool, score: u8, rationale: String }`). Review `cli/src/agent.rs` and `core/src/types.rs` (the `EvaluationMode` enum and `Task.evaluation` field) to understand how to add the new variant. Consider: what context to include in the evaluation prompt (task description, acceptance criteria, diff summary), how to parse the structured JSON verdict, how to surface the rationale in TUI and logs, and what fallback behaviour applies if the agent returns malformed output. Document the design in inline comments in a new stub file `cli/src/semantic_eval.rs`.",
+  "iteration": 34,
+  "current_task_id": "impl-semantic-evaluation",
+  "issue_number": 237,
+  "last_prompt": "Implement the semantic evaluation mode designed in `ideas-semantic-evaluation`. Create `cli/src/semantic_eval.rs` with an async `evaluate_semantically(task, diff, agent_client) -> SemanticVerdict` function where `SemanticVerdict = { passed: bool, score: u8, rationale: String }`. The function should construct a prompt that includes the task description, any acceptance criteria from `task.acceptance_criteria`, the git diff, and instructions to return a JSON verdict. Parse the agent response with lenient JSON extraction (scan for the first `{` block). Add `Semantic` variant to `EvaluationMode` in `core/src/types.rs`. Wire the new mode into the evaluation dispatch in `cli/src/agent.rs` (or wherever EvaluationMode is dispatched). Expose it via `evaluation: { mode: \"semantic\" }` in task JSON. Log the rationale at INFO level and surface the score in TUI task detail view.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -235,13 +233,10 @@
     "iteration 32: marked PR #228 as ready for review",
     "iteration 32: merged PR #228 for task Some(\"eval-prompt-customization\") (brute mode)",
     "iteration 33: triggered cloud agent for task ideas-semantic-evaluation (issue #229)",
-    "iteration 33: agent opened PR #230 for task Some(\"ideas-semantic-evaluation\") (still working)"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 230,
-      "task_id": "ideas-semantic-evaluation",
-      "issue_number": 229
-    }
+    "iteration 33: agent opened PR #230 for task Some(\"ideas-semantic-evaluation\") (still working)",
+    "iteration 33: agent created PR #230 for task Some(\"ideas-semantic-evaluation\")",
+    "iteration 33: marked PR #230 as ready for review",
+    "iteration 33: merged PR #230 for task Some(\"ideas-semantic-evaluation\") (brute mode)",
+    "iteration 34: triggered cloud agent for task impl-semantic-evaluation (issue #237)"
   ]
 }
