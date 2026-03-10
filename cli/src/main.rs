@@ -632,6 +632,7 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
                 },
                 Task {
                     id: "2".to_string(),
@@ -654,6 +655,7 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
                 },
                 Task {
                     id: "3".to_string(),
@@ -676,6 +678,7 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
                 },
             ];
 
@@ -981,6 +984,7 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
                 };
                 task_manager::append_task(&task_file, new_task)?;
                 println!("Task '{}' added to {}.", id, task_file.display());
