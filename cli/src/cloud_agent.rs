@@ -51,6 +51,8 @@ pub enum PrMergeStatus {
     Mergeable,
     /// The PR has already been merged.
     AlreadyMerged,
+    /// The PR was closed without being merged.
+    ClosedNotMerged,
 }
 
 /// Summary of an open pull request, returned by [`CloudAgentClient::list_open_prs`].
@@ -1192,7 +1194,7 @@ impl CloudAgentClient {
             return Ok(PrMergeStatus::AlreadyMerged);
         }
         if state != "open" {
-            return Ok(PrMergeStatus::NotMergeable);
+            return Ok(PrMergeStatus::ClosedNotMerged);
         }
         if draft {
             return Ok(PrMergeStatus::Draft);

@@ -752,6 +752,25 @@ async fn advance_tracked_prs(
                 resolved_pr_numbers.push(pr_number);
                 made_progress = true;
             }
+            Ok(PrMergeStatus::ClosedNotMerged) => {
+                println!(
+                    "[wreck-it] advance: PR #{} (task {}) was closed without merging — \
+                     resetting task to pending",
+                    pr_number, tracked.task_id
+                );
+                mark_task_pending_by_id(&tracked.task_id, &task_file)?;
+                if state.pr_number == Some(pr_number) {
+                    state.phase = AgentPhase::NeedsTrigger;
+                    state.current_task_id = None;
+                    state.issue_number = None;
+                    state.pr_number = None;
+                    state.pr_url = None;
+                    state.last_prompt = None;
+                    state.review_requested = None;
+                }
+                resolved_pr_numbers.push(pr_number);
+                made_progress = true;
+            }
             Err(e) => {
                 println!(
                     "[wreck-it] advance: error checking PR #{}: {}",
@@ -816,6 +835,24 @@ fn mark_task_complete_by_id(task_id: &str, task_file: &Path) -> Result<()> {
                     .unwrap_or_default()
                     .as_secs(),
             );
+            save_tasks(task_file, &tasks)?;
+        }
+    }
+    Ok(())
+}
+
+/// Reset a task back to pending by its ID in the task file.
+///
+/// Used when a PR is closed without being merged so the task can be
+/// retried on the next iteration.
+fn mark_task_pending_by_id(task_id: &str, task_file: &Path) -> Result<()> {
+    if task_id == UNKNOWN_TASK_ID {
+        return Ok(());
+    }
+    let mut tasks = load_tasks(task_file)?;
+    if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
+        if task.status != crate::types::TaskStatus::Pending {
+            task.status = crate::types::TaskStatus::Pending;
             save_tasks(task_file, &tasks)?;
         }
     }
@@ -1321,6 +1358,33 @@ async fn run_needs_verification(
             }
             // Remove from tracked list.
             state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
+
+            return Ok(StepOutcome::Continue);
+        }
+        Ok(PrMergeStatus::ClosedNotMerged) => {
+            println!(
+                "[wreck-it] PR #{} was closed without merging — resetting task to pending",
+                pr_number
+            );
+            state.memory.push(format!(
+                "iteration {}: PR #{} closed without merge for task {:?} — resetting to pending",
+                state.iteration, pr_number, state.current_task_id,
+            ));
+
+            // Reset task back to pending so it will be retried.
+            let task_file = state_dir.join(&headless_cfg.task_file);
+            if let Some(task_id) = &state.current_task_id {
+                mark_task_pending_by_id(task_id, &task_file)?;
+            }
+            // Remove from tracked list and reset state.
+            state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
+            state.phase = AgentPhase::NeedsTrigger;
+            state.current_task_id = None;
+            state.issue_number = None;
+            state.pr_number = None;
+            state.pr_url = None;
+            state.last_prompt = None;
+            state.review_requested = None;
 
             return Ok(StepOutcome::Continue);
         }
