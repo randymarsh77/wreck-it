@@ -182,6 +182,18 @@ pub struct Config {
     /// appropriate repo.  See `docs/multi-repo.md` for the full design.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub work_dirs: HashMap<String, String>,
+
+    /// Optional path to a directory containing per-role system prompt template
+    /// files and per-task overrides.  When set, the `prompt_loader` module
+    /// resolves and injects custom prompts before each agent invocation,
+    /// falling back to built-in defaults when no matching file is found.
+    ///
+    /// When `None`, downstream code uses `.wreck-it/prompts` as the conventional
+    /// default directory (i.e. no automatic directory creation occurs; it only
+    /// takes effect if the directory is present and the value is explicitly set).
+    /// The value may be overridden at runtime via the `--prompt-dir` CLI flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_dir: Option<String>,
 }
 
 fn default_max_iterations() -> usize {
@@ -240,6 +252,7 @@ impl Default for Config {
             github_repo: None,
             max_cost_usd: None,
             work_dirs: HashMap::new(),
+            prompt_dir: None,
         }
     }
 }

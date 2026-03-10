@@ -147,6 +147,10 @@ impl RalphLoop {
             config.completion_marker_file.to_string_lossy().to_string(),
             config.max_autopilot_continues,
         )
+        .with_prompt_dir(
+            config.prompt_dir.clone(),
+            config.github_repo.clone().unwrap_or_default(),
+        )
         .with_cost_tracker(Arc::clone(&cost_tracker));
 
         Self {

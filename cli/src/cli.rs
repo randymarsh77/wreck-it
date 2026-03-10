@@ -131,6 +131,14 @@ pub enum Commands {
             number_of_values = 1
         )]
         work_dir_map: Vec<String>,
+
+        /// Path to the directory containing per-role and per-task system prompt
+        /// template files (e.g. `ideas.md`, `implementer.md`, `impl-my-task.md`).
+        /// Overrides the `prompt_dir` value from the ralph config.
+        /// When not specified, downstream code uses `.wreck-it/prompts` as the
+        /// conventional default location (only active when explicitly set).
+        #[arg(long = "prompt-dir", value_name = "PATH")]
+        prompt_dir: Option<String>,
     },
 
     /// Generate a structured task plan from a natural-language goal using the

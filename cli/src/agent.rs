@@ -1,6 +1,7 @@
 use crate::agent_memory::AgentMemory;
 use crate::artefact_store;
 use crate::cost_tracker::{CostTracker, TokenUsage};
+use crate::prompt_loader;
 use crate::types::{
     CriticResult, EvaluationMode, ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL,
     DEFAULT_LLAMA_MODEL, DEFAULT_PRECONDITION_MARKER, LLAMA_PROVIDER_TYPE,
@@ -186,6 +187,14 @@ pub struct AgentClient {
     /// Optional shared cost tracker updated by every HTTP chat completion call.
     /// When `None` (e.g. Copilot / Llama provider), no usage is recorded.
     cost_tracker: Option<Arc<std::sync::Mutex<CostTracker>>>,
+    /// Optional directory containing per-role and per-task system prompt
+    /// templates.  When set, [`prompt_loader::resolve_system_prompt`] is
+    /// called before each task execution to override the built-in prompt.
+    prompt_dir: Option<String>,
+    /// `owner/repo` slug of the current repository.  Used for `{{repo}}`
+    /// substitution in prompt templates.  `None` when not configured, which
+    /// causes the placeholder to expand to an empty string.
+    repo_slug: Option<String>,
 }
 
 impl AgentClient {
@@ -211,10 +220,10 @@ impl AgentClient {
             completion_marker_file: crate::types::DEFAULT_COMPLETION_MARKER.to_string(),
             max_autopilot_continues: None,
             cost_tracker: None,
+            prompt_dir: None,
+            repo_slug: None,
         }
     }
-
-    /// Create a new client with full configuration including evaluation settings.
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     pub fn with_evaluation(
@@ -267,6 +276,8 @@ impl AgentClient {
             completion_marker_file,
             max_autopilot_continues,
             cost_tracker: None,
+            prompt_dir: None,
+            repo_slug: None,
         }
     }
 
@@ -274,6 +285,18 @@ impl AgentClient {
     /// chat completion call made by this client.
     pub fn with_cost_tracker(mut self, tracker: Arc<std::sync::Mutex<CostTracker>>) -> Self {
         self.cost_tracker = Some(tracker);
+        self
+    }
+
+    /// Set the prompt directory and repository slug used for system prompt
+    /// template resolution.
+    ///
+    /// When `prompt_dir` is `Some`, [`prompt_loader::resolve_system_prompt`] is
+    /// called before each task execution.  `repo_slug` is the `owner/repo`
+    /// string substituted for `{{repo}}` placeholders in templates.
+    pub fn with_prompt_dir(mut self, prompt_dir: Option<String>, repo_slug: String) -> Self {
+        self.prompt_dir = prompt_dir;
+        self.repo_slug = Some(repo_slug);
         self
     }
 
@@ -383,6 +406,19 @@ impl AgentClient {
         Ok(())
     }
 
+    /// Resolve the system prompt intro for a task.
+    ///
+    /// Calls [`prompt_loader::resolve_system_prompt`] when `prompt_dir` is
+    /// configured and returns the custom template with placeholders expanded.
+    /// Falls back to the built-in default when no matching template is found.
+    fn resolve_system_intro(&self, task: &Task) -> String {
+        let dir = self.prompt_dir.as_deref().map(std::path::Path::new);
+        let repo = self.repo_slug.as_deref().unwrap_or("");
+        prompt_loader::resolve_system_prompt(dir, task, repo).unwrap_or_else(|| {
+            "You are an AI coding agent working on a task in a git repository.".to_string()
+        })
+    }
+
     /// Execute a task using the Copilot agent
     pub async fn execute_task(&mut self, task: &Task) -> Result<String> {
         tracing::info!("Executing task: {}", task.description);
@@ -446,8 +482,9 @@ impl AgentClient {
         };
         let artefact_section = self.build_artefact_context(task);
         let iteration = memory.attempt_count(&task.id) + 1;
+        let system_intro = self.resolve_system_intro(task);
         let prompt = format!(
-            "You are an AI coding agent working on a task in a git repository.\n\
+            "{system_intro}\n\
              Working directory: {}\n\n\
              Task: {}\n\n\
              Context:\n{}\n{}{}\
@@ -502,8 +539,9 @@ impl AgentClient {
         };
         let artefact_section = self.build_artefact_context(task);
         let iteration = memory.attempt_count(&task.id) + 1;
+        let system_intro = self.resolve_system_intro(task);
         let prompt = format!(
-            "You are an AI coding agent working on a task in a git repository.\n\
+            "{system_intro}\n\
              Working directory: {}\n\n\
              Task: {}\n\n\
              Context:\n{}\n{}{}\
@@ -555,8 +593,9 @@ impl AgentClient {
         let artefact_section = self.build_artefact_context(task);
         let iteration = memory.attempt_count(&task.id) + 1;
 
+        let system_intro = self.resolve_system_intro(task);
         let prompt = format!(
-            "You are an AI coding agent working on a task in a git repository.\n\
+            "{system_intro}\n\
              Working directory: {work_dir}\n\n\
              Task: {desc}\n\n\
              Context:\n{ctx}\n{mem}{art}\
