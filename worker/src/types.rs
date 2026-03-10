@@ -148,7 +148,9 @@ mod tests {
                 task_id: "t1".into(),
                 issue_number: Some(10),
                 review_requested: None,
+                merge_method: None,
             }],
+            pending_issues: vec![],
             review_requested: None,
             task_statuses: std::collections::HashMap::new(),
         };

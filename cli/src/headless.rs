@@ -358,6 +358,7 @@ async fn advance_tracked_prs(
                 task_id,
                 issue_number: state.issue_number,
                 review_requested: None,
+                merge_method: None,
             });
         }
     }
@@ -530,7 +531,7 @@ async fn advance_tracked_prs(
                                     pr_number, e
                                 );
                             }
-                            match client.merge_pr(pr_number).await {
+                            match client.merge_pr(pr_number, tracked.merge_method.as_deref()).await {
                                 Ok(()) => {
                                     println!("[wreck-it] advance: merged PR #{}", pr_number);
                                     state
@@ -561,7 +562,7 @@ async fn advance_tracked_prs(
                                     pr_number, e
                                 );
                             }
-                            if let Err(e) = client.enable_auto_merge(pr_number).await {
+                            if let Err(e) = client.enable_auto_merge(pr_number, tracked.merge_method.as_deref()).await {
                                 println!(
                                     "[wreck-it] advance: failed to enable auto-merge for PR #{}: {}",
                                     pr_number, e
@@ -641,7 +642,7 @@ async fn advance_tracked_prs(
                             pr_number, e
                         );
                     }
-                    match client.merge_pr(pr_number).await {
+                    match client.merge_pr(pr_number, tracked.merge_method.as_deref()).await {
                         Ok(()) => {
                             println!("[wreck-it] advance: merged PR #{}", pr_number);
                             state
@@ -674,7 +675,7 @@ async fn advance_tracked_prs(
                             pr_number, e
                         );
                     }
-                    if let Err(e) = client.enable_auto_merge(pr_number).await {
+                    if let Err(e) = client.enable_auto_merge(pr_number, tracked.merge_method.as_deref()).await {
                         println!(
                             "[wreck-it] advance: failed to enable auto-merge for PR #{}: {}",
                             pr_number, e
@@ -705,7 +706,7 @@ async fn advance_tracked_prs(
                                 pr_number, e
                             );
                         }
-                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                        if let Err(e) = client.enable_auto_merge(pr_number, tracked.merge_method.as_deref()).await {
                             println!(
                                 "[wreck-it] advance: failed to enable auto-merge for PR #{}: {}",
                                 pr_number, e
@@ -717,7 +718,7 @@ async fn advance_tracked_prs(
                             "[wreck-it] advance: PR #{} is mergeable, merging directly",
                             pr_number
                         );
-                        match client.merge_pr(pr_number).await {
+                        match client.merge_pr(pr_number, tracked.merge_method.as_deref()).await {
                             Ok(()) => {
                                 println!("[wreck-it] advance: merged PR #{}", pr_number);
                                 state
@@ -1072,6 +1073,7 @@ async fn run_agent_working(
                         task_id,
                         issue_number: Some(issue_number),
                         review_requested: None,
+                        merge_method: None,
                     });
                 }
             }
@@ -1094,6 +1096,7 @@ async fn run_agent_working(
                         task_id,
                         issue_number: Some(issue_number),
                         review_requested: None,
+                        merge_method: None,
                     });
                 }
             }
@@ -1139,6 +1142,13 @@ async fn run_needs_verification(
             return Ok(StepOutcome::Continue);
         }
     };
+
+    // Look up the merge method from the tracked PR entry (if any).
+    let pr_merge_method: Option<String> = state
+        .tracked_prs
+        .iter()
+        .find(|tp| tp.pr_number == pr_number)
+        .and_then(|tp| tp.merge_method.clone());
 
     let github_token = config
         .api_token
@@ -1280,7 +1290,7 @@ async fn run_needs_verification(
                                 pr_number, e
                             );
                         }
-                        match client.merge_pr(pr_number).await {
+                        match client.merge_pr(pr_number, pr_merge_method.as_deref()).await {
                             Ok(()) => {
                                 println!(
                                     "[wreck-it] PR #{} merged successfully (brute mode)",
@@ -1316,7 +1326,7 @@ async fn run_needs_verification(
                                 pr_number, e
                             );
                         }
-                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                        if let Err(e) = client.enable_auto_merge(pr_number, pr_merge_method.as_deref()).await {
                             println!(
                                 "[wreck-it] failed to enable auto-merge for PR #{}: {}",
                                 pr_number, e
@@ -1451,7 +1461,7 @@ async fn run_needs_verification(
                 pr_number, e
             );
         }
-        match client.merge_pr(pr_number).await {
+        match client.merge_pr(pr_number, pr_merge_method.as_deref()).await {
             Ok(()) => {
                 println!(
                     "[wreck-it] PR #{} merged successfully (brute mode)",
@@ -1496,7 +1506,7 @@ async fn run_needs_verification(
                 pr_number, e
             );
         }
-        if let Err(e) = client.enable_auto_merge(pr_number).await {
+        if let Err(e) = client.enable_auto_merge(pr_number, pr_merge_method.as_deref()).await {
             println!(
                 "[wreck-it] failed to enable auto-merge for PR #{}: {}",
                 pr_number, e
@@ -1535,7 +1545,7 @@ async fn run_needs_verification(
                 pr_number, e
             );
         }
-        if let Err(e) = client.enable_auto_merge(pr_number).await {
+        if let Err(e) = client.enable_auto_merge(pr_number, pr_merge_method.as_deref()).await {
             println!(
                 "[wreck-it] failed to enable auto-merge for PR #{}: {}",
                 pr_number, e
@@ -1549,7 +1559,7 @@ async fn run_needs_verification(
     }
 
     // No required checks and no pending check runs — merge directly.
-    match client.merge_pr(pr_number).await {
+    match client.merge_pr(pr_number, pr_merge_method.as_deref()).await {
         Ok(()) => {
             println!("[wreck-it] PR #{} merged successfully", pr_number);
             state.phase = AgentPhase::Completed;
@@ -1751,6 +1761,7 @@ mod tests {
             last_prompt: Some("do something".to_string()),
             memory: vec![],
             tracked_prs: vec![],
+            pending_issues: vec![],
             review_requested: None,
             task_statuses: std::collections::HashMap::new(),
         };
@@ -1997,6 +2008,7 @@ mod tests {
             last_prompt: Some("do something".to_string()),
             memory: vec![],
             tracked_prs: vec![],
+            pending_issues: vec![],
             review_requested: Some(true),
             task_statuses: std::collections::HashMap::new(),
         };
@@ -2036,6 +2048,7 @@ mod tests {
             task_id: "task-1".to_string(),
             issue_number: Some(10),
             review_requested: Some(true),
+            merge_method: None,
         };
         assert_eq!(pr.review_requested, Some(true));
 
@@ -2053,6 +2066,7 @@ mod tests {
             task_id: "task-1".to_string(),
             issue_number: None,
             review_requested: None,
+            merge_method: None,
         };
         let json = serde_json::to_string(&pr).unwrap();
         assert!(!json.contains("review_requested"));

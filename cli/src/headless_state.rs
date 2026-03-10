@@ -4,7 +4,7 @@ use std::path::Path;
 
 // Re-export shared types from wreck-it-core so that the rest of the crate
 // can continue to use `crate::headless_state::AgentPhase`, etc.
-pub use wreck_it_core::state::{AgentPhase, HeadlessState, TrackedPr};
+pub use wreck_it_core::state::{AgentPhase, HeadlessState, PendingIssue, TrackedPr};
 
 /// Load headless state from a JSON file. Returns default state if the file
 /// does not exist.
@@ -60,7 +60,9 @@ mod tests {
                 task_id: "task-1".to_string(),
                 issue_number: Some(99),
                 review_requested: None,
+                merge_method: None,
             }],
+            pending_issues: vec![],
             review_requested: None,
             task_statuses: std::collections::HashMap::new(),
         };
@@ -118,6 +120,7 @@ mod tests {
             task_id: "impl-3".to_string(),
             issue_number: Some(42),
             review_requested: None,
+            merge_method: None,
         };
         let json = serde_json::to_string(&pr).unwrap();
         let loaded: TrackedPr = serde_json::from_str(&json).unwrap();
@@ -142,6 +145,7 @@ mod tests {
             task_id: "eval-1".to_string(),
             issue_number: None,
             review_requested: None,
+            merge_method: None,
         };
         let json = serde_json::to_string(&pr).unwrap();
         assert!(!json.contains("issue_number"));
@@ -154,6 +158,7 @@ mod tests {
             task_id: "ideas-2".to_string(),
             issue_number: Some(100),
             review_requested: None,
+            merge_method: None,
         };
         let json = serde_json::to_string(&pr).unwrap();
         assert!(json.contains("\"issue_number\":100"));
@@ -176,6 +181,7 @@ mod tests {
             task_id: "ideas-2".to_string(),
             issue_number: None,
             review_requested: Some(true),
+            merge_method: None,
         };
         let json = serde_json::to_string(&pr).unwrap();
         assert!(json.contains("review_requested"));
@@ -213,6 +219,7 @@ mod tests {
             last_prompt: None,
             memory: vec![],
             tracked_prs: vec![],
+            pending_issues: vec![],
             review_requested: Some(true),
             task_statuses: std::collections::HashMap::new(),
         };

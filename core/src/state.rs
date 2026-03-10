@@ -49,6 +49,26 @@ pub struct TrackedPr {
     /// so that it does not re-request on subsequent invocations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_requested: Option<bool>,
+
+    /// Merge method to use when merging this PR (e.g. `"merge"`, `"squash"`,
+    /// `"rebase"`).  When `None`, the default (`"squash"`) is used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_method: Option<String>,
+}
+
+/// An issue created by the merge ralph to trigger a coding agent.
+///
+/// Stored in state while the agent is working.  Once the agent creates a PR,
+/// the entry is promoted to a [`TrackedPr`] and removed from this list.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingIssue {
+    /// GitHub issue number.
+    pub issue_number: u64,
+    /// The wreck-it task ID (e.g. `"merge-pr-42"`).
+    pub task_id: String,
+    /// Merge method to propagate to the resulting [`TrackedPr`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_method: Option<String>,
 }
 
 /// Persistent state that is committed to the repo between cron invocations.
@@ -90,6 +110,12 @@ pub struct HeadlessState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracked_prs: Vec<TrackedPr>,
 
+    /// Issues created by the merge ralph that have not yet produced a PR.
+    /// Each invocation polls these issues; once the agent creates a PR the
+    /// entry is promoted to [`tracked_prs`] and removed from here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_issues: Vec<PendingIssue>,
+
     /// Whether reviews have been requested for the current task's PR.
     ///
     /// Set to `true` after the runner calls `request_reviewers` for the
@@ -119,6 +145,7 @@ impl Default for HeadlessState {
             last_prompt: None,
             memory: Vec::new(),
             tracked_prs: Vec::new(),
+            pending_issues: Vec::new(),
             review_requested: None,
             task_statuses: HashMap::new(),
         }

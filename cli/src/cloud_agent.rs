@@ -1645,15 +1645,19 @@ impl CloudAgentClient {
         }
     }
 
-    /// Merge a pull request using a squash merge.
-    pub async fn merge_pr(&self, pr_number: u64) -> Result<()> {
+    /// Merge a pull request.
+    ///
+    /// `merge_method` selects the strategy (`"squash"`, `"merge"`, or
+    /// `"rebase"`).  When `None`, defaults to `"squash"`.
+    pub async fn merge_pr(&self, pr_number: u64, merge_method: Option<&str>) -> Result<()> {
         let url = format!(
             "{}/repos/{}/{}/pulls/{}/merge",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, pr_number,
         );
 
+        let method = merge_method.unwrap_or("squash");
         let body = serde_json::json!({
-            "merge_method": "squash",
+            "merge_method": method,
         });
 
         let resp = self
@@ -1930,11 +1934,18 @@ impl CloudAgentClient {
         Ok(())
     }
 
-    /// Enable auto-merge on a pull request using the squash merge method.
+    /// Enable auto-merge on a pull request.
+    ///
+    /// `merge_method` selects the strategy (`"squash"`, `"merge"`, or
+    /// `"rebase"`).  When `None`, defaults to `"squash"`.
     ///
     /// This uses the GraphQL `enablePullRequestAutoMerge` mutation so that
     /// GitHub automatically merges the PR once all required checks pass.
-    pub async fn enable_auto_merge(&self, pr_number: u64) -> Result<()> {
+    pub async fn enable_auto_merge(
+        &self,
+        pr_number: u64,
+        merge_method: Option<&str>,
+    ) -> Result<()> {
         // Fetch the PR to obtain the GraphQL node_id.
         let pr_url = format!(
             "{}/repos/{}/{}/pulls/{}",
@@ -1969,17 +1980,24 @@ impl CloudAgentClient {
 
         // Use the GraphQL API to enable auto-merge.
         let graphql_url = format!("{}/graphql", GITHUB_API_BASE);
+        let gql_merge_method = match merge_method.unwrap_or("squash") {
+            "merge" => "MERGE",
+            "rebase" => "REBASE",
+            _ => "SQUASH",
+        };
+        let mutation = format!(
+            "mutation($prId: ID!) {{ \
+               enablePullRequestAutoMerge(input: {{ \
+                 pullRequestId: $prId, \
+                 mergeMethod: {} \
+               }}) {{ \
+                 pullRequest {{ autoMergeRequest {{ enabledAt }} }} \
+               }} \
+             }}",
+            gql_merge_method,
+        );
         let query = serde_json::json!({
-            "query": concat!(
-                "mutation($prId: ID!) { ",
-                  "enablePullRequestAutoMerge(input: { ",
-                    "pullRequestId: $prId, ",
-                    "mergeMethod: SQUASH ",
-                  "}) { ",
-                    "pullRequest { autoMergeRequest { enabledAt } } ",
-                  "} ",
-                "}"
-            ),
+            "query": mutation,
             "variables": { "prId": node_id },
         });
 
