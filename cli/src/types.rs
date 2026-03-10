@@ -48,6 +48,10 @@ pub enum EvaluationMode {
     Command,
     /// Ask an agent to evaluate completeness; it writes a marker file if done.
     AgentFile,
+    /// Ask an agent to read the task description alongside the git diff and
+    /// return a structured JSON verdict `{ passed: bool, score: u8,
+    /// rationale: String }`.  The verdict is surfaced in TUI and logs.
+    Semantic,
 }
 
 /// Result of a critic evaluation of a git diff against a task description.

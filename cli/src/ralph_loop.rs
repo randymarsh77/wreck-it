@@ -626,6 +626,16 @@ impl RalphLoop {
             let task = self.state.tasks[task_idx].clone();
             return self.agent.evaluate_completeness(&task).await;
         }
+        if self.agent.evaluation_mode() == EvaluationMode::Semantic {
+            let task = self.state.tasks[task_idx].clone();
+            let verdict = self.agent.evaluate_task_semantically(&task).await?;
+            // Surface the rationale in the loop log so it appears in the TUI.
+            self.state.add_log(format!(
+                "Semantic verdict for [{}]: passed={}, score={}, rationale={}",
+                task.id, verdict.passed, verdict.score, verdict.rationale
+            ));
+            return Ok(verdict.passed);
+        }
         self.agent.run_tests()
     }
 
