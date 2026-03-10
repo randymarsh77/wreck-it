@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 30,
-  "current_task_id": "impl-prompt-customization",
-  "issue_number": 221,
-  "last_prompt": "Implement the dynamic prompt customization system designed in `ideas-prompt-customization`. Create `cli/src/prompt_loader.rs` with a `PromptLoader` struct that: (1) reads `.wreck-it/prompts/<role>.md` for global role overrides, (2) reads `.wreck-it/prompts/<task_id>.md` for per-task overrides (per-task takes precedence), (3) performs variable substitution for `{{task_id}}`, `{{repo}}`, `{{description}}` placeholders, and (4) falls back to the built-in default prompts when no file is found. Add a `prompt_dir: Option<String>` field to `Config` in `core/src/types.rs` (defaulting to `.wreck-it/prompts`). Wire `PromptLoader::load()` into `cli/src/agent.rs` and `cli/src/cloud_agent.rs` at the system prompt construction point so that custom prompts replace the default role prompt. Add a `--prompt-dir <PATH>` CLI flag in `cli/src/cli.rs` that overrides the config value.",
+  "iteration": 31,
+  "current_task_id": "test-prompt-customization",
+  "issue_number": 224,
+  "last_prompt": "Write unit and integration tests for the prompt customization feature implemented in `impl-prompt-customization`. In `cli/src/prompt_loader.rs` add a `#[cfg(test)]` module covering: (1) loading a role-based prompt file and verifying it overrides the default, (2) loading a per-task prompt file and verifying it takes precedence over the role file, (3) variable interpolation of `{{task_id}}`, `{{repo}}`, and `{{description}}` placeholders, (4) graceful fallback to built-in defaults when no prompt files exist. Use `tempfile::tempdir()` to create isolated test directories. Also add a test that verifies the `--prompt-dir` CLI flag is parsed correctly and populates `Config.prompt_dir`. Ensure all tests pass with `cargo test --lib`.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -220,6 +220,10 @@
     "iteration 29: agent created PR #217 for task Some(\"ideas-prompt-customization\")",
     "iteration 29: marked PR #217 as ready for review",
     "iteration 29: merged PR #217 for task Some(\"ideas-prompt-customization\") (brute mode)",
-    "iteration 30: triggered cloud agent for task impl-prompt-customization (issue #221)"
+    "iteration 30: triggered cloud agent for task impl-prompt-customization (issue #221)",
+    "iteration 30: agent created PR #222 for task Some(\"impl-prompt-customization\")",
+    "iteration 30: marked PR #222 as ready for review",
+    "iteration 30: merged PR #222 for task Some(\"impl-prompt-customization\") (brute mode)",
+    "iteration 31: triggered cloud agent for task test-prompt-customization (issue #224)"
   ]
 }
