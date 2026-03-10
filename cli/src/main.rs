@@ -85,6 +85,7 @@ async fn main() -> Result<()> {
             github_token,
             max_cost_usd,
             work_dir_map,
+            prompt_dir,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -229,6 +230,15 @@ async fn main() -> Result<()> {
                              (expected ROLE_OR_ID=PATH)",
                             entry
                         );
+                    }
+                }
+
+                // CLI --prompt-dir overrides config and ralph-level prompt_dir.
+                if let Some(ref pd) = prompt_dir {
+                    config.prompt_dir = Some(pd.clone());
+                } else if let Some(rc) = ralph_override {
+                    if let Some(ref pd) = rc.prompt_dir {
+                        config.prompt_dir = Some(pd.clone());
                     }
                 }
 

@@ -4,6 +4,7 @@ use crate::headless_state::{
     load_headless_state, save_headless_state, AgentPhase, HeadlessState, TrackedPr,
 };
 use crate::plan_migration::migrate_pending_plans;
+use crate::prompt_loader;
 use crate::repo_config::{load_repo_config, RalphConfig};
 use crate::state_worktree::{commit_and_push_state, ensure_feature_branch, ensure_state_worktree};
 use crate::task_manager::{load_tasks, reset_recurring_tasks, save_tasks};
@@ -942,7 +943,7 @@ async fn run_needs_trigger(
         work_dir,
     )?;
 
-    let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
+    let mut client = CloudAgentClient::new(github_token, repo_owner.clone(), repo_name.clone());
     client.resolve_authenticated_login().await;
 
     // If a preferred agent is configured in the ralph config, set it on the
@@ -963,6 +964,19 @@ async fn run_needs_trigger(
         }
     }
 
+    // Resolve optional custom system prompt from ralph prompt_dir or config.
+    let prompt_dir_str = ralph
+        .and_then(|rc| rc.prompt_dir.as_deref())
+        .or(config.prompt_dir.as_deref());
+    let repo_slug = format!("{}/{}", repo_owner, repo_name);
+    let system_prompt = prompt_dir_str.and_then(|pd| {
+        prompt_loader::resolve_system_prompt(
+            Some(std::path::Path::new(pd)),
+            &pending_task,
+            &repo_slug,
+        )
+    });
+
     println!(
         "[wreck-it] triggering cloud agent for task {}: {}",
         pending_task.id, pending_task.description
@@ -975,6 +989,7 @@ async fn run_needs_trigger(
             &pending_task.description,
             &state.memory,
             ralph_branch,
+            system_prompt.as_deref(),
         )
         .await?;
 
