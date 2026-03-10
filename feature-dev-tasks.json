@@ -320,5 +320,273 @@
     "priority": 2,
     "complexity": 2,
     "last_attempt_at": 1773057614
+  },
+  {
+    "id": "ideas-prompt-customization",
+    "description": "Research and design a dynamic prompt customization system for wreck-it. The system should allow users to place per-role system prompt templates in a `.wreck-it/prompts/` directory (e.g. `ideas.md`, `implementer.md`, `evaluator.md`, plus per-task overrides like `impl-my-task.md`). Review the existing agent invocation path in `cli/src/agent.rs` and `cli/src/cloud_agent.rs` to identify where system prompts are constructed and how they could be replaced or augmented with user-supplied content. Also review `core/src/types.rs` (Task and Config structs) to identify any new fields needed (e.g. `prompt_dir: Option<String>` on Config, `system_prompt_override: Option<String>` on Task). Document a design that supports: (1) global role-based prompt templates, (2) per-task prompt overrides, (3) variable interpolation (e.g. `{{task_id}}`, `{{repo}}`). Write a design document as inline comments in a new stub file `cli/src/prompt_loader.rs`.",
+    "status": "pending",
+    "role": "ideas",
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "impl-prompt-customization",
+    "description": "Implement the dynamic prompt customization system designed in `ideas-prompt-customization`. Create `cli/src/prompt_loader.rs` with a `PromptLoader` struct that: (1) reads `.wreck-it/prompts/<role>.md` for global role overrides, (2) reads `.wreck-it/prompts/<task_id>.md` for per-task overrides (per-task takes precedence), (3) performs variable substitution for `{{task_id}}`, `{{repo}}`, `{{description}}` placeholders, and (4) falls back to the built-in default prompts when no file is found. Add a `prompt_dir: Option<String>` field to `Config` in `core/src/types.rs` (defaulting to `.wreck-it/prompts`). Wire `PromptLoader::load()` into `cli/src/agent.rs` and `cli/src/cloud_agent.rs` at the system prompt construction point so that custom prompts replace the default role prompt. Add a `--prompt-dir <PATH>` CLI flag in `cli/src/cli.rs` that overrides the config value.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "ideas-prompt-customization"
+    ],
+    "priority": 4,
+    "complexity": 4
+  },
+  {
+    "id": "test-prompt-customization",
+    "description": "Write unit and integration tests for the prompt customization feature implemented in `impl-prompt-customization`. In `cli/src/prompt_loader.rs` add a `#[cfg(test)]` module covering: (1) loading a role-based prompt file and verifying it overrides the default, (2) loading a per-task prompt file and verifying it takes precedence over the role file, (3) variable interpolation of `{{task_id}}`, `{{repo}}`, and `{{description}}` placeholders, (4) graceful fallback to built-in defaults when no prompt files exist. Use `tempfile::tempdir()` to create isolated test directories. Also add a test that verifies the `--prompt-dir` CLI flag is parsed correctly and populates `Config.prompt_dir`. Ensure all tests pass with `cargo test --lib`.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "impl-prompt-customization"
+    ],
+    "priority": 4,
+    "complexity": 3
+  },
+  {
+    "id": "eval-prompt-customization",
+    "description": "Evaluate the prompt customization feature end-to-end. Create a minimal `.wreck-it/prompts/ideas.md` file containing a custom role prompt in this repository, run a dry-run or unit-level test to confirm `PromptLoader` picks it up and substitutes variables correctly. Verify that the fallback path works when the file is absent. Review the implementation in `cli/src/prompt_loader.rs` for correctness of variable substitution logic and confirm no regressions in existing agent behaviour by running `cargo test --lib`. Write a brief evaluation summary as a comment block at the top of `cli/src/prompt_loader.rs` noting test results, edge cases handled, and any follow-up improvements.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-prompt-customization"
+    ],
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-semantic-evaluation",
+    "description": "Research and design a semantic evaluation mode for wreck-it tasks. Currently evaluation is done via shell command exit codes (`command` evaluation) or agent-created marker files (`agent-file` evaluation). Design a new `semantic` evaluation mode where the agent is prompted to read the original task description alongside the git diff produced by the implementation and returns a structured verdict (`{ passed: bool, score: u8, rationale: String }`). Review `cli/src/agent.rs` and `core/src/types.rs` (the `EvaluationMode` enum and `Task.evaluation` field) to understand how to add the new variant. Consider: what context to include in the evaluation prompt (task description, acceptance criteria, diff summary), how to parse the structured JSON verdict, how to surface the rationale in TUI and logs, and what fallback behaviour applies if the agent returns malformed output. Document the design in inline comments in a new stub file `cli/src/semantic_eval.rs`.",
+    "status": "pending",
+    "role": "ideas",
+    "priority": 5,
+    "complexity": 2
+  },
+  {
+    "id": "impl-semantic-evaluation",
+    "description": "Implement the semantic evaluation mode designed in `ideas-semantic-evaluation`. Create `cli/src/semantic_eval.rs` with an async `evaluate_semantically(task, diff, agent_client) -> SemanticVerdict` function where `SemanticVerdict = { passed: bool, score: u8, rationale: String }`. The function should construct a prompt that includes the task description, any acceptance criteria from `task.acceptance_criteria`, the git diff, and instructions to return a JSON verdict. Parse the agent response with lenient JSON extraction (scan for the first `{` block). Add `Semantic` variant to `EvaluationMode` in `core/src/types.rs`. Wire the new mode into the evaluation dispatch in `cli/src/agent.rs` (or wherever EvaluationMode is dispatched). Expose it via `evaluation: { mode: \"semantic\" }` in task JSON. Log the rationale at INFO level and surface the score in TUI task detail view.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "ideas-semantic-evaluation"
+    ],
+    "priority": 5,
+    "complexity": 5
+  },
+  {
+    "id": "test-semantic-evaluation",
+    "description": "Write unit tests for the semantic evaluation feature implemented in `impl-semantic-evaluation`. In `cli/src/semantic_eval.rs` add a `#[cfg(test)]` module covering: (1) successful parsing of a well-formed JSON verdict `{ passed: true, score: 9, rationale: \"...\" }`, (2) lenient extraction when the agent wraps JSON in markdown code fences, (3) fallback to `passed: false, score: 0` when the response is unparseable, (4) that `evaluate_semantically` returns `SemanticVerdict` with expected fields when given a mock agent response. Use a mock or stub for the agent client to avoid real API calls. Also verify that setting `evaluation: { mode: \"semantic\" }` on a task triggers `evaluate_semantically` in the dispatch path. Run `cargo test --lib` to confirm all tests pass.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "impl-semantic-evaluation"
+    ],
+    "priority": 5,
+    "complexity": 3
+  },
+  {
+    "id": "eval-semantic-evaluation",
+    "description": "Evaluate the semantic evaluation feature end-to-end. Create a minimal task with `evaluation: { mode: \"semantic\" }` and a known git diff fixture, then run the unit-level evaluation function with a stubbed agent to verify verdict parsing and fallback logic. Confirm no regressions by running `cargo test --lib`. Review `cli/src/semantic_eval.rs` for prompt quality: does it provide enough context (diff, task description, criteria)? Does the verdict rationale get logged and displayed correctly? Write a brief evaluation summary as a comment block at the top of `cli/src/semantic_eval.rs` noting results, limitations (e.g. large diffs exceeding context window), and recommended follow-up work.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-semantic-evaluation"
+    ],
+    "priority": 5,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-html-report",
+    "description": "Research and design an HTML report generator for wreck-it run summaries. The report should capture: overall run statistics (total tasks, completed/failed/pending counts, total cost, total tokens, elapsed time), a per-task timeline table (id, role, status, duration, cost, retries), a dependency graph rendered inline as an SVG or Mermaid diagram, and a section for failed tasks showing error output excerpts. Review existing data sources: `cli/src/cost_tracker.rs` (cost and token data), `cli/src/openclaw.rs` (provenance events), `cli/src/graph.rs` (dependency graph Mermaid output), and `core/src/task_manager.rs` (task state). Design a `ReportData` struct that aggregates all necessary data, a Handlebars or simple string-template approach for HTML generation, and a `wreck-it report --output report.html` CLI sub-command. Document the design as inline comments in a new stub file `cli/src/report.rs`.",
+    "status": "pending",
+    "role": "ideas",
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "impl-html-report",
+    "description": "Implement the HTML report generator designed in `ideas-html-report`. Create `cli/src/report.rs` with: (1) a `ReportData` struct that aggregates task statuses from the task manager, cost/token data from `CostTracker`, and provenance events from openclaw if available; (2) a `generate_html(data: &ReportData) -> String` function that produces a self-contained HTML file using inline CSS and optional Mermaid JS (loaded from CDN) for the dependency graph section; (3) a `write_report(path: &Path, data: &ReportData)` helper that serialises the HTML to disk. Add a `report` sub-command to `cli/src/cli.rs` with `--output <PATH>` (default `wreck-it-report.html`) and `--task-file <PATH>` flags. Wire the sub-command in `cli/src/main.rs`. The HTML output must be self-contained (inline styles, no external dependencies except optional Mermaid CDN) and render correctly in modern browsers.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "ideas-html-report"
+    ],
+    "priority": 3,
+    "complexity": 5
+  },
+  {
+    "id": "test-html-report",
+    "description": "Write unit tests for the HTML report generator implemented in `impl-html-report`. In `cli/src/report.rs` add a `#[cfg(test)]` module covering: (1) `generate_html` produces a non-empty string containing `<html>`, `<table>`, and at least one task row when given a `ReportData` with one completed task; (2) cost and token totals appear correctly in the summary section; (3) the Mermaid graph section is included only when the dependency graph is non-empty; (4) `write_report` creates the file at the specified path and its contents match `generate_html` output. Use `tempfile::tempdir()` for file-system tests. Also verify that the `report` CLI sub-command is registered and parses `--output` correctly. Run `cargo test --lib` to confirm all tests pass.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "impl-html-report"
+    ],
+    "priority": 3,
+    "complexity": 3
+  },
+  {
+    "id": "eval-html-report",
+    "description": "Evaluate the HTML report generator end-to-end. Run `wreck-it report --output /tmp/test-report.html --task-file <fixture-tasks.json>` (or invoke the function directly in a test) and confirm the generated file is valid HTML with correct task counts, cost summaries, and a Mermaid diagram block. Open or parse the HTML to verify it contains the expected sections. Check edge cases: empty task list, all-failed tasks, tasks with zero cost. Run `cargo test --lib` to confirm no regressions. Write a brief evaluation summary as a comment block at the top of `cli/src/report.rs` noting browser compatibility, file size for large task lists, and recommended enhancements (e.g. dark mode, exportable CSV).",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-html-report"
+    ],
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-error-classification",
+    "description": "Research and design an error classification and smart recovery system for wreck-it. Currently all task failures are treated identically: retried up to `max_retries` times and then re-planned after `replan_threshold` consecutive failures. Design a system that classifies errors into categories: `Transient` (e.g. rate-limit HTTP 429, network timeout), `Permanent` (e.g. compile error, test failure), `NeedsReplan` (e.g. task description ambiguous, wrong file targeted), and `ContextOverflow` (e.g. agent returned truncated output). Review `cli/src/headless.rs`, `cli/src/agent.rs`, and `cli/src/ralph_loop.rs` to identify where error handling occurs. For each error category, propose a recovery strategy: `Transient` → exponential backoff retry; `Permanent` → invoke critic with error output injected; `NeedsReplan` → immediate re-plan trigger; `ContextOverflow` → task splitting. Document the design as inline comments in a new stub file `cli/src/error_classifier.rs`.",
+    "status": "pending",
+    "role": "ideas",
+    "priority": 4,
+    "complexity": 3
+  },
+  {
+    "id": "impl-error-classification",
+    "description": "Implement the error classification and smart recovery system designed in `ideas-error-classification`. Create `cli/src/error_classifier.rs` with: (1) an `ErrorCategory` enum (`Transient`, `Permanent`, `NeedsReplan`, `ContextOverflow`); (2) a `classify_error(output: &str, exit_code: Option<i32>, http_status: Option<u16>) -> ErrorCategory` function using pattern matching on keywords (\"rate limit\", \"429\", \"timeout\" → Transient; \"error[E\", \"FAILED\" → Permanent; \"context length\", \"max_tokens\" → ContextOverflow; otherwise NeedsReplan); (3) a `RecoveryAction` enum with backoff delay for Transient, critic injection for Permanent, immediate replan for NeedsReplan, and task-split hint for ContextOverflow. Wire `classify_error` into the failure handling path in `cli/src/headless.rs` so that Transient errors trigger a configurable backoff (default 30s) before retry, and NeedsReplan errors bypass the `replan_threshold` counter to immediately invoke the re-planner.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "ideas-error-classification"
+    ],
+    "priority": 4,
+    "complexity": 5
+  },
+  {
+    "id": "test-error-classification",
+    "description": "Write unit tests for the error classification system implemented in `impl-error-classification`. In `cli/src/error_classifier.rs` add a `#[cfg(test)]` module covering: (1) HTTP 429 response body maps to `Transient`; (2) Rust compile error output containing `error[E` maps to `Permanent`; (3) output mentioning \"context length exceeded\" maps to `ContextOverflow`; (4) an exit code of 0 with ambiguous output defaults to `NeedsReplan`; (5) multiple keyword signals in one output resolve to the highest-priority category. Also test the `RecoveryAction` produced for each category and verify that the backoff retry path in `headless.rs` is exercised when `Transient` is returned. Run `cargo test --lib` to confirm all tests pass.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "impl-error-classification"
+    ],
+    "priority": 4,
+    "complexity": 3
+  },
+  {
+    "id": "eval-error-classification",
+    "description": "Evaluate the error classification and smart recovery system end-to-end. Review `cli/src/error_classifier.rs` to ensure the keyword patterns cover the most common real-world failure modes seen in wreck-it CI runs. Check that the Transient backoff path in `headless.rs` correctly delays and retries without incrementing the replan counter. Verify NeedsReplan immediately triggers the re-planner. Run `cargo test --lib` to confirm no regressions. Write a brief evaluation summary as a comment block at the top of `cli/src/error_classifier.rs` describing classification accuracy trade-offs, false positive/negative risks for each category, and recommended follow-up work (e.g. ML-based classifier, user-configurable keyword patterns).",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-error-classification"
+    ],
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "mcp-server-integration",
+    "description": "Implement an MCP (Model Context Protocol) server mode for wreck-it so that AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can directly query and manage the task pipeline via the standard MCP protocol. Expose MCP tools for: listing tasks and their statuses, adding new tasks, updating task status, reading artefacts, and triggering a loop iteration. This bridges wreck-it's structured task graph with the rapidly emerging MCP ecosystem, enabling humans to supervise autonomous loops through their preferred AI assistant interface rather than the CLI or TUI.",
+    "status": "pending",
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "otel-metrics-export",
+    "description": "Add OpenTelemetry (OTEL) trace and metrics export to wreck-it's execution engine. Instrument task lifecycle events (start, complete, fail, retry) as OTEL spans with attributes for model name, token counts, task role, phase, and complexity. Export to configurable OTLP endpoints (Jaeger, Honeycomb, Grafana). This uniquely leverages wreck-it's existing cost tracking and provenance audit trail to provide deep observability into autonomous agent workflows — a capability no other agent framework offers out of the box.",
+    "status": "pending",
+    "priority": 8,
+    "complexity": 6
+  },
+  {
+    "id": "security-gate-checks",
+    "description": "Add a built-in security gate task kind that runs CodeQL, cargo-audit, or npm audit as a mandatory completion gate before any implementation task PR can be merged. Integrate into the task phase system so security scans run in a post-implementation phase automatically. Surface findings back to the implementing agent via the artefact system so it can self-remediate. This combines wreck-it's phase-based scheduling, artefact chaining, and retry loop into a first-class security posture — addressing the growing trend of shift-left security in AI-native development.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "mcp-server-integration"
+    ],
+    "priority": 9,
+    "complexity": 6
+  },
+  {
+    "id": "test-coverage-enforcer",
+    "description": "Implement a test coverage enforcer as a built-in evaluator-role task that automatically runs after each implementation task completes. The enforcer reads the coverage report artefact produced by the implementation phase, verifies that coverage did not regress, and either approves the task or triggers a retry with a coverage-improvement prompt. Use wreck-it's `inputs` artefact system to pass coverage data between phases. This creates a unique test-driven autonomous development loop where the AI is held accountable to coverage thresholds without human intervention.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "otel-metrics-export"
+    ],
+    "priority": 8,
+    "complexity": 5
+  },
+  {
+    "id": "adaptive-prompt-optimizer",
+    "description": "Build an adaptive prompt optimization system that tracks which task description patterns correlate with successful first-attempt completions vs. repeated failures. After each failed attempt, analyze the task description and failure log using an ideas-role agent to suggest a rewritten task description. Store the rewrite in per-task agent memory and apply it on next retry. Surface aggregated pattern insights as a periodic report artefact. This uniquely leverages wreck-it's existing retry tracking, agent memory system, and artefact chaining to create a self-improving task specification loop.",
+    "status": "pending",
+    "priority": 7,
+    "complexity": 7
+  },
+  {
+    "id": "kanban-bidirectional-sync",
+    "description": "Implement bidirectional sync between wreck-it tasks and external kanban systems (Linear, JIRA, Trello). When new tickets are created in the external system with a configurable label/tag, automatically generate wreck-it task objects and append them to the appropriate task file. When wreck-it tasks complete, update the corresponding external ticket status and attach the git diff URL as a comment. Build on the existing KanbanClient enum dispatch and KanbanProvider trait in cli/src/kanban/. This closes the loop between human planning tools and autonomous execution, enabling teams to manage AI workloads from their existing project management tools.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "adaptive-prompt-optimizer"
+    ],
+    "priority": 7,
+    "complexity": 6
+  },
+  {
+    "id": "budget-aware-prioritization",
+    "description": "Implement dynamic budget-aware task prioritization that adjusts task execution order based on remaining cost budget, current complexity estimates, and historical cost-per-complexity ratios. Add a `--budget-strategy` CLI flag with options: `greedy` (maximize completed tasks), `critical-path` (prioritize highest-priority tasks first), and `conservative` (prefer low-complexity tasks when budget is below a threshold). Integrate with the existing `--max-cost` budget tracking to automatically pause the loop when projected remaining cost would exceed budget. This extends wreck-it's existing cost tracking into a planning optimization feature unique in the agent orchestration space.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "otel-metrics-export"
+    ],
+    "priority": 6,
+    "complexity": 5
+  },
+  {
+    "id": "semantic-changelog-generator",
+    "description": "Add an automated semantic changelog generator that runs as a recurring evaluator-role task. At the end of each iteration, it reads the provenance audit trail and completed task artefacts, groups changes by category (features, fixes, refactors, security), and generates a human-readable CHANGELOG.md entry. Use conventional-commit conventions to classify changes. Output the changelog entry as an artefact that can be consumed by release automation. This uniquely combines wreck-it's provenance audit trail, artefact system, and recurring task cooldown to create fully automated release notes with zero human effort.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "test-coverage-enforcer",
+      "security-gate-checks"
+    ],
+    "priority": 6,
+    "complexity": 4
+  },
+  {
+    "id": "multi-repo-change-orchestrator",
+    "description": "Build a multi-repo change orchestration feature that detects when a completed task modifies a public API or exported interface, then automatically creates follow-up tasks in dependent repositories using the existing `--work-dir-map` multi-repo support. Implement interface change detection by comparing type signatures and exported symbols before/after the git diff. When a breaking change is detected, generate adaptation tasks in consumer repos and inject them into their respective task files. This combines wreck-it's multi-repo support and artefact system into an intelligent cross-repo dependency management capability.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "kanban-bidirectional-sync"
+    ],
+    "priority": 5,
+    "complexity": 9
+  },
+  {
+    "id": "parallel-subtask-fan-out",
+    "description": "Implement a fan-out/fan-in execution pattern allowing a single ideas-role task to dynamically decompose work into parallel implementer sub-tasks at runtime, then collect and synthesize their results via a fan-in aggregator task. Extend the existing `parent_id` and phase system: when an ideas task outputs a sub-task manifest artefact, the runner spawns those tasks in the next phase with the parent's context injected. The fan-in task waits for all siblings to complete and synthesizes a consolidated result. This addresses the growing trend of multi-agent coordination and enables wreck-it to tackle problems too large for a single context window.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "budget-aware-prioritization",
+      "adaptive-prompt-optimizer"
+    ],
+    "priority": 9,
+    "complexity": 9
   }
 ]
