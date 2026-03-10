@@ -104,6 +104,19 @@ pub struct RalphConfig {
     /// waiting for GitHub's auto-merge to kick in once checks pass.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brute_mode: Option<bool>,
+
+    /// Backend to use for this ralph context.
+    ///
+    /// Supported values:
+    /// - `"cloud_agent"` – creates a GitHub issue describing the work and
+    ///   assigns a coding agent to resolve it remotely.
+    /// - `"cli"` – performs the work locally (e.g. git merge) and pushes the
+    ///   result directly.
+    ///
+    /// When omitted, the backend defaults to `"cloud_agent"` for commands
+    /// that support it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
 }
 
 fn default_state_branch() -> String {
