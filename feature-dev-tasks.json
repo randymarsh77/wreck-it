@@ -357,19 +357,20 @@
   {
     "id": "eval-prompt-customization",
     "description": "Evaluate the prompt customization feature end-to-end. Create a minimal `.wreck-it/prompts/ideas.md` file containing a custom role prompt in this repository, run a dry-run or unit-level test to confirm `PromptLoader` picks it up and substitutes variables correctly. Verify that the fallback path works when the file is absent. Review the implementation in `cli/src/prompt_loader.rs` for correctness of variable substitution logic and confirm no regressions in existing agent behaviour by running `cargo test --lib`. Write a brief evaluation summary as a comment block at the top of `cli/src/prompt_loader.rs` noting test results, edge cases handled, and any follow-up improvements.",
-    "status": "pending",
+    "status": "completed",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
       "test-prompt-customization"
     ],
     "priority": 4,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1773179369
   },
   {
     "id": "ideas-semantic-evaluation",
     "description": "Research and design a semantic evaluation mode for wreck-it tasks. Currently evaluation is done via shell command exit codes (`command` evaluation) or agent-created marker files (`agent-file` evaluation). Design a new `semantic` evaluation mode where the agent is prompted to read the original task description alongside the git diff produced by the implementation and returns a structured verdict (`{ passed: bool, score: u8, rationale: String }`). Review `cli/src/agent.rs` and `core/src/types.rs` (the `EvaluationMode` enum and `Task.evaluation` field) to understand how to add the new variant. Consider: what context to include in the evaluation prompt (task description, acceptance criteria, diff summary), how to parse the structured JSON verdict, how to surface the rationale in TUI and logs, and what fallback behaviour applies if the agent returns malformed output. Document the design in inline comments in a new stub file `cli/src/semantic_eval.rs`.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "ideas",
     "priority": 5,
     "complexity": 2
