@@ -184,5 +184,8 @@
     "iteration 3: agent created PR #211 for task Some(\"feature-assessor\")",
     "iteration 3: marked PR #211 as ready for review",
     "iteration 3: merged PR #211 for task Some(\"feature-assessor\") (brute mode)"
-  ]
+  ],
+  "task_statuses": {
+    "feature-assessor": "pending"
+  }
 }
