@@ -21,6 +21,7 @@ pub const DEFAULT_COMPLETION_MARKER: &str = ".task-complete";
 pub const DEFAULT_PRECONDITION_MARKER: &str = ".task-precondition-met";
 pub const DEFAULT_REFLECTION_ROUNDS: u8 = 2;
 pub const DEFAULT_REPLAN_THRESHOLD: u32 = 2;
+pub const DEFAULT_AUTOPILOT_MODEL: &str = "copilot-autopilot";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
@@ -28,6 +29,14 @@ pub enum ModelProvider {
     Copilot,
     Llama,
     GithubModels,
+    /// Use the Copilot CLI in autopilot mode (`copilot --autopilot --yolo -p`).
+    ///
+    /// This invokes the `copilot` binary as a subprocess with full autonomous
+    /// permissions, letting it execute multi-step tasks (file edits, shell
+    /// commands, git operations) without per-tool approval prompts.
+    #[serde(alias = "copilot-autopilot")]
+    #[value(alias = "copilot-autopilot")]
+    CopilotAutopilot,
 }
 
 /// How task completeness is evaluated after the agent finishes work.
@@ -124,6 +133,12 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
 
+    /// Maximum number of autonomous continuation steps the Copilot CLI agent
+    /// may take per task when using the `CopilotAutopilot` model provider.
+    /// Maps to `--max-autopilot-continues`.  `None` means unlimited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_autopilot_continues: Option<u32>,
+
     /// List of URLs to notify via HTTP POST when a task changes status.
     /// Failures are logged as warnings and do not abort the loop.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -219,6 +234,7 @@ impl Default for Config {
             gastown_endpoint: None,
             gastown_token: None,
             github_token: None,
+            max_autopilot_continues: None,
             notify_webhooks: Vec::new(),
             github_issues_enabled: false,
             github_repo: None,
@@ -456,6 +472,34 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.model_provider, ModelProvider::GithubModels);
+    }
+
+    #[test]
+    fn model_provider_copilot_autopilot_roundtrip() {
+        let config = Config {
+            model_provider: ModelProvider::CopilotAutopilot,
+            max_autopilot_continues: Some(10),
+            ..Config::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("copilotautopilot"));
+        let loaded: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.model_provider, ModelProvider::CopilotAutopilot);
+        assert_eq!(loaded.max_autopilot_continues, Some(10));
+    }
+
+    #[test]
+    fn max_autopilot_continues_defaults_to_none() {
+        let json = r#"{"max_iterations":10}"#;
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.max_autopilot_continues.is_none());
+    }
+
+    #[test]
+    fn max_autopilot_continues_omitted_when_none() {
+        let config = Config::default();
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("max_autopilot_continues"));
     }
 
     // ---- AgentRole tests ----

@@ -8,7 +8,7 @@ use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{
     Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus,
-    DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
+    DEFAULT_AUTOPILOT_MODEL, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
@@ -24,6 +24,7 @@ fn model_name(provider: &ModelProvider) -> String {
         ModelProvider::Copilot => "copilot".to_string(),
         ModelProvider::Llama => DEFAULT_LLAMA_MODEL.to_string(),
         ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL.to_string(),
+        ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL.to_string(),
     }
 }
 
@@ -130,11 +131,12 @@ impl RalphLoop {
             ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL,
             ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
             ModelProvider::Copilot => "copilot",
+            ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL,
         };
         let (inp, out) = model_pricing(model_str);
         let cost_tracker = Arc::new(Mutex::new(CostTracker::new(inp, out)));
 
-        let agent = AgentClient::with_evaluation(
+        let agent = AgentClient::with_evaluation_and_autopilot(
             config.model_provider.clone(),
             config.api_endpoint.clone(),
             config.api_token.clone(),
@@ -143,6 +145,7 @@ impl RalphLoop {
             config.evaluation_mode,
             config.completeness_prompt.clone(),
             config.completion_marker_file.to_string_lossy().to_string(),
+            config.max_autopilot_continues,
         )
         .with_cost_tracker(Arc::clone(&cost_tracker));
 
@@ -723,7 +726,7 @@ impl RalphLoop {
         for (idx, task, ts) in task_data {
             // Resolve per-task working directory for multi-repo orchestration.
             let task_work_dir = self.resolve_work_dir(&task);
-            let agent = AgentClient::with_evaluation(
+            let mut agent = AgentClient::with_evaluation_and_autopilot(
                 self.config.model_provider.clone(),
                 self.config.api_endpoint.clone(),
                 self.config.api_token.clone(),
@@ -735,10 +738,10 @@ impl RalphLoop {
                     .completion_marker_file
                     .to_string_lossy()
                     .to_string(),
+                self.config.max_autopilot_continues,
             )
             .with_work_dir(task_work_dir.to_string_lossy().to_string())
             .with_cost_tracker(Arc::clone(&self.cost_tracker));
-            let mut agent = agent;
             let handle = tokio::spawn(async move {
                 // Wrap execution in a per-task timeout when `timeout_seconds` is set.
                 let result = if let Some(timeout_secs) = task.timeout_seconds {

@@ -86,6 +86,12 @@ pub enum Commands {
         #[arg(long)]
         goal: Option<String>,
 
+        /// Maximum number of autonomous continuation steps when using
+        /// `--model-provider copilot-autopilot`.  Maps to Copilot CLI's
+        /// `--max-autopilot-continues` flag.  Default is unlimited.
+        #[arg(long)]
+        max_autopilot_continues: Option<u32>,
+
         /// Webhook URLs to notify on task status transitions (can be specified
         /// multiple times).
         #[arg(long = "notify-webhook", value_name = "URL")]
