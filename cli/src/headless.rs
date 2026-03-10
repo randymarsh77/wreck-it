@@ -2056,4 +2056,111 @@ mod tests {
         let state: HeadlessState = serde_json::from_str(json).unwrap();
         assert!(state.review_requested.is_none());
     }
+
+    #[test]
+    fn mark_task_pending_by_id_resets_in_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+
+        let tasks = vec![crate::types::Task {
+            id: "t1".to_string(),
+            description: "task one".to_string(),
+            status: crate::types::TaskStatus::InProgress,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            timeout_seconds: None,
+            max_retries: None,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
+        }];
+        save_tasks(&task_file, &tasks).unwrap();
+
+        mark_task_pending_by_id("t1", &task_file).unwrap();
+
+        let reloaded = load_tasks(&task_file).unwrap();
+        assert_eq!(reloaded[0].status, crate::types::TaskStatus::Pending);
+    }
+
+    #[test]
+    fn mark_task_pending_by_id_ignores_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+
+        let tasks = vec![crate::types::Task {
+            id: "t1".to_string(),
+            description: "task one".to_string(),
+            status: crate::types::TaskStatus::InProgress,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            timeout_seconds: None,
+            max_retries: None,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
+        }];
+        save_tasks(&task_file, &tasks).unwrap();
+
+        // UNKNOWN_TASK_ID task IDs are skipped.
+        mark_task_pending_by_id(UNKNOWN_TASK_ID, &task_file).unwrap();
+
+        let reloaded = load_tasks(&task_file).unwrap();
+        assert_eq!(reloaded[0].status, crate::types::TaskStatus::InProgress);
+    }
+
+    #[test]
+    fn mark_task_pending_by_id_noop_when_already_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+
+        let tasks = vec![crate::types::Task {
+            id: "t1".to_string(),
+            description: "task one".to_string(),
+            status: crate::types::TaskStatus::Pending,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            timeout_seconds: None,
+            max_retries: None,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
+        }];
+        save_tasks(&task_file, &tasks).unwrap();
+
+        // Already pending — should be a no-op.
+        mark_task_pending_by_id("t1", &task_file).unwrap();
+
+        let reloaded = load_tasks(&task_file).unwrap();
+        assert_eq!(reloaded[0].status, crate::types::TaskStatus::Pending);
+    }
 }
