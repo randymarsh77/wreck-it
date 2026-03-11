@@ -449,19 +449,20 @@
   {
     "id": "eval-html-report",
     "description": "Evaluate the HTML report generator end-to-end. Run `wreck-it report --output /tmp/test-report.html --task-file <fixture-tasks.json>` (or invoke the function directly in a test) and confirm the generated file is valid HTML with correct task counts, cost summaries, and a Mermaid diagram block. Open or parse the HTML to verify it contains the expected sections. Check edge cases: empty task list, all-failed tasks, tasks with zero cost. Run `cargo test --lib` to confirm no regressions. Write a brief evaluation summary as a comment block at the top of `cli/src/report.rs` noting browser compatibility, file size for large task lists, and recommended enhancements (e.g. dark mode, exportable CSV).",
-    "status": "pending",
+    "status": "completed",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
       "test-html-report"
     ],
     "priority": 3,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1773203909
   },
   {
     "id": "ideas-error-classification",
     "description": "Research and design an error classification and smart recovery system for wreck-it. Currently all task failures are treated identically: retried up to `max_retries` times and then re-planned after `replan_threshold` consecutive failures. Design a system that classifies errors into categories: `Transient` (e.g. rate-limit HTTP 429, network timeout), `Permanent` (e.g. compile error, test failure), `NeedsReplan` (e.g. task description ambiguous, wrong file targeted), and `ContextOverflow` (e.g. agent returned truncated output). Review `cli/src/headless.rs`, `cli/src/agent.rs`, and `cli/src/ralph_loop.rs` to identify where error handling occurs. For each error category, propose a recovery strategy: `Transient` → exponential backoff retry; `Permanent` → invoke critic with error output injected; `NeedsReplan` → immediate re-plan trigger; `ContextOverflow` → task splitting. Document the design as inline comments in a new stub file `cli/src/error_classifier.rs`.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "ideas",
     "priority": 4,
     "complexity": 3

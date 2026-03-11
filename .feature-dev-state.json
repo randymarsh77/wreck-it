@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 40,
-  "current_task_id": "eval-html-report",
-  "issue_number": 253,
-  "last_prompt": "Evaluate the HTML report generator end-to-end. Run `wreck-it report --output /tmp/test-report.html --task-file <fixture-tasks.json>` (or invoke the function directly in a test) and confirm the generated file is valid HTML with correct task counts, cost summaries, and a Mermaid diagram block. Open or parse the HTML to verify it contains the expected sections. Check edge cases: empty task list, all-failed tasks, tasks with zero cost. Run `cargo test --lib` to confirm no regressions. Write a brief evaluation summary as a comment block at the top of `cli/src/report.rs` noting browser compatibility, file size for large task lists, and recommended enhancements (e.g. dark mode, exportable CSV).",
+  "iteration": 41,
+  "current_task_id": "ideas-error-classification",
+  "issue_number": 256,
+  "last_prompt": "Research and design an error classification and smart recovery system for wreck-it. Currently all task failures are treated identically: retried up to `max_retries` times and then re-planned after `replan_threshold` consecutive failures. Design a system that classifies errors into categories: `Transient` (e.g. rate-limit HTTP 429, network timeout), `Permanent` (e.g. compile error, test failure), `NeedsReplan` (e.g. task description ambiguous, wrong file targeted), and `ContextOverflow` (e.g. agent returned truncated output). Review `cli/src/headless.rs`, `cli/src/agent.rs`, and `cli/src/ralph_loop.rs` to identify where error handling occurs. For each error category, propose a recovery strategy: `Transient` → exponential backoff retry; `Permanent` → invoke critic with error output injected; `NeedsReplan` → immediate re-plan trigger; `ContextOverflow` → task splitting. Document the design as inline comments in a new stub file `cli/src/error_classifier.rs`.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -261,6 +261,10 @@
     "iteration 39: agent created PR #251 for task Some(\"test-html-report\")",
     "iteration 39: marked PR #251 as ready for review",
     "iteration 39: merged PR #251 for task Some(\"test-html-report\") (brute mode)",
-    "iteration 40: triggered cloud agent for task eval-html-report (issue #253)"
+    "iteration 40: triggered cloud agent for task eval-html-report (issue #253)",
+    "iteration 40: agent created PR #254 for task Some(\"eval-html-report\")",
+    "iteration 40: marked PR #254 as ready for review",
+    "iteration 40: merged PR #254 for task Some(\"eval-html-report\") (brute mode)",
+    "iteration 41: triggered cloud agent for task ideas-error-classification (issue #256)"
   ]
 }
