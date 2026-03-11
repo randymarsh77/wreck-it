@@ -15,7 +15,8 @@ use crate::cloud_agent::{
     resolve_repo_info, CloudAgentClient, CloudAgentStatus, PrMergeStatus,
 };
 use crate::headless_config::{load_headless_config, HeadlessConfig};
-use crate::headless_state::{load_headless_state, save_headless_state, HeadlessState, PendingIssue, TrackedPr};
+use crate::headless_state::{load_headless_state, save_headless_state, HeadlessState, TrackedPr};
+use wreck_it_core::state::PendingIssue;
 use crate::repo_config::RalphConfig;
 use crate::state_worktree::{commit_and_push_state, ensure_state_worktree};
 use crate::types::Config;
@@ -601,6 +602,10 @@ async fn promote_pending_merge_issues(
                         review_requested: None,
                         merge_method: None,
                     });
+                }
+                promoted.push(pending.issue_number);
+            }
+            Ok(CloudAgentStatus::PrCreatedAgentWorking { pr_number, .. }) => {
                 // PR exists but agent is still working — track it now so
                 // that advance_tracked_prs can see the issue_number and
                 // defer marking-ready until the agent finishes.
@@ -616,6 +621,10 @@ async fn promote_pending_merge_issues(
                         review_requested: None,
                         merge_method: None,
                     });
+                }
+                promoted.push(pending.issue_number);
+            }
+            Ok(CloudAgentStatus::CompletedNoPr) => {
                 println!(
                     "[wreck-it] merge: issue #{} completed without a PR — removing",
                     pending.issue_number,
@@ -804,6 +813,7 @@ mod tests {
             task_id: "merge-pr-33".to_string(),
             issue_number: Some(88),
             review_requested: None,
+            merge_method: None,
         });
 
         save_headless_state(&state_file, &state).unwrap();
