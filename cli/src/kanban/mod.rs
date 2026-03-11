@@ -51,6 +51,7 @@ pub struct KanbanIssue {
 
 /// Updates fetched from the external board for a single issue.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct KanbanUpdates {
     /// New description text, if the description changed since the last sync.
     pub description: Option<String>,
@@ -210,11 +211,7 @@ impl KanbanClient {
         }
     }
 
-    pub async fn transition_issue(
-        &self,
-        external_id: &str,
-        status: TaskStatus,
-    ) -> Result<()> {
+    pub async fn transition_issue(&self, external_id: &str, status: TaskStatus) -> Result<()> {
         match self {
             Self::Linear(p) => p.transition_issue(external_id, status).await,
             Self::Jira(p) => p.transition_issue(external_id, status).await,
@@ -222,6 +219,7 @@ impl KanbanClient {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn add_comment(&self, external_id: &str, comment: &str) -> Result<()> {
         match self {
             Self::Linear(p) => p.add_comment(external_id, comment).await,
@@ -230,6 +228,7 @@ impl KanbanClient {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn add_link(&self, external_id: &str, url: &str, title: &str) -> Result<()> {
         match self {
             Self::Linear(p) => p.add_link(external_id, url, title).await,
@@ -238,6 +237,7 @@ impl KanbanClient {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn get_issue(&self, external_id: &str) -> Result<KanbanIssue> {
         match self {
             Self::Linear(p) => p.get_issue(external_id).await,
@@ -246,6 +246,7 @@ impl KanbanClient {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn get_updates(
         &self,
         external_id: &str,
@@ -258,6 +259,7 @@ impl KanbanClient {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn close_issue(&self, external_id: &str) -> Result<()> {
         match self {
             Self::Linear(p) => p.close_issue(external_id).await,
