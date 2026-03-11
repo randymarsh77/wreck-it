@@ -170,7 +170,17 @@ impl TuiApp {
                     Style::default().fg(color)
                 };
 
-                let content = format!("{} [{}] {}", symbol, task.id, task.description);
+                // Append semantic score when available.
+                let score_suffix = state
+                    .semantic_scores
+                    .get(&task.id)
+                    .map(|s| format!(" [score: {s}/100]"))
+                    .unwrap_or_default();
+
+                let content = format!(
+                    "{} [{}] {}{}",
+                    symbol, task.id, task.description, score_suffix
+                );
                 ListItem::new(content).style(style)
             })
             .collect();
