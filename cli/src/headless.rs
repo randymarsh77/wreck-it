@@ -328,7 +328,7 @@ async fn log_issue_assignees(client: &CloudAgentClient, issue_number: u64, prefi
 /// Returns `true` when at least one tracked PR transitioned state (e.g. was
 /// marked ready, merged, or resolved), signalling that another progress round
 /// may be worthwhile.
-async fn advance_tracked_prs(
+pub(crate) async fn advance_tracked_prs(
     config: &Config,
     headless_cfg: &HeadlessConfig,
     ralph: Option<&RalphConfig>,
@@ -1767,6 +1767,7 @@ mod tests {
             memory: vec![],
             tracked_prs: vec![],
             review_requested: None,
+            pending_merge_issues: vec![],
             task_statuses: std::collections::HashMap::new(),
         };
 
@@ -2025,6 +2026,7 @@ mod tests {
             memory: vec![],
             tracked_prs: vec![],
             review_requested: Some(true),
+            pending_merge_issues: vec![],
             task_statuses: std::collections::HashMap::new(),
         };
 

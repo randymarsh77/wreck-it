@@ -295,7 +295,7 @@ async fn main() -> Result<()> {
                             );
                         }
                     } else if rc.command.as_deref() == Some("merge") {
-                        if let Err(e) = merge::run_merge(&config, rc.backend.as_deref()).await {
+                        if let Err(e) = merge::run_merge(&config, rc.backend.as_deref(), Some(rc)).await {
                             println!(
                                 "[wreck-it] ralph '{}' (merge) failed: {}. Continuing…",
                                 rc.name, e
@@ -901,7 +901,7 @@ async fn main() -> Result<()> {
             config.work_dir = resolved_work_dir;
             config.api_token = config.api_token.or_else(|| env::var("GITHUB_TOKEN").ok());
 
-            merge::run_merge(&config, Some(&backend)).await?;
+            merge::run_merge(&config, Some(&backend), None).await?;
         }
 
         Commands::Graph {
