@@ -15,14 +15,14 @@ use crate::cloud_agent::{
     resolve_repo_info, CloudAgentClient, CloudAgentStatus, PrMergeStatus,
 };
 use crate::headless_config::{load_headless_config, HeadlessConfig};
-use crate::headless_state::{load_headless_state, save_headless_state, HeadlessState, PendingIssue, TrackedPr};
+use crate::headless_state::{load_headless_state, save_headless_state, HeadlessState, TrackedPr};
+use wreck_it_core::state::PendingIssue;
 use crate::repo_config::RalphConfig;
 use crate::state_worktree::{commit_and_push_state, ensure_state_worktree};
 use crate::types::Config;
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::Path;
-use wreck_it_core::state::PendingMergeIssue;
 
 /// Default name for the repo-committed config file.
 const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
@@ -347,6 +347,12 @@ async fn advance_merge_tracked_prs(client: &CloudAgentClient, state: &mut Headle
                 );
                 resolved.push(pr_number);
             }
+            Ok(PrMergeStatus::AgentWorkInProgress) => {
+                println!(
+                    "[wreck-it] merge: PR #{} — agent work still in progress, skipping",
+                    pr_number,
+                );
+            }
             Err(e) => {
                 println!(
                     "[wreck-it] merge: error checking PR #{}: {}",
@@ -567,86 +573,6 @@ async fn resolve_via_cli(
     }
 
     Ok(())
-}
-
-/// Poll pending merge issues and promote them to tracked PRs when the coding
-/// agent has created a pull request.
-async fn promote_pending_merge_issues(
-    client: &CloudAgentClient,
-    state: &mut crate::headless_state::HeadlessState,
-) {
-    if state.pending_merge_issues.is_empty() {
-        return;
-    }
-
-    println!(
-        "[wreck-it] merge: checking {} pending merge issue(s) for linked PRs",
-        state.pending_merge_issues.len(),
-    );
-
-    let mut promoted: Vec<u64> = Vec::new();
-
-    for pending in &state.pending_merge_issues {
-        match client.check_agent_status(pending.issue_number).await {
-            Ok(CloudAgentStatus::PrCreated { pr_number, .. }) => {
-                if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_number) {
-                    println!(
-                        "[wreck-it] merge: issue #{} produced PR #{} — now tracking",
-                        pending.issue_number, pr_number,
-                    );
-                    state.tracked_prs.push(TrackedPr {
-                        pr_number,
-                        task_id: pending.task_id.clone(),
-                        issue_number: Some(pending.issue_number),
-                        review_requested: None,
-                    });
-                }
-                promoted.push(pending.issue_number);
-            }
-            Ok(CloudAgentStatus::PrCreatedAgentWorking { pr_number, .. }) => {
-                // PR exists but agent is still working — track it now so
-                // that advance_tracked_prs can see the issue_number and
-                // defer marking-ready until the agent finishes.
-                if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_number) {
-                    println!(
-                        "[wreck-it] merge: issue #{} produced PR #{} (agent still working) — now tracking",
-                        pending.issue_number, pr_number,
-                    );
-                    state.tracked_prs.push(TrackedPr {
-                        pr_number,
-                        task_id: pending.task_id.clone(),
-                        issue_number: Some(pending.issue_number),
-                        review_requested: None,
-                    });
-                }
-                promoted.push(pending.issue_number);
-            }
-            Ok(CloudAgentStatus::CompletedNoPr) => {
-                println!(
-                    "[wreck-it] merge: issue #{} completed without a PR — removing",
-                    pending.issue_number,
-                );
-                promoted.push(pending.issue_number);
-            }
-            Ok(CloudAgentStatus::Working) => {
-                println!(
-                    "[wreck-it] merge: issue #{} — agent still working",
-                    pending.issue_number,
-                );
-            }
-            Err(e) => {
-                println!(
-                    "[wreck-it] merge: failed to check status of issue #{}: {}",
-                    pending.issue_number, e,
-                );
-            }
-        }
-    }
-
-    // Remove promoted/completed issues from the pending list.
-    state
-        .pending_merge_issues
-        .retain(|p| !promoted.contains(&p.issue_number));
 }
 
 /// Fetch recent commit messages on the base branch via the GitHub REST API.

@@ -4,7 +4,7 @@ use std::path::Path;
 
 // Re-export shared types from wreck-it-core so that the rest of the crate
 // can continue to use `crate::headless_state::AgentPhase`, etc.
-pub use wreck_it_core::state::{AgentPhase, HeadlessState, PendingIssue, TrackedPr};
+pub use wreck_it_core::state::{AgentPhase, HeadlessState, TrackedPr};
 
 /// Load headless state from a JSON file. Returns default state if the file
 /// does not exist.
@@ -32,6 +32,7 @@ pub fn save_headless_state(path: &Path, state: &HeadlessState) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use wreck_it_core::state::PendingIssue;
 
     #[test]
     fn test_load_headless_state_defaults_when_missing() {
@@ -325,6 +326,7 @@ mod tests {
                 merge_method: Some("merge".to_string()),
             }],
             review_requested: None,
+            pending_merge_issues: vec![],
             task_statuses: std::collections::HashMap::new(),
         };
 
