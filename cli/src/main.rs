@@ -9,13 +9,14 @@ mod gastown_client;
 mod github_auth;
 mod github_client;
 mod graph;
-mod kanban;
 mod headless;
 mod headless_config;
 mod headless_state;
 mod install;
 #[cfg(test)]
 mod integration_eval;
+mod kanban;
+mod merge;
 mod notifier;
 mod openclaw;
 mod plan_migration;
@@ -31,7 +32,6 @@ mod task_manager;
 mod templates;
 mod tui;
 mod types;
-mod merge;
 mod unstuck;
 
 use anyhow::{Context, Result};
@@ -219,9 +219,7 @@ async fn main() -> Result<()> {
                 // Parse `KEY=PATH` pairs from --work-dir-map into the config map.
                 for entry in &work_dir_map {
                     if let Some((key, path)) = entry.split_once('=') {
-                        config
-                            .work_dirs
-                            .insert(key.to_string(), path.to_string());
+                        config.work_dirs.insert(key.to_string(), path.to_string());
                     } else {
                         eprintln!(
                             "Warning: ignoring malformed --work-dir-map entry '{}' \
@@ -282,9 +280,7 @@ async fn main() -> Result<()> {
                             );
                         }
                     } else if rc.command.as_deref() == Some("merge") {
-                        if let Err(e) =
-                            merge::run_merge(&config, rc.backend.as_deref()).await
-                        {
+                        if let Err(e) = merge::run_merge(&config, rc.backend.as_deref()).await {
                             println!(
                                 "[wreck-it] ralph '{}' (merge) failed: {}. Continuing…",
                                 rc.name, e
@@ -940,10 +936,7 @@ async fn main() -> Result<()> {
                     );
                     println!("{}", "-".repeat(id_w + status_w + role_w + 30));
                     for t in &filtered {
-                        println!(
-                            "{}",
-                            task_cli::format_task_row(t, id_w, status_w, role_w)
-                        );
+                        println!("{}", task_cli::format_task_row(t, id_w, status_w, role_w));
                     }
                     println!("\n{} task(s) listed.", filtered.len());
                 }

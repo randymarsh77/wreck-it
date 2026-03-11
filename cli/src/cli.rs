@@ -119,7 +119,11 @@ pub enum Commands {
         /// instead of the top-level --work-dir.  Example:
         ///   --work-dir-map frontend=/home/user/my-frontend
         ///   --work-dir-map backend=/home/user/my-backend
-        #[arg(long = "work-dir-map", value_name = "ROLE_OR_ID=PATH", number_of_values = 1)]
+        #[arg(
+            long = "work-dir-map",
+            value_name = "ROLE_OR_ID=PATH",
+            number_of_values = 1
+        )]
         work_dir_map: Vec<String>,
     },
 

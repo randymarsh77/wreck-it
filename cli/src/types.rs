@@ -876,12 +876,22 @@ mod tests {
     #[test]
     fn config_work_dirs_roundtrip() {
         let mut config = Config::default();
-        config.work_dirs.insert("frontend".to_string(), "/repos/frontend".to_string());
-        config.work_dirs.insert("backend".to_string(), "/repos/backend".to_string());
+        config
+            .work_dirs
+            .insert("frontend".to_string(), "/repos/frontend".to_string());
+        config
+            .work_dirs
+            .insert("backend".to_string(), "/repos/backend".to_string());
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.work_dirs.get("frontend").map(String::as_str), Some("/repos/frontend"));
-        assert_eq!(loaded.work_dirs.get("backend").map(String::as_str), Some("/repos/backend"));
+        assert_eq!(
+            loaded.work_dirs.get("frontend").map(String::as_str),
+            Some("/repos/frontend")
+        );
+        assert_eq!(
+            loaded.work_dirs.get("backend").map(String::as_str),
+            Some("/repos/backend")
+        );
     }
 
     #[test]
