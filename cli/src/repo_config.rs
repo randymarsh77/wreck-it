@@ -345,6 +345,11 @@ state_file = ".docs-state.json"
                 prompt_dir: None,
                 validation_command: None,
             }],
+        };
+        save_repo_config(dir.path(), &cfg).unwrap();
+        let loaded = load_repo_config(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ralphs.len(), 1);
+        assert_eq!(
             loaded.ralphs[0].branch.as_deref(),
             Some("feature/my-branch"),
         );
