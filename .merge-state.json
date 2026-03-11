@@ -51,16 +51,36 @@
       "pr_number": 284,
       "task_id": "merge-pr-208",
       "issue_number": 280
-    }
-  ],
-  "pending_merge_issues": [
-    {
-      "issue_number": 282,
-      "task_id": "merge-pr-207"
     },
     {
-      "issue_number": 283,
-      "task_id": "merge-pr-174"
+      "pr_number": 285,
+      "task_id": "merge-pr-207",
+      "issue_number": 282
+    },
+    {
+      "pr_number": 286,
+      "task_id": "merge-pr-174",
+      "issue_number": 283
+    },
+    {
+      "pr_number": 289,
+      "task_id": "merge-pr-259",
+      "issue_number": 287
+    },
+    {
+      "pr_number": 292,
+      "task_id": "merge-pr-208",
+      "issue_number": 288
+    },
+    {
+      "pr_number": 293,
+      "task_id": "merge-pr-207",
+      "issue_number": 290
+    },
+    {
+      "pr_number": 294,
+      "task_id": "merge-pr-174",
+      "issue_number": 291
     }
   ]
 }
