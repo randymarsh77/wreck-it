@@ -344,6 +344,7 @@ state_file = ".docs-state.json"
 
                 prompt_dir: None,
                 validation_command: None,
+
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -374,6 +375,7 @@ state_file = ".docs-state.json"
 
                 prompt_dir: None,
                 validation_command: None,
+
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -449,6 +451,7 @@ reviewers = ["alice", "bob"]
 
                 prompt_dir: None,
                 validation_command: None,
+
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -477,6 +480,7 @@ reviewers = ["alice", "bob"]
 
                 prompt_dir: None,
                 validation_command: None,
+
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -530,6 +534,7 @@ command = "unstuck"
 
                 prompt_dir: None,
                 validation_command: None,
+
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
