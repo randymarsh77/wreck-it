@@ -144,7 +144,6 @@
 //!   the task lifecycle state machine.
 
 use crate::types::Task;
-use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of UTF-8 characters included from the git diff in the
@@ -210,10 +209,7 @@ pub fn build_semantic_eval_prompt(
     };
 
     // Use task-level acceptance_criteria first, fall back to global completeness_prompt.
-    let criteria = task
-        .acceptance_criteria
-        .as_deref()
-        .or(completeness_prompt);
+    let criteria = task.acceptance_criteria.as_deref().or(completeness_prompt);
 
     let criteria_section = criteria
         .map(|p| format!("Acceptance criteria:\n{p}"))
@@ -270,21 +266,23 @@ pub fn parse_semantic_verdict(response: &str) -> SemanticVerdict {
     }
 }
 
+#[cfg(test)]
+use anyhow::{Context, Result};
+
 /// Run a semantic evaluation against a git diff.
 ///
-/// This is a testable wrapper that:
+/// This is a test-only wrapper that:
 /// 1. Builds the evaluation prompt via [`build_semantic_eval_prompt`].
 /// 2. Calls the provided `chat_fn` to get the LLM response.
 /// 3. Parses the response into a [`SemanticVerdict`] via
 ///    [`parse_semantic_verdict`].
 ///
 /// The `chat_fn` parameter accepts a prompt string and returns the raw model
-/// response.  In production this is wired to
-/// `AgentClient::chat_via_http` / `AgentClient::critique_via_copilot`.
-/// In tests it can be replaced with a stub that returns canned JSON.
+/// response.  In tests it can be replaced with a stub that returns canned JSON.
 ///
 /// The caller is responsible for collecting the git diff before calling this
 /// function (see `AgentClient::get_git_diff` in production).
+#[cfg(test)]
 pub async fn evaluate_semantically<F, Fut>(
     task: &Task,
     diff: &str,
@@ -487,11 +485,8 @@ index 3a2b1c4..9f8e7d2 100644
         // the completeness_prompt passed from the agent config.
         let mut task = make_task("Do something");
         task.acceptance_criteria = Some("Task-level criterion".to_string());
-        let prompt = build_semantic_eval_prompt(
-            &task,
-            Some("Global completeness prompt"),
-            "diff content",
-        );
+        let prompt =
+            build_semantic_eval_prompt(&task, Some("Global completeness prompt"), "diff content");
         assert!(
             prompt.contains("Task-level criterion"),
             "task acceptance_criteria should be in prompt"
@@ -505,11 +500,8 @@ index 3a2b1c4..9f8e7d2 100644
     #[test]
     fn prompt_falls_back_to_completeness_prompt_when_no_acceptance_criteria() {
         let task = make_task("Do something");
-        let prompt = build_semantic_eval_prompt(
-            &task,
-            Some("Global completeness prompt"),
-            "diff content",
-        );
+        let prompt =
+            build_semantic_eval_prompt(&task, Some("Global completeness prompt"), "diff content");
         assert!(prompt.contains("Global completeness prompt"));
     }
 
@@ -629,8 +621,9 @@ index 3a2b1c4..9f8e7d2 100644
             mode: "semantic".to_string(),
         });
 
-        let chat_fn =
-            |_prompt: String| async move { Ok("I think it looks good but I am not sure.".to_string()) };
+        let chat_fn = |_prompt: String| async move {
+            Ok("I think it looks good but I am not sure.".to_string())
+        };
 
         let verdict = evaluate_semantically(&task, SAMPLE_DIFF, None, chat_fn)
             .await

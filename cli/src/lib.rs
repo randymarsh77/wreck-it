@@ -16,12 +16,12 @@
 
 mod agent;
 mod agent_memory;
-mod error_classifier;
 mod artefact_store;
 mod cli;
 mod cloud_agent;
 mod config_manager;
 mod cost_tracker;
+mod error_classifier;
 mod gastown_client;
 mod github_auth;
 mod github_client;
@@ -41,8 +41,8 @@ mod prompt_loader;
 mod provenance;
 mod ralph_loop;
 mod replanner;
-mod report;
 mod repo_config;
+mod report;
 mod semantic_eval;
 mod state_worktree;
 mod task_cli;
