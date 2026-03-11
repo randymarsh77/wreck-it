@@ -346,6 +346,36 @@ state_file = ".docs-state.json"
                 validation_command: None,
             }],
         };
+        save_repo_config(dir.path(), &cfg).unwrap();
+        let loaded = load_repo_config(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ralphs.len(), 1);
+        assert_eq!(
+            loaded.ralphs[0].branch.as_deref(),
+            Some("feature/my-branch"),
+        );
+    }
+
+    #[test]
+    fn test_ralph_config_branch_omitted_when_none() {
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![RalphConfig {
+                name: "docs".to_string(),
+                task_file: "docs-tasks.json".to_string(),
+                state_file: ".docs-state.json".to_string(),
+                branch: None,
+                agent: None,
+                reviewers: None,
+                command: None,
+                brute_mode: None,
+                backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
+            }],
+        };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
         // The ralph section should not contain a "branch" key.
         // (state_branch at the top level is unrelated.)
@@ -413,6 +443,34 @@ reviewers = ["alice", "bob"]
                 branch: None,
                 agent: Some("claude".to_string()),
                 reviewers: Some(vec!["reviewer1".to_string(), "reviewer2".to_string()]),
+                command: None,
+                brute_mode: None,
+                backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
+            }],
+        };
+        save_repo_config(dir.path(), &cfg).unwrap();
+        let loaded = load_repo_config(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.ralphs[0].agent.as_deref(), Some("claude"));
+        let reviewers = loaded.ralphs[0].reviewers.as_ref().unwrap();
+        assert_eq!(reviewers, &["reviewer1", "reviewer2"]);
+    }
+
+    #[test]
+    fn test_ralph_config_agent_omitted_when_none() {
+        let cfg = RepoConfig {
+            state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
+            state_root: ".wreck-it".to_string(),
+            ralphs: vec![RalphConfig {
+                name: "docs".to_string(),
+                task_file: "docs-tasks.json".to_string(),
+                state_file: ".docs-state.json".to_string(),
+                branch: None,
+                agent: None,
+                reviewers: None,
                 command: None,
                 brute_mode: None,
                 backend: None,
