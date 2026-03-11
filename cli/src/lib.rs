@@ -25,13 +25,13 @@ mod gastown_client;
 mod github_auth;
 mod github_client;
 mod graph;
+pub mod kanban;
 mod headless;
 mod headless_config;
 mod headless_state;
 mod install;
 #[cfg(test)]
 mod integration_eval;
-pub mod kanban;
 mod notifier;
 mod openclaw;
 mod plan_migration;
