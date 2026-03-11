@@ -291,8 +291,8 @@ pub fn parse_and_validate_plan(raw: &str) -> Result<Vec<Task>> {
                 parent_id: None,
                 labels: vec![],
                 system_prompt_override: None,
-            acceptance_criteria: None,
-            evaluation: None,
+                acceptance_criteria: None,
+                evaluation: None,
             })
         })
         .collect::<Result<Vec<Task>>>()?;

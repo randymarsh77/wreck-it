@@ -403,16 +403,26 @@ pub(crate) async fn advance_tracked_prs(
                 // If we know the triggering issue, check whether the coding
                 // agent is still assigned — a draft PR while the agent is
                 // assigned means it is still pushing changes and should not
-                // be marked ready yet.
+                // be marked ready yet.  However, some agents (e.g. Copilot)
+                // remain assigned after finishing, so also consult PR-level
+                // signals (session completion, title heuristic) before
+                // deciding to skip.
                 if let Some(issue_num) = tracked.issue_number {
                     match client.is_agent_assigned_to_issue(issue_num).await {
                         Ok(true) => {
+                            if !client.is_pr_work_completed(pr_number).await {
+                                println!(
+                                    "[wreck-it] advance: PR #{} is a draft and agent is still \
+                                     assigned to issue #{}; skipping",
+                                    pr_number, issue_num,
+                                );
+                                continue;
+                            }
                             println!(
-                                "[wreck-it] advance: PR #{} is a draft and agent is still \
-                                 assigned to issue #{}; skipping",
+                                "[wreck-it] advance: PR #{} agent assigned to issue #{} but \
+                                 work appears completed; proceeding to mark ready",
                                 pr_number, issue_num,
                             );
-                            continue;
                         }
                         Ok(false) => { /* agent finished; mark ready below */ }
                         Err(e) => {
@@ -998,9 +1008,7 @@ fn format_validation_failure_comment(failure: &ValidationFailure) -> String {
         ));
     }
 
-    comment.push_str(
-        "\nPlease investigate the failure and push a fix.",
-    );
+    comment.push_str("\nPlease investigate the failure and push a fix.");
 
     comment
 }
