@@ -407,7 +407,6 @@ async fn resolve_via_cli(
     Ok(())
 }
 
-
 /// Poll pending merge issues and promote them to tracked PRs when the coding
 /// agent has created a pull request.
 async fn promote_pending_merge_issues(
@@ -487,7 +486,6 @@ async fn promote_pending_merge_issues(
         .pending_merge_issues
         .retain(|p| !promoted.contains(&p.issue_number));
 }
-
 
 /// Fetch recent commit messages on the base branch via the GitHub REST API.
 async fn fetch_recent_base_commits_via_api(client: &CloudAgentClient, base_ref: &str) -> String {
