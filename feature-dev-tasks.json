@@ -379,18 +379,19 @@
   {
     "id": "impl-semantic-evaluation",
     "description": "Implement the semantic evaluation mode designed in `ideas-semantic-evaluation`. Create `cli/src/semantic_eval.rs` with an async `evaluate_semantically(task, diff, agent_client) -> SemanticVerdict` function where `SemanticVerdict = { passed: bool, score: u8, rationale: String }`. The function should construct a prompt that includes the task description, any acceptance criteria from `task.acceptance_criteria`, the git diff, and instructions to return a JSON verdict. Parse the agent response with lenient JSON extraction (scan for the first `{` block). Add `Semantic` variant to `EvaluationMode` in `core/src/types.rs`. Wire the new mode into the evaluation dispatch in `cli/src/agent.rs` (or wherever EvaluationMode is dispatched). Expose it via `evaluation: { mode: \"semantic\" }` in task JSON. Log the rationale at INFO level and surface the score in TUI task detail view.",
-    "status": "pending",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-semantic-evaluation"
     ],
     "priority": 5,
-    "complexity": 5
+    "complexity": 5,
+    "last_attempt_at": 1773189973
   },
   {
     "id": "test-semantic-evaluation",
     "description": "Write unit tests for the semantic evaluation feature implemented in `impl-semantic-evaluation`. In `cli/src/semantic_eval.rs` add a `#[cfg(test)]` module covering: (1) successful parsing of a well-formed JSON verdict `{ passed: true, score: 9, rationale: \"...\" }`, (2) lenient extraction when the agent wraps JSON in markdown code fences, (3) fallback to `passed: false, score: 0` when the response is unparseable, (4) that `evaluate_semantically` returns `SemanticVerdict` with expected fields when given a mock agent response. Use a mock or stub for the agent client to avoid real API calls. Also verify that setting `evaluation: { mode: \"semantic\" }` on a task triggers `evaluate_semantically` in the dispatch path. Run `cargo test --lib` to confirm all tests pass.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "impl-semantic-evaluation"
