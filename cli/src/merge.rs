@@ -486,7 +486,6 @@ async fn promote_pending_merge_issues(
         .pending_merge_issues
         .retain(|p| !promoted.contains(&p.issue_number));
 }
-
 /// Fetch recent commit messages on the base branch via the GitHub REST API.
 async fn fetch_recent_base_commits_via_api(client: &CloudAgentClient, base_ref: &str) -> String {
     match client.fetch_recent_commits(base_ref, 10).await {
