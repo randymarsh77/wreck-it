@@ -438,9 +438,9 @@ async fn promote_pending_merge_issues(
                 promoted.push(pending.issue_number);
             }
             Ok(CloudAgentStatus::PrCreatedAgentWorking { pr_number, .. }) => {
-                // PR exists but agent is still working — track it but don't
-                // remove from pending yet so advance_tracked_prs can see the
-                // issue_number and skip premature actions.
+                // PR exists but agent is still working — track it now so
+                // that advance_tracked_prs can see the issue_number and
+                // defer marking-ready until the agent finishes.
                 if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_number) {
                     println!(
                         "[wreck-it] merge: issue #{} produced PR #{} (agent still working) — now tracking",
