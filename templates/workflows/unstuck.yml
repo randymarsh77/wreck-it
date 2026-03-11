@@ -33,12 +33,14 @@ jobs:
   unstuck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
 
       - name: Run wreck-it unstuck
-        uses: randymarsh77/wreck-it/action@main
+        uses: randymarsh77/wreck-it/action@master
+        with:
+          command: unstuck
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}

@@ -87,7 +87,15 @@ pub(crate) fn build_issue_body(
     task_description: &str,
     memory: &[String],
     branch: Option<&str>,
+    system_prompt: Option<&str>,
 ) -> String {
+    let system_prompt_section = match system_prompt {
+        Some(sp) if !sp.is_empty() => format!(
+            "<!-- system-prompt -->\n```\n{}\n```\n<!-- /system-prompt -->\n\n",
+            sp
+        ),
+        _ => String::new(),
+    };
     let branch_section = match branch {
         Some(b) => format!(
             "\n\n## Branch\n\nBase your work on the `{}` branch and target your pull request to `{}`.",
@@ -106,8 +114,8 @@ pub(crate) fn build_issue_body(
         format!("\n\n## Previous Context\n\n{}", bullets)
     };
     format!(
-        "{}{}{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
-        task_description, branch_section, memory_section, task_id,
+        "{}{}{}{}\n\n---\n*Triggered by wreck-it cloud agent orchestrator (task `{}`)*",
+        system_prompt_section, task_description, branch_section, memory_section, task_id,
     )
 }
 
@@ -300,8 +308,15 @@ impl CloudAgentClient {
         task_description: &str,
         memory_context: &[String],
         branch: Option<&str>,
+        system_prompt: Option<&str>,
     ) -> Result<TriggerResult> {
-        let issue_body = build_issue_body(task_id, task_description, memory_context, branch);
+        let issue_body = build_issue_body(
+            task_id,
+            task_description,
+            memory_context,
+            branch,
+            system_prompt,
+        );
 
         let create_body = serde_json::json!({
             "title": format!("[wreck-it] {} {}", ralph_name, task_id),
@@ -1899,6 +1914,111 @@ impl CloudAgentClient {
         Ok(has_failure)
     }
 
+    /// Check whether the tip of a branch/ref has any failing check runs.
+    ///
+    /// Resolves the ref to a SHA via the GitHub API and then queries the
+    /// check-runs endpoint – similar to [`has_failing_checks_for_pr`] but
+    /// operating on an arbitrary git ref instead of a PR head.
+    pub async fn has_failing_checks_for_ref(&self, git_ref: &str) -> Result<bool> {
+        // Resolve the ref to a commit SHA.
+        let ref_url = format!(
+            "{}/repos/{}/{}/commits/{}",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, git_ref,
+        );
+
+        let ref_resp = self
+            .http
+            .get(&ref_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github.sha")
+            .send()
+            .await
+            .context("Failed to resolve ref to SHA")?;
+
+        if !ref_resp.status().is_success() {
+            tracing::warn!(
+                "Failed to resolve ref '{}' ({})",
+                git_ref,
+                ref_resp.status(),
+            );
+            return Ok(false);
+        }
+
+        let sha = ref_resp.text().await?.trim().to_string();
+
+        // Query completed check runs for the SHA.
+        let checks_url = format!(
+            "{}/repos/{}/{}/commits/{}/check-runs?status=completed&per_page=100",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, sha,
+        );
+
+        let resp = self
+            .http
+            .get(&checks_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to list check runs for ref")?;
+
+        if !resp.status().is_success() {
+            tracing::warn!(
+                "Failed to list check runs for ref '{}' ({})",
+                git_ref,
+                resp.status(),
+            );
+            return Ok(false);
+        }
+
+        let body: serde_json::Value = resp.json().await?;
+        let has_failure = body["check_runs"]
+            .as_array()
+            .map(|runs| {
+                runs.iter()
+                    .any(|r| r["conclusion"].as_str() == Some("failure"))
+            })
+            .unwrap_or(false);
+
+        Ok(has_failure)
+    }
+
+    /// Search for an open issue in this repository whose title matches the
+    /// given `title_query` string.  Returns the issue number of the first
+    /// match, or `None` when no matching open issue exists.
+    pub async fn find_open_issue_by_title(&self, title_query: &str) -> Result<Option<u64>> {
+        let query = format!(
+            "repo:{}/{} is:issue is:open in:title {}",
+            self.repo_owner, self.repo_name, title_query,
+        );
+        let url = format!("{}/search/issues", GITHUB_API_BASE);
+
+        let resp = self
+            .http
+            .get(&url)
+            .query(&[("per_page", "5"), ("q", &query)])
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("Failed to search issues")?;
+
+        if !resp.status().is_success() {
+            tracing::warn!("Issue search request failed ({})", resp.status(),);
+            return Ok(None);
+        }
+
+        let body: serde_json::Value = resp.json().await?;
+        let issue_number = body["items"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(|item| item["number"].as_u64());
+
+        Ok(issue_number)
+    }
+
     /// Post a comment on a pull request (via the issues comments API).
     pub async fn comment_on_pr(&self, pr_number: u64, body: &str) -> Result<()> {
         let url = format!(
@@ -2504,11 +2624,7 @@ impl CloudAgentClient {
     /// Fetch the most recent commit messages on a branch.
     ///
     /// Returns a newline-separated string of `<sha_short> <message>` lines.
-    pub async fn fetch_recent_commits(
-        &self,
-        branch: &str,
-        count: u32,
-    ) -> Result<String> {
+    pub async fn fetch_recent_commits(&self, branch: &str, count: u32) -> Result<String> {
         let url = format!(
             "{}/repos/{}/{}/commits?sha={}&per_page={}",
             GITHUB_API_BASE, self.repo_owner, self.repo_name, branch, count,
@@ -2971,7 +3087,7 @@ mod tests {
 
     #[test]
     fn build_issue_body_without_memory() {
-        let body = build_issue_body("task-1", "Implement feature X", &[], None);
+        let body = build_issue_body("task-1", "Implement feature X", &[], None, None);
         assert!(body.contains("Implement feature X"));
         assert!(body.contains("task `task-1`"));
         assert!(!body.contains("Previous Context"));
@@ -2984,7 +3100,7 @@ mod tests {
             "iteration 1: triggered cloud agent for task setup (issue #10)".to_string(),
             "iteration 2: agent created PR #5 for task setup".to_string(),
         ];
-        let body = build_issue_body("task-2", "Add test coverage", &memory, None);
+        let body = build_issue_body("task-2", "Add test coverage", &memory, None, None);
         assert!(body.contains("Add test coverage"));
         assert!(body.contains("task `task-2`"));
         assert!(body.contains("Previous Context"));
@@ -2995,7 +3111,7 @@ mod tests {
     #[test]
     fn build_issue_body_memory_placed_before_footer() {
         let memory = vec!["some context".to_string()];
-        let body = build_issue_body("t", "desc", &memory, None);
+        let body = build_issue_body("t", "desc", &memory, None, None);
         let context_pos = body.find("Previous Context").unwrap();
         let footer_pos = body.find("Triggered by wreck-it").unwrap();
         assert!(
@@ -3011,6 +3127,7 @@ mod tests {
             "Implement feature X",
             &[],
             Some("feature/my-branch"),
+            None,
         );
         assert!(body.contains("Implement feature X"));
         assert!(body.contains("## Branch"));
@@ -3021,13 +3138,37 @@ mod tests {
     #[test]
     fn build_issue_body_with_branch_and_memory() {
         let memory = vec!["iteration 1: something".to_string()];
-        let body = build_issue_body("task-1", "desc", &memory, Some("dev"));
+        let body = build_issue_body("task-1", "desc", &memory, Some("dev"), None);
         // Branch section should come before memory section
         let branch_pos = body.find("## Branch").unwrap();
         let memory_pos = body.find("Previous Context").unwrap();
         let footer_pos = body.find("Triggered by wreck-it").unwrap();
         assert!(branch_pos < memory_pos);
         assert!(memory_pos < footer_pos);
+    }
+
+    #[test]
+    fn build_issue_body_with_system_prompt() {
+        let body = build_issue_body(
+            "task-1",
+            "Implement feature X",
+            &[],
+            None,
+            Some("You are a Rust expert."),
+        );
+        assert!(body.contains("<!-- system-prompt -->"));
+        assert!(body.contains("You are a Rust expert."));
+        assert!(body.contains("<!-- /system-prompt -->"));
+        // System prompt should appear before description
+        let sp_pos = body.find("<!-- system-prompt -->").unwrap();
+        let desc_pos = body.find("Implement feature X").unwrap();
+        assert!(sp_pos < desc_pos);
+    }
+
+    #[test]
+    fn build_issue_body_without_system_prompt_has_no_marker() {
+        let body = build_issue_body("task-1", "desc", &[], None, None);
+        assert!(!body.contains("<!-- system-prompt -->"));
     }
 
     #[test]
