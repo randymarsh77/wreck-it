@@ -189,7 +189,7 @@ mod tests {
                     backend: None,
 
                     prompt_dir: None,
-                validation_command: None,
+                    validation_command: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -203,7 +203,7 @@ mod tests {
                     backend: None,
 
                     prompt_dir: None,
-                validation_command: None,
+                    validation_command: None,
                 },
             ],
         };
@@ -254,7 +254,7 @@ name = "docs"
                     backend: None,
 
                     prompt_dir: None,
-                validation_command: None,
+                    validation_command: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -268,7 +268,7 @@ name = "docs"
                     backend: None,
 
                     prompt_dir: None,
-                validation_command: None,
+                    validation_command: None,
                 },
             ],
             ..RepoConfig::default()

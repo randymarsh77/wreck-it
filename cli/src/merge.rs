@@ -165,9 +165,15 @@ pub async fn run_merge(
             merge_headless_cfg.state_file = state_file_name.clone().into();
         }
 
-        if let Err(e) =
-            headless::advance_tracked_prs(config, &merge_headless_cfg, ralph, &mut state, work_dir, sd)
-                .await
+        if let Err(e) = headless::advance_tracked_prs(
+            config,
+            &merge_headless_cfg,
+            ralph,
+            &mut state,
+            work_dir,
+            sd,
+        )
+        .await
         {
             println!("[wreck-it] merge: failed to advance tracked PRs: {}", e);
         }
@@ -179,12 +185,10 @@ pub async fn run_merge(
         if let Err(e) = save_headless_state(&state_path, &state) {
             println!("[wreck-it] merge: failed to save state: {}", e);
         }
-        if let Err(e) = commit_and_push_state(work_dir, &state_branch, "wreck-it: update merge state")
+        if let Err(e) =
+            commit_and_push_state(work_dir, &state_branch, "wreck-it: update merge state")
         {
-            println!(
-                "[wreck-it] merge: failed to commit/push state: {}",
-                e
-            );
+            println!("[wreck-it] merge: failed to commit/push state: {}", e);
         }
     }
 
@@ -622,11 +626,7 @@ mod tests {
         use crate::headless_state::load_headless_state;
         let dir = tempfile::tempdir().unwrap();
         let state_file = dir.path().join(".merge-state.json");
-        std::fs::write(
-            &state_file,
-            r#"{"phase":"needs_trigger","iteration":0}"#,
-        )
-        .unwrap();
+        std::fs::write(&state_file, r#"{"phase":"needs_trigger","iteration":0}"#).unwrap();
 
         let loaded = load_headless_state(&state_file).unwrap();
         assert!(loaded.pending_merge_issues.is_empty());

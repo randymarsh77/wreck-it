@@ -238,9 +238,9 @@ pub fn collect_report_data(task_file: &Path, work_dir: Option<&Path>) -> Result<
                     // calculation will be wired up in the implementation phase once the schema
                     // is extended with `started_at`/`finished_at`.
                     let duration_str = None; // placeholder – see TODO below
-                    // ProvenanceRecord does not currently carry raw error output;
-                    // error excerpts will be populated in a future iteration when
-                    // the schema is extended with an `error_output` field.
+                                             // ProvenanceRecord does not currently carry raw error output;
+                                             // error excerpts will be populated in a future iteration when
+                                             // the schema is extended with an `error_output` field.
                     let excerpt: Option<String> = None;
                     (retry_count, duration_str, excerpt)
                 }
@@ -286,10 +286,10 @@ pub fn collect_report_data(task_file: &Path, work_dir: Option<&Path>) -> Result<
         failed_count,
         pending_count,
         in_progress_count,
-        total_cost_usd: None,  // caller may inject from CostTracker
-        total_prompt_tokens: 0,    // caller may inject from CostTracker
+        total_cost_usd: None,       // caller may inject from CostTracker
+        total_prompt_tokens: 0,     // caller may inject from CostTracker
         total_completion_tokens: 0, // caller may inject from CostTracker
-        elapsed_time: None,    // caller may inject from run timing
+        elapsed_time: None,         // caller may inject from run timing
         task_rows,
         mermaid_graph,
     })
@@ -341,11 +341,7 @@ pub fn generate_html(data: &ReportData) -> String {
         "n/a".to_string()
     };
 
-    let elapsed_display = data
-        .elapsed_time
-        .as_deref()
-        .unwrap_or("n/a")
-        .to_string();
+    let elapsed_display = data.elapsed_time.as_deref().unwrap_or("n/a").to_string();
 
     let mermaid_section = if data.mermaid_graph.is_empty() {
         String::new()
@@ -776,7 +772,10 @@ mod tests {
         let data = sample_report_data();
         let html = generate_html(&data);
         // The "Failed Tasks" heading should be present when there is ≥1 failed task.
-        assert!(html.contains("Failed Tasks"), "failed tasks section missing");
+        assert!(
+            html.contains("Failed Tasks"),
+            "failed tasks section missing"
+        );
         // The error excerpt should appear.
         assert!(
             html.contains("panic: index out of bounds"),
@@ -854,8 +853,8 @@ mod tests {
     fn collect_report_data_with_empty_task_list() {
         // load_tasks returns Ok(vec![]) when the file does not exist,
         // so collect_report_data yields zero tasks rather than an error.
-        let data =
-            collect_report_data(Path::new("/nonexistent/tasks.json"), None).expect("should succeed");
+        let data = collect_report_data(Path::new("/nonexistent/tasks.json"), None)
+            .expect("should succeed");
         assert_eq!(data.total_tasks, 0);
     }
 
@@ -935,7 +934,11 @@ mod tests {
 
     #[test]
     fn generate_html_mermaid_section_present_when_graph_nonempty() {
-        let tasks = vec![make_task("a", TaskStatus::Completed, AgentRole::Implementer)];
+        let tasks = vec![make_task(
+            "a",
+            TaskStatus::Completed,
+            AgentRole::Implementer,
+        )];
         let data = ReportData {
             total_tasks: 1,
             completed_count: 1,
@@ -1004,7 +1007,10 @@ mod tests {
 
         let contents = std::fs::read_to_string(&output_path).expect("read report");
         let expected = generate_html(&data);
-        assert_eq!(contents, expected, "file contents do not match generate_html output");
+        assert_eq!(
+            contents, expected,
+            "file contents do not match generate_html output"
+        );
     }
 
     // ── CLI subcommand ────────────────────────────────────────────────────────
@@ -1087,7 +1093,10 @@ mod tests {
         // Task count equals failed count.
         assert_eq!(data.total_tasks, data.failed_count);
         // Failed Tasks section must be rendered.
-        assert!(html.contains("Failed Tasks"), "Failed Tasks section missing");
+        assert!(
+            html.contains("Failed Tasks"),
+            "Failed Tasks section missing"
+        );
         // Both error excerpts must appear.
         assert!(
             html.contains("Error in task fail-1"),
@@ -1147,8 +1156,14 @@ mod tests {
         assert!(html.contains("<html"), "missing <html> tag");
         assert!(html.contains("</html>"), "missing closing </html> tag");
         // No task rows and no failed-tasks section expected.
-        assert!(!html.contains("Failed Tasks"), "unexpected Failed Tasks section");
+        assert!(
+            !html.contains("Failed Tasks"),
+            "unexpected Failed Tasks section"
+        );
         // No Mermaid block expected.
-        assert!(!html.contains("class=\"mermaid\""), "unexpected mermaid block");
+        assert!(
+            !html.contains("class=\"mermaid\""),
+            "unexpected mermaid block"
+        );
     }
 }

@@ -210,10 +210,7 @@ pub fn build_semantic_eval_prompt(
     };
 
     // Use task-level acceptance_criteria first, fall back to global completeness_prompt.
-    let criteria = task
-        .acceptance_criteria
-        .as_deref()
-        .or(completeness_prompt);
+    let criteria = task.acceptance_criteria.as_deref().or(completeness_prompt);
 
     let criteria_section = criteria
         .map(|p| format!("Acceptance criteria:\n{p}"))
@@ -487,11 +484,8 @@ index 3a2b1c4..9f8e7d2 100644
         // the completeness_prompt passed from the agent config.
         let mut task = make_task("Do something");
         task.acceptance_criteria = Some("Task-level criterion".to_string());
-        let prompt = build_semantic_eval_prompt(
-            &task,
-            Some("Global completeness prompt"),
-            "diff content",
-        );
+        let prompt =
+            build_semantic_eval_prompt(&task, Some("Global completeness prompt"), "diff content");
         assert!(
             prompt.contains("Task-level criterion"),
             "task acceptance_criteria should be in prompt"
@@ -505,11 +499,8 @@ index 3a2b1c4..9f8e7d2 100644
     #[test]
     fn prompt_falls_back_to_completeness_prompt_when_no_acceptance_criteria() {
         let task = make_task("Do something");
-        let prompt = build_semantic_eval_prompt(
-            &task,
-            Some("Global completeness prompt"),
-            "diff content",
-        );
+        let prompt =
+            build_semantic_eval_prompt(&task, Some("Global completeness prompt"), "diff content");
         assert!(prompt.contains("Global completeness prompt"));
     }
 
@@ -629,8 +620,9 @@ index 3a2b1c4..9f8e7d2 100644
             mode: "semantic".to_string(),
         });
 
-        let chat_fn =
-            |_prompt: String| async move { Ok("I think it looks good but I am not sure.".to_string()) };
+        let chat_fn = |_prompt: String| async move {
+            Ok("I think it looks good but I am not sure.".to_string())
+        };
 
         let verdict = evaluate_semantically(&task, SAMPLE_DIFF, None, chat_fn)
             .await
