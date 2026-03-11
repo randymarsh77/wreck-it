@@ -61,10 +61,11 @@ jobs:
 
             ## What's included
 
-            - `.wreck-it/config.toml` — Engineering-team template with four ralph contexts (docs, features, planner, feature-dev)
+            - `.wreck-it/config.toml` — Engineering-team template with six ralph contexts (docs, features, planner, cohesiveness, feature-dev, merge)
             - `.wreck-it/plans/` — Directory for generated task plans
             - `.github/workflows/ralph.yml` — Scheduled workflow that runs the wreck-it agent loop
             - `.github/workflows/plan.yml` — Dispatch workflow for generating task plans
+            - `.github/workflows/unstuck.yml` — Dispatch workflow for unblocking PRs with failing CI
 
             ## Next steps
 
