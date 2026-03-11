@@ -126,10 +126,14 @@ impl SemanticVerdict {
 /// The prompt is structured into clearly delimited sections so the model can
 /// locate each piece of context reliably.
 ///
+/// Acceptance criteria are resolved in priority order:
+/// 1. `task.acceptance_criteria` — per-task criteria set in the task JSON.
+/// 2. `completeness_prompt`      — global criteria from the agent configuration.
+///
 /// # Parameters
 /// * `task`                — The task being evaluated.
 /// * `completeness_prompt` — Optional acceptance-criteria string from the
-///   agent configuration.
+///   agent configuration (used as fallback when the task has none).
 /// * `diff`                — Output of `git diff HEAD` in the work directory.
 pub fn build_semantic_eval_prompt(
     task: &Task,
@@ -149,7 +153,13 @@ pub fn build_semantic_eval_prompt(
         diff.to_string()
     };
 
-    let criteria_section = completeness_prompt
+    // Use task-level acceptance_criteria first, fall back to global completeness_prompt.
+    let criteria = task
+        .acceptance_criteria
+        .as_deref()
+        .or(completeness_prompt);
+
+    let criteria_section = criteria
         .map(|p| format!("Acceptance criteria:\n{p}"))
         .unwrap_or_else(|| {
             "Acceptance criteria: (none provided — use your general judgement)".to_string()
@@ -280,6 +290,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         }
     }
 
@@ -380,6 +392,38 @@ mod tests {
         let big_diff = "x".repeat(MAX_DIFF_CHARS + 100);
         let prompt = build_semantic_eval_prompt(&task, None, &big_diff);
         assert!(prompt.contains("truncated"));
+    }
+
+    #[test]
+    fn prompt_uses_task_acceptance_criteria_over_completeness_prompt() {
+        // When the task has acceptance_criteria, it should take precedence over
+        // the completeness_prompt passed from the agent config.
+        let mut task = make_task("Do something");
+        task.acceptance_criteria = Some("Task-level criterion".to_string());
+        let prompt = build_semantic_eval_prompt(
+            &task,
+            Some("Global completeness prompt"),
+            "diff content",
+        );
+        assert!(
+            prompt.contains("Task-level criterion"),
+            "task acceptance_criteria should be in prompt"
+        );
+        assert!(
+            !prompt.contains("Global completeness prompt"),
+            "global completeness_prompt should be overridden by task acceptance_criteria"
+        );
+    }
+
+    #[test]
+    fn prompt_falls_back_to_completeness_prompt_when_no_acceptance_criteria() {
+        let task = make_task("Do something");
+        let prompt = build_semantic_eval_prompt(
+            &task,
+            Some("Global completeness prompt"),
+            "diff content",
+        );
+        assert!(prompt.contains("Global completeness prompt"));
     }
 
     // ── evaluate_semantically (async, stub chat_fn) ───────────────────────

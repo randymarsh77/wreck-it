@@ -82,6 +82,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         }
     }
 
@@ -188,6 +190,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         };
         task_manager::append_task(&path, new_task).unwrap();
 

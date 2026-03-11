@@ -6,7 +6,7 @@ use std::path::PathBuf;
 // Re-export shared types from wreck-it-core so that the rest of the crate
 // can continue to use `crate::types::Task`, etc. without changes.
 pub use wreck_it_core::types::{
-    AgentRole, ArtefactKind, Task, TaskArtefact, TaskKind, TaskRuntime, TaskStatus,
+    AgentRole, ArtefactKind, Task, TaskArtefact, TaskEvaluation, TaskKind, TaskRuntime, TaskStatus,
 };
 
 pub const DEFAULT_COPILOT_ENDPOINT: &str = "https://api.githubcopilot.com";
@@ -272,6 +272,14 @@ pub struct LoopState {
     pub logs: Vec<String>,
     /// Number of consecutive task failures since the last success or re-plan.
     pub consecutive_failures: u32,
+    /// Semantic evaluation scores keyed by task id (0–100).  Populated when
+    /// `EvaluationMode::Semantic` is used; absent for other evaluation modes.
+    ///
+    /// The range 0–100 mirrors the `score` field in [`SemanticVerdict`]; the
+    /// LLM is instructed to return values in this range.  The `u8` storage
+    /// type accepts up to 255, so values slightly above 100 are possible if
+    /// the model ignores the instruction.
+    pub semantic_scores: HashMap<String, u8>,
 }
 
 impl LoopState {
@@ -284,6 +292,7 @@ impl LoopState {
             running: false,
             logs: Vec::new(),
             consecutive_failures: 0,
+            semantic_scores: HashMap::new(),
         }
     }
 
@@ -373,6 +382,8 @@ mod tests {
             parent_id: None,
             labels: vec![],
             system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         }
     }
 
@@ -944,5 +955,18 @@ mod tests {
         let json = r#"{"max_iterations":5}"#;
         let config: Config = serde_json::from_str(json).unwrap();
         assert!(config.work_dirs.is_empty());
+    }
+
+    #[test]
+    fn loop_state_semantic_scores_defaults_to_empty() {
+        let state = LoopState::new(10);
+        assert!(state.semantic_scores.is_empty());
+    }
+
+    #[test]
+    fn loop_state_semantic_scores_stores_and_retrieves_score() {
+        let mut state = LoopState::new(10);
+        state.semantic_scores.insert("my-task".to_string(), 85);
+        assert_eq!(state.semantic_scores.get("my-task").copied(), Some(85));
     }
 }
