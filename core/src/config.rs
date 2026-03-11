@@ -28,6 +28,20 @@ pub struct RepoConfig {
     #[serde(default = "default_state_branch")]
     pub state_branch: String,
 
+    /// Git branch used to read task definition files.
+    ///
+    /// Task definitions are treated as stateless documents: they describe
+    /// *what* needs to be done but do not carry runtime status.  Runtime
+    /// status for each task is tracked by ID inside the state files on the
+    /// [`state_branch`].
+    ///
+    /// When omitted, task files are read from the state branch for backward
+    /// compatibility.  Set this to the repository's default branch (e.g.
+    /// `"master"` or `"main"`) to keep task definitions alongside the code
+    /// where agents can work with them directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_branch: Option<String>,
+
     /// Root directory for state files (inside the state worktree).
     #[serde(default = "default_state_root")]
     pub state_root: String,
@@ -117,6 +131,36 @@ pub struct RalphConfig {
     /// that support it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
+
+    /// Optional path to a directory containing per-role system prompt
+    /// template files (e.g. `ideas.md`, `implementer.md`, `evaluator.md`) and
+    /// per-task overrides (e.g. `impl-my-task.md`).
+    ///
+    /// When set, the `prompt_loader` module reads templates from this
+    /// directory and injects them as the system prompt for the matching agent
+    /// invocation, falling back to the built-in defaults when no matching file
+    /// is found.  Relative paths are resolved from the repository root.
+    ///
+    /// Example: `.wreck-it/prompts`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_dir: Option<String>,
+
+    /// Optional shell command to validate PR changes before merging.
+    ///
+    /// When set, the headless runner executes this command in the repository
+    /// work directory during the `NeedsVerification` phase, before attempting
+    /// to merge a pull request.  The command is run via the system shell
+    /// (`sh -c` on Unix, `cmd /C` on Windows) so pipes, redirects, and other
+    /// shell features are available.
+    ///
+    /// If the command exits with a non-zero status, the PR is **not** merged.
+    /// Instead, a comment is posted on the PR at-mentioning `@copilot` with
+    /// the command, its exit code, and the captured stdout / stderr output so
+    /// the coding agent can address the failure.
+    ///
+    /// Example: `"cargo test --lib"`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_command: Option<String>,
 }
 
 fn default_state_branch() -> String {
@@ -139,9 +183,20 @@ impl Default for RepoConfig {
     fn default() -> Self {
         Self {
             state_branch: default_state_branch(),
+            task_branch: None,
             state_root: default_state_root(),
             ralphs: Vec::new(),
         }
+    }
+}
+
+impl RepoConfig {
+    /// Return the effective branch from which task files are read.
+    ///
+    /// When `task_branch` is set, returns that value.  Otherwise falls back to
+    /// the `state_branch` for backward compatibility.
+    pub fn effective_task_branch(&self) -> &str {
+        self.task_branch.as_deref().unwrap_or(&self.state_branch)
     }
 }
 
@@ -150,4 +205,89 @@ impl Default for RepoConfig {
 /// Returns `None` if the config has no `[[ralphs]]` entry with the given name.
 pub fn find_ralph<'a>(config: &'a RepoConfig, name: &str) -> Option<&'a RalphConfig> {
     config.ralphs.iter().find(|r| r.name == name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_has_no_task_branch() {
+        let cfg = RepoConfig::default();
+        assert!(cfg.task_branch.is_none());
+    }
+
+    #[test]
+    fn effective_task_branch_falls_back_to_state_branch() {
+        let cfg = RepoConfig::default();
+        assert_eq!(cfg.effective_task_branch(), DEFAULT_STATE_BRANCH);
+    }
+
+    #[test]
+    fn effective_task_branch_uses_explicit_value() {
+        let cfg = RepoConfig {
+            task_branch: Some("main".to_string()),
+            ..RepoConfig::default()
+        };
+        assert_eq!(cfg.effective_task_branch(), "main");
+    }
+
+    #[test]
+    fn task_branch_roundtrips_via_toml() {
+        let toml_str = r#"
+task_branch = "master"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.task_branch.as_deref(), Some("master"));
+        assert_eq!(cfg.effective_task_branch(), "master");
+    }
+
+    #[test]
+    fn task_branch_omitted_from_toml_when_none() {
+        let cfg = RepoConfig::default();
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            !toml_str.contains("task_branch"),
+            "task_branch should be absent: {toml_str}"
+        );
+    }
+
+    #[test]
+    fn task_branch_absent_in_toml_defaults_to_none() {
+        let toml_str = r#"
+state_branch = "my-state"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.task_branch.is_none());
+        assert_eq!(cfg.effective_task_branch(), "my-state");
+    }
+
+    #[test]
+    fn validation_command_roundtrips_via_toml() {
+        let toml_str = r#"
+name = "ci-check"
+validation_command = "cargo test --lib"
+"#;
+        let cfg: RalphConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.validation_command.as_deref(), Some("cargo test --lib"),);
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            serialized.contains("validation_command"),
+            "validation_command should be present: {serialized}"
+        );
+    }
+
+    #[test]
+    fn validation_command_omitted_from_toml_when_none() {
+        let toml_str = r#"
+name = "docs"
+"#;
+        let cfg: RalphConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.validation_command.is_none());
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            !serialized.contains("validation_command"),
+            "validation_command should be absent: {serialized}"
+        );
+    }
 }
