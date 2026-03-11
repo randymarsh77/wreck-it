@@ -40,5 +40,7 @@ jobs:
 
       - name: Run wreck-it unstuck
         uses: randymarsh77/wreck-it/action@main
+        with:
+          command: unstuck
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
