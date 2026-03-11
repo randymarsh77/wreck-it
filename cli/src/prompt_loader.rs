@@ -177,20 +177,38 @@ pub fn resolve_system_prompt(
 
     // Priority 1: inline override on the task itself.
     if let Some(tpl) = &task.system_prompt_override {
-        return Some(interpolate(tpl, &task.id, repo_slug, &task.description, task.role));
+        return Some(interpolate(
+            tpl,
+            &task.id,
+            repo_slug,
+            &task.description,
+            task.role,
+        ));
     }
 
     // Priority 2: per-task file override (e.g. `impl-my-task.md`).
     let per_task_file = dir.join(format!("{}.md", task.id));
     if let Some(content) = try_read_file(&per_task_file) {
-        return Some(interpolate(&content, &task.id, repo_slug, &task.description, task.role));
+        return Some(interpolate(
+            &content,
+            &task.id,
+            repo_slug,
+            &task.description,
+            task.role,
+        ));
     }
 
     // Priority 3: global role template (e.g. `implementer.md`).
     let role_name = role_file_name(task.role);
     let role_file = dir.join(format!("{role_name}.md"));
     if let Some(content) = try_read_file(&role_file) {
-        return Some(interpolate(&content, &task.id, repo_slug, &task.description, task.role));
+        return Some(interpolate(
+            &content,
+            &task.id,
+            repo_slug,
+            &task.description,
+            task.role,
+        ));
     }
 
     // No custom template found — caller falls back to built-in default.
@@ -309,7 +327,10 @@ mod tests {
             "add login support",
             AgentRole::Implementer,
         );
-        assert_eq!(result, "Work on add login support (task impl-foo) in owner/repo");
+        assert_eq!(
+            result,
+            "Work on add login support (task impl-foo) in owner/repo"
+        );
     }
 
     #[test]

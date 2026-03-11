@@ -310,8 +310,13 @@ impl CloudAgentClient {
         branch: Option<&str>,
         system_prompt: Option<&str>,
     ) -> Result<TriggerResult> {
-        let issue_body =
-            build_issue_body(task_id, task_description, memory_context, branch, system_prompt);
+        let issue_body = build_issue_body(
+            task_id,
+            task_description,
+            memory_context,
+            branch,
+            system_prompt,
+        );
 
         let create_body = serde_json::json!({
             "title": format!("[wreck-it] {} {}", ralph_name, task_id),
