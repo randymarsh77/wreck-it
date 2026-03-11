@@ -64,7 +64,6 @@ mod tests {
             }],
             pending_issues: vec![],
             review_requested: None,
-            pending_merge_issues: vec![],
             task_statuses: std::collections::HashMap::new(),
         };
 
@@ -222,7 +221,6 @@ mod tests {
             tracked_prs: vec![],
             pending_issues: vec![],
             review_requested: Some(true),
-            pending_merge_issues: vec![],
             task_statuses: std::collections::HashMap::new(),
         };
 
@@ -325,7 +323,6 @@ mod tests {
                 merge_method: Some("merge".to_string()),
             }],
             review_requested: None,
-            pending_merge_issues: vec![],
             task_statuses: std::collections::HashMap::new(),
         };
 
