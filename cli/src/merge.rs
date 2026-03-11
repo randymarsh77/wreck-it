@@ -11,12 +11,16 @@
 //! This can be used as a standalone CLI command (`wreck-it merge`) or as a
 //! ralph command (`command = "merge"` in `[[ralphs]]`).
 
-use crate::cloud_agent::{resolve_repo_info, CloudAgentClient};
+use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus};
+use crate::headless;
 use crate::headless_config::{load_headless_config, HeadlessConfig};
-use crate::state_worktree::ensure_state_worktree;
+use crate::headless_state::{load_headless_state, save_headless_state, TrackedPr};
+use crate::repo_config::RalphConfig;
+use crate::state_worktree::{commit_and_push_state, ensure_state_worktree};
 use crate::types::Config;
 use anyhow::{Context, Result};
 use std::path::Path;
+use wreck_it_core::state::PendingMergeIssue;
 
 /// Default name for the repo-committed config file.
 const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
@@ -30,7 +34,15 @@ const BACKEND_CLI: &str = "cli";
 /// `backend` selects how conflicts are resolved – `"cloud_agent"` (default)
 /// assigns a coding agent via a new issue, while `"cli"` merges locally and
 /// pushes.
-pub async fn run_merge(config: &Config, backend: Option<&str>) -> Result<()> {
+///
+/// When `ralph` is provided, the merge command also loads/saves persistent
+/// state so that PRs created by previous runs are tracked and advanced
+/// through the merge pipeline (mark ready → merge).
+pub async fn run_merge(
+    config: &Config,
+    backend: Option<&str>,
+    ralph: Option<&RalphConfig>,
+) -> Result<()> {
     let work_dir = &config.work_dir;
     let backend = backend.unwrap_or(BACKEND_CLOUD_AGENT);
 
@@ -57,13 +69,37 @@ pub async fn run_merge(config: &Config, backend: Option<&str>) -> Result<()> {
         CloudAgentClient::new(github_token.clone(), repo_owner.clone(), repo_name.clone());
     client.resolve_authenticated_login().await;
 
+    // ── State loading ──────────────────────────────────────────────────
+    let repo_cfg = crate::repo_config::load_repo_config(work_dir)
+        .ok()
+        .flatten();
+    let state_branch = repo_cfg
+        .as_ref()
+        .map(|c| c.state_branch.clone())
+        .unwrap_or_else(|| headless_cfg.state_branch.clone());
+
+    let state_dir = ensure_state_worktree(work_dir, &state_branch).ok();
+
+    // Determine the state file name from the ralph config (e.g.
+    // `.merge-state.json`); fall back to the headless config default.
+    let state_file_name = ralph
+        .map(|r| r.state_file.clone())
+        .unwrap_or_else(|| headless_cfg.state_file.to_string_lossy().into_owned());
+
+    let mut state = state_dir
+        .as_ref()
+        .map(|d| load_headless_state(&d.join(&state_file_name)))
+        .transpose()
+        .context("Failed to load merge state")?
+        .unwrap_or_default();
+
+    // ── Conflict resolution ────────────────────────────────────────────
     let prs = client.list_open_prs().await?;
     if prs.is_empty() {
         println!("[wreck-it] merge: no open PRs found");
-        return Ok(());
+    } else {
+        println!("[wreck-it] merge: found {} open PR(s)", prs.len());
     }
-
-    println!("[wreck-it] merge: found {} open PR(s)", prs.len());
 
     let mut fixed = 0u32;
     for pr in &prs {
@@ -96,7 +132,7 @@ pub async fn run_merge(config: &Config, backend: Option<&str>) -> Result<()> {
             BACKEND_CLI => {
                 resolve_via_cli(work_dir, &pr_detail, &github_token, &repo_owner, &repo_name).await
             }
-            _ => resolve_via_cloud_agent(&client, &pr_detail).await,
+            _ => resolve_via_cloud_agent(&client, &pr_detail, &mut state).await,
         };
 
         match result {
@@ -116,6 +152,46 @@ pub async fn run_merge(config: &Config, backend: Option<&str>) -> Result<()> {
         "[wreck-it] merge: done — initiated conflict resolution on {} PR(s)",
         fixed,
     );
+
+    // ── Promote pending issues → tracked PRs ───────────────────────────
+    promote_pending_merge_issues(&client, &mut state).await;
+
+    // ── Advance tracked PRs (mark ready, merge, etc.) ──────────────────
+    if let Some(ref sd) = state_dir {
+        // Build a HeadlessConfig with the correct state_file for this ralph.
+        let mut merge_headless_cfg = headless_cfg.clone();
+        if let Some(rc) = ralph {
+            merge_headless_cfg.task_file = rc.task_file.clone().into();
+            merge_headless_cfg.state_file = state_file_name.clone().into();
+        }
+
+        if let Err(e) = headless::advance_tracked_prs(
+            config,
+            &merge_headless_cfg,
+            ralph,
+            &mut state,
+            work_dir,
+            sd,
+        )
+        .await
+        {
+            println!("[wreck-it] merge: failed to advance tracked PRs: {}", e);
+        }
+    }
+
+    // ── Save state ─────────────────────────────────────────────────────
+    if let Some(ref sd) = state_dir {
+        let state_path = sd.join(&state_file_name);
+        if let Err(e) = save_headless_state(&state_path, &state) {
+            println!("[wreck-it] merge: failed to save state: {}", e);
+        }
+        if let Err(e) =
+            commit_and_push_state(work_dir, &state_branch, "wreck-it: update merge state")
+        {
+            println!("[wreck-it] merge: failed to commit/push state: {}", e);
+        }
+    }
+
     Ok(())
 }
 
@@ -205,7 +281,14 @@ fn build_merge_context(detail: &PrDetail, recent_base_commits: &str, diff_summar
 }
 
 /// Resolve merge conflicts by creating an issue and assigning a cloud agent.
-async fn resolve_via_cloud_agent(client: &CloudAgentClient, detail: &PrDetail) -> Result<()> {
+///
+/// On success, the resulting issue is recorded in `state.pending_merge_issues`
+/// so that subsequent invocations can poll for the created PR and advance it.
+async fn resolve_via_cloud_agent(
+    client: &CloudAgentClient,
+    detail: &PrDetail,
+    state: &mut crate::headless_state::HeadlessState,
+) -> Result<()> {
     // Gather context: recent base commits and diff.
     let recent_base_commits = fetch_recent_base_commits_via_api(client, &detail.base_ref).await;
     let diff_summary = fetch_diff_summary_via_api(client, detail.number).await;
@@ -222,13 +305,16 @@ async fn resolve_via_cloud_agent(client: &CloudAgentClient, detail: &PrDetail) -
         detail.number, detail.head_ref, detail.base_ref, detail.head_ref, detail.base_ref, context,
     );
 
+    let task_id = format!("merge-pr-{}", detail.number);
+
     let result = client
         .trigger_agent(
             "merge",
-            &format!("merge-pr-{}", detail.number),
+            &task_id,
             &issue_body,
             &[],
             Some(&detail.head_ref),
+            None,
         )
         .await?;
 
@@ -236,6 +322,19 @@ async fn resolve_via_cloud_agent(client: &CloudAgentClient, detail: &PrDetail) -
         "[wreck-it] merge: created issue #{} for PR #{} conflict resolution ({})",
         result.issue_number, detail.number, result.issue_url,
     );
+
+    // Record the issue so we can poll for the resulting PR later.
+    if !state
+        .pending_merge_issues
+        .iter()
+        .any(|p| p.issue_number == result.issue_number)
+    {
+        state.pending_merge_issues.push(PendingMergeIssue {
+            issue_number: result.issue_number,
+            task_id,
+        });
+    }
+
     Ok(())
 }
 
@@ -306,6 +405,86 @@ async fn resolve_via_cli(
     }
 
     Ok(())
+}
+
+/// Poll pending merge issues and promote them to tracked PRs when the coding
+/// agent has created a pull request.
+async fn promote_pending_merge_issues(
+    client: &CloudAgentClient,
+    state: &mut crate::headless_state::HeadlessState,
+) {
+    if state.pending_merge_issues.is_empty() {
+        return;
+    }
+
+    println!(
+        "[wreck-it] merge: checking {} pending merge issue(s) for linked PRs",
+        state.pending_merge_issues.len(),
+    );
+
+    let mut promoted: Vec<u64> = Vec::new();
+
+    for pending in &state.pending_merge_issues {
+        match client.check_agent_status(pending.issue_number).await {
+            Ok(CloudAgentStatus::PrCreated { pr_number, .. }) => {
+                if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_number) {
+                    println!(
+                        "[wreck-it] merge: issue #{} produced PR #{} — now tracking",
+                        pending.issue_number, pr_number,
+                    );
+                    state.tracked_prs.push(TrackedPr {
+                        pr_number,
+                        task_id: pending.task_id.clone(),
+                        issue_number: Some(pending.issue_number),
+                        review_requested: None,
+                    });
+                }
+                promoted.push(pending.issue_number);
+            }
+            Ok(CloudAgentStatus::PrCreatedAgentWorking { pr_number, .. }) => {
+                // PR exists but agent is still working — track it now so
+                // that advance_tracked_prs can see the issue_number and
+                // defer marking-ready until the agent finishes.
+                if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_number) {
+                    println!(
+                        "[wreck-it] merge: issue #{} produced PR #{} (agent still working) — now tracking",
+                        pending.issue_number, pr_number,
+                    );
+                    state.tracked_prs.push(TrackedPr {
+                        pr_number,
+                        task_id: pending.task_id.clone(),
+                        issue_number: Some(pending.issue_number),
+                        review_requested: None,
+                    });
+                }
+                promoted.push(pending.issue_number);
+            }
+            Ok(CloudAgentStatus::CompletedNoPr) => {
+                println!(
+                    "[wreck-it] merge: issue #{} completed without a PR — removing",
+                    pending.issue_number,
+                );
+                promoted.push(pending.issue_number);
+            }
+            Ok(CloudAgentStatus::Working) => {
+                println!(
+                    "[wreck-it] merge: issue #{} — agent still working",
+                    pending.issue_number,
+                );
+            }
+            Err(e) => {
+                println!(
+                    "[wreck-it] merge: failed to check status of issue #{}: {}",
+                    pending.issue_number, e,
+                );
+            }
+        }
+    }
+
+    // Remove promoted/completed issues from the pending list.
+    state
+        .pending_merge_issues
+        .retain(|p| !promoted.contains(&p.issue_number));
 }
 
 /// Fetch recent commit messages on the base branch via the GitHub REST API.
@@ -427,5 +606,70 @@ mod tests {
     fn backend_constants_are_valid() {
         assert_eq!(BACKEND_CLOUD_AGENT, "cloud_agent");
         assert_eq!(BACKEND_CLI, "cli");
+    }
+
+    #[test]
+    fn pending_merge_issue_serde_roundtrip() {
+        let issue = PendingMergeIssue {
+            issue_number: 99,
+            task_id: "merge-pr-42".to_string(),
+        };
+        let json = serde_json::to_string(&issue).unwrap();
+        let loaded: PendingMergeIssue = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.issue_number, 99);
+        assert_eq!(loaded.task_id, "merge-pr-42");
+    }
+
+    #[test]
+    fn state_pending_merge_issues_backward_compat() {
+        // Existing state files without pending_merge_issues should still load.
+        use crate::headless_state::load_headless_state;
+        let dir = tempfile::tempdir().unwrap();
+        let state_file = dir.path().join(".merge-state.json");
+        std::fs::write(&state_file, r#"{"phase":"needs_trigger","iteration":0}"#).unwrap();
+
+        let loaded = load_headless_state(&state_file).unwrap();
+        assert!(loaded.pending_merge_issues.is_empty());
+        assert!(loaded.tracked_prs.is_empty());
+    }
+
+    #[test]
+    fn state_pending_merge_issues_roundtrip() {
+        use crate::headless_state::{load_headless_state, save_headless_state, HeadlessState};
+        let dir = tempfile::tempdir().unwrap();
+        let state_file = dir.path().join(".merge-state.json");
+        let mut state = HeadlessState::default();
+        state.pending_merge_issues.push(PendingMergeIssue {
+            issue_number: 100,
+            task_id: "merge-pr-55".to_string(),
+        });
+        state.tracked_prs.push(TrackedPr {
+            pr_number: 200,
+            task_id: "merge-pr-33".to_string(),
+            issue_number: Some(88),
+            review_requested: None,
+        });
+
+        save_headless_state(&state_file, &state).unwrap();
+        let loaded = load_headless_state(&state_file).unwrap();
+
+        assert_eq!(loaded.pending_merge_issues.len(), 1);
+        assert_eq!(loaded.pending_merge_issues[0].issue_number, 100);
+        assert_eq!(loaded.pending_merge_issues[0].task_id, "merge-pr-55");
+        assert_eq!(loaded.tracked_prs.len(), 1);
+        assert_eq!(loaded.tracked_prs[0].pr_number, 200);
+    }
+
+    #[test]
+    fn state_pending_merge_issues_omitted_when_empty() {
+        // When pending_merge_issues is empty, it should not appear in JSON.
+        use crate::headless_state::{save_headless_state, HeadlessState};
+        let dir = tempfile::tempdir().unwrap();
+        let state_file = dir.path().join(".merge-state.json");
+        let state = HeadlessState::default();
+
+        save_headless_state(&state_file, &state).unwrap();
+        let content = std::fs::read_to_string(&state_file).unwrap();
+        assert!(!content.contains("pending_merge_issues"));
     }
 }

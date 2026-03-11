@@ -1,0 +1,102 @@
+[
+  {
+    "id": "mcp-server-integration",
+    "description": "Implement an MCP (Model Context Protocol) server mode for wreck-it so that AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can directly query and manage the task pipeline via the standard MCP protocol. Expose MCP tools for: listing tasks and their statuses, adding new tasks, updating task status, reading artefacts, and triggering a loop iteration. This bridges wreck-it's structured task graph with the rapidly emerging MCP ecosystem, enabling humans to supervise autonomous loops through their preferred AI assistant interface rather than the CLI or TUI.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "depends_on": [],
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "otel-metrics-export",
+    "description": "Add OpenTelemetry (OTEL) trace and metrics export to wreck-it's execution engine. Instrument task lifecycle events (start, complete, fail, retry) as OTEL spans with attributes for model name, token counts, task role, phase, and complexity. Export to configurable OTLP endpoints (Jaeger, Honeycomb, Grafana). This uniquely leverages wreck-it's existing cost tracking and provenance audit trail to provide deep observability into autonomous agent workflows — a capability no other agent framework offers out of the box.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "depends_on": [],
+    "priority": 8,
+    "complexity": 6
+  },
+  {
+    "id": "security-gate-checks",
+    "description": "Add a built-in security gate task kind that runs CodeQL, cargo-audit, or npm audit as a mandatory completion gate before any implementation task PR can be merged. Integrate into the task phase system so security scans run in a post-implementation phase automatically. Surface findings back to the implementing agent via the artefact system so it can self-remediate. This combines wreck-it's phase-based scheduling, artefact chaining, and retry loop into a first-class security posture — addressing the growing trend of shift-left security in AI-native development.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["mcp-server-integration"],
+    "priority": 9,
+    "complexity": 6
+  },
+  {
+    "id": "test-coverage-enforcer",
+    "description": "Implement a test coverage enforcer as a built-in evaluator-role task that automatically runs after each implementation task completes. The enforcer reads the coverage report artefact produced by the implementation phase, verifies that coverage did not regress, and either approves the task or triggers a retry with a coverage-improvement prompt. Use wreck-it's `inputs` artefact system to pass coverage data between phases. This creates a unique test-driven autonomous development loop where the AI is held accountable to coverage thresholds without human intervention.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["otel-metrics-export"],
+    "priority": 8,
+    "complexity": 5
+  },
+  {
+    "id": "adaptive-prompt-optimizer",
+    "description": "Build an adaptive prompt optimization system that tracks which task description patterns correlate with successful first-attempt completions vs. repeated failures. After each failed attempt, analyze the task description and failure log using an ideas-role agent to suggest a rewritten task description. Store the rewrite in per-task agent memory and apply it on next retry. Surface aggregated pattern insights as a periodic report artefact. This uniquely leverages wreck-it's existing retry tracking, agent memory system, and artefact chaining to create a self-improving task specification loop.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "depends_on": [],
+    "priority": 7,
+    "complexity": 7
+  },
+  {
+    "id": "kanban-bidirectional-sync",
+    "description": "Implement bidirectional sync between wreck-it tasks and external kanban systems (Linear, JIRA, Trello). When new tickets are created in the external system with a configurable label/tag, automatically generate wreck-it task objects and append them to the appropriate task file. When wreck-it tasks complete, update the corresponding external ticket status and attach the git diff URL as a comment. Build on the existing KanbanClient enum dispatch and KanbanProvider trait in cli/src/kanban/. This closes the loop between human planning tools and autonomous execution, enabling teams to manage AI workloads from their existing project management tools.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["adaptive-prompt-optimizer"],
+    "priority": 7,
+    "complexity": 6
+  },
+  {
+    "id": "budget-aware-prioritization",
+    "description": "Implement dynamic budget-aware task prioritization that adjusts task execution order based on remaining cost budget, current complexity estimates, and historical cost-per-complexity ratios. Add a `--budget-strategy` CLI flag with options: `greedy` (maximize completed tasks), `critical-path` (prioritize highest-priority tasks first), and `conservative` (prefer low-complexity tasks when budget is below a threshold). Integrate with the existing `--max-cost` budget tracking to automatically pause the loop when projected remaining cost would exceed budget. This extends wreck-it's existing cost tracking into a planning optimization feature unique in the agent orchestration space.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["otel-metrics-export"],
+    "priority": 6,
+    "complexity": 5
+  },
+  {
+    "id": "semantic-changelog-generator",
+    "description": "Add an automated semantic changelog generator that runs as a recurring evaluator-role task. At the end of each iteration, it reads the provenance audit trail and completed task artefacts, groups changes by category (features, fixes, refactors, security), and generates a human-readable CHANGELOG.md entry. Use conventional-commit conventions to classify changes. Output the changelog entry as an artefact that can be consumed by release automation. This uniquely combines wreck-it's provenance audit trail, artefact system, and recurring task cooldown to create fully automated release notes with zero human effort.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["test-coverage-enforcer", "security-gate-checks"],
+    "priority": 6,
+    "complexity": 4
+  },
+  {
+    "id": "multi-repo-change-orchestrator",
+    "description": "Build a multi-repo change orchestration feature that detects when a completed task modifies a public API or exported interface, then automatically creates follow-up tasks in dependent repositories using the existing `--work-dir-map` multi-repo support. Implement interface change detection by comparing type signatures and exported symbols before/after the git diff. When a breaking change is detected, generate adaptation tasks in consumer repos and inject them into their respective task files. This combines wreck-it's multi-repo support and artefact system into an intelligent cross-repo dependency management capability.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["kanban-bidirectional-sync"],
+    "priority": 5,
+    "complexity": 9
+  },
+  {
+    "id": "parallel-subtask-fan-out",
+    "description": "Implement a fan-out/fan-in execution pattern allowing a single ideas-role task to dynamically decompose work into parallel implementer sub-tasks at runtime, then collect and synthesize their results via a fan-in aggregator task. Extend the existing `parent_id` and phase system: when an ideas task outputs a sub-task manifest artefact, the runner spawns those tasks in the next phase with the parent's context injected. The fan-in task waits for all siblings to complete and synthesizes a consolidated result. This addresses the growing trend of multi-agent coordination and enables wreck-it to tackle problems too large for a single context window.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["budget-aware-prioritization", "adaptive-prompt-optimizer"],
+    "priority": 9,
+    "complexity": 9
+  }
+]
