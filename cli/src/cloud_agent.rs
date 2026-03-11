@@ -957,7 +957,7 @@ impl CloudAgentClient {
     ///
     /// Returns `true` when the agent appears to have finished, `false` when it
     /// is still working or the status cannot be determined.
-    async fn is_pr_work_completed(&self, pr_number: u64) -> bool {
+    pub async fn is_pr_work_completed(&self, pr_number: u64) -> bool {
         // Primary signal: Copilot session completion via GraphQL.
         match self.check_copilot_session_completed(pr_number).await {
             Some(true) => return true,

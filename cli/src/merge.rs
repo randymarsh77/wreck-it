@@ -123,6 +123,18 @@ pub async fn run_merge(
             continue;
         }
 
+        // Guard: skip if we already have a pending issue or tracked PR for
+        // this conflict resolution to avoid creating duplicate work.
+        let task_id = format!("merge-pr-{}", pr.number);
+        if has_existing_work_for_task(&state, &task_id) {
+            println!(
+                "[wreck-it] merge: PR #{} ({}) already has an outstanding issue/PR for \
+                 conflict resolution ({}), skipping",
+                pr.number, pr.title, task_id,
+            );
+            continue;
+        }
+
         println!(
             "[wreck-it] merge: PR #{} ({}) has merge conflicts — resolving via {}",
             pr.number, pr.title, backend,
@@ -515,6 +527,20 @@ async fn fetch_diff_summary_via_api(client: &CloudAgentClient, pr_number: u64) -
     }
 }
 
+/// Check whether we already have a pending merge issue or tracked PR for the
+/// given `task_id`.  This prevents creating duplicate issues when a conflict
+/// resolution is already in progress.
+fn has_existing_work_for_task(
+    state: &crate::headless_state::HeadlessState,
+    task_id: &str,
+) -> bool {
+    state
+        .pending_merge_issues
+        .iter()
+        .any(|p| p.task_id == task_id)
+        || state.tracked_prs.iter().any(|tp| tp.task_id == task_id)
+}
+
 /// Load the headless config, preferring the state worktree copy when the state
 /// branch can be determined.
 fn load_headless_cfg(work_dir: &Path) -> Result<HeadlessConfig> {
@@ -671,5 +697,53 @@ mod tests {
         save_headless_state(&state_file, &state).unwrap();
         let content = std::fs::read_to_string(&state_file).unwrap();
         assert!(!content.contains("pending_merge_issues"));
+    }
+
+    #[test]
+    fn has_existing_work_returns_false_for_empty_state() {
+        let state = crate::headless_state::HeadlessState::default();
+        assert!(!has_existing_work_for_task(&state, "merge-pr-42"));
+    }
+
+    #[test]
+    fn has_existing_work_detects_pending_merge_issue() {
+        let mut state = crate::headless_state::HeadlessState::default();
+        state.pending_merge_issues.push(PendingMergeIssue {
+            issue_number: 100,
+            task_id: "merge-pr-42".to_string(),
+        });
+        assert!(has_existing_work_for_task(&state, "merge-pr-42"));
+        assert!(!has_existing_work_for_task(&state, "merge-pr-99"));
+    }
+
+    #[test]
+    fn has_existing_work_detects_tracked_pr() {
+        let mut state = crate::headless_state::HeadlessState::default();
+        state.tracked_prs.push(TrackedPr {
+            pr_number: 200,
+            task_id: "merge-pr-55".to_string(),
+            issue_number: Some(100),
+            review_requested: None,
+        });
+        assert!(has_existing_work_for_task(&state, "merge-pr-55"));
+        assert!(!has_existing_work_for_task(&state, "merge-pr-42"));
+    }
+
+    #[test]
+    fn has_existing_work_detects_both_pending_and_tracked() {
+        let mut state = crate::headless_state::HeadlessState::default();
+        state.pending_merge_issues.push(PendingMergeIssue {
+            issue_number: 100,
+            task_id: "merge-pr-42".to_string(),
+        });
+        state.tracked_prs.push(TrackedPr {
+            pr_number: 200,
+            task_id: "merge-pr-55".to_string(),
+            issue_number: Some(101),
+            review_requested: None,
+        });
+        assert!(has_existing_work_for_task(&state, "merge-pr-42"));
+        assert!(has_existing_work_for_task(&state, "merge-pr-55"));
+        assert!(!has_existing_work_for_task(&state, "merge-pr-99"));
     }
 }
