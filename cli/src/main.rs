@@ -22,10 +22,13 @@ mod openclaw;
 mod plan_migration;
 mod plan_wizard;
 mod planner;
+mod prompt_loader;
 mod provenance;
 mod ralph_loop;
 mod replanner;
 mod repo_config;
+mod report;
+mod semantic_eval;
 mod state_worktree;
 mod task_cli;
 mod task_manager;
@@ -79,12 +82,14 @@ async fn main() -> Result<()> {
             goal,
             reflection_rounds,
             replan_threshold,
+            max_autopilot_continues,
             notify_webhooks,
             github_issues,
             github_repo,
             github_token,
             max_cost_usd,
             work_dir_map,
+            prompt_dir,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -183,6 +188,9 @@ async fn main() -> Result<()> {
                 if let Some(replan_threshold) = replan_threshold {
                     config.replan_threshold = replan_threshold;
                 }
+                if let Some(max_autopilot_continues) = max_autopilot_continues {
+                    config.max_autopilot_continues = Some(max_autopilot_continues);
+                }
                 if config.model_provider == ModelProvider::Llama
                     && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
                 {
@@ -226,6 +234,15 @@ async fn main() -> Result<()> {
                              (expected ROLE_OR_ID=PATH)",
                             entry
                         );
+                    }
+                }
+
+                // CLI --prompt-dir overrides config and ralph-level prompt_dir.
+                if let Some(ref pd) = prompt_dir {
+                    config.prompt_dir = Some(pd.clone());
+                } else if let Some(rc) = ralph_override {
+                    if let Some(ref pd) = rc.prompt_dir {
+                        config.prompt_dir = Some(pd.clone());
                     }
                 }
 
@@ -280,7 +297,9 @@ async fn main() -> Result<()> {
                             );
                         }
                     } else if rc.command.as_deref() == Some("merge") {
-                        if let Err(e) = merge::run_merge(&config, rc.backend.as_deref()).await {
+                        if let Err(e) =
+                            merge::run_merge(&config, rc.backend.as_deref(), Some(rc)).await
+                        {
                             println!(
                                 "[wreck-it] ralph '{}' (merge) failed: {}. Continuing…",
                                 rc.name, e
@@ -410,6 +429,8 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
+                        validation_command: None,
+                        prompt_dir: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -508,6 +529,8 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
+                        validation_command: None,
+                        prompt_dir: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -543,6 +566,7 @@ async fn main() -> Result<()> {
                             prompt_with_default("State root directory", repo_config::CONFIG_DIR);
                         RepoConfig {
                             state_branch: branch,
+                            task_branch: None,
                             state_root: root,
                             ralphs: vec![],
                         }
@@ -624,6 +648,9 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 },
                 Task {
                     id: "2".to_string(),
@@ -646,6 +673,9 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 },
                 Task {
                     id: "3".to_string(),
@@ -668,6 +698,9 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 },
             ];
 
@@ -872,7 +905,7 @@ async fn main() -> Result<()> {
             config.work_dir = resolved_work_dir;
             config.api_token = config.api_token.or_else(|| env::var("GITHUB_TOKEN").ok());
 
-            merge::run_merge(&config, Some(&backend)).await?;
+            merge::run_merge(&config, Some(&backend), None).await?;
         }
 
         Commands::Graph {
@@ -899,6 +932,20 @@ async fn main() -> Result<()> {
                 }
                 None => print!("{content}"),
             }
+        }
+
+        Commands::Report {
+            task_file,
+            work_dir,
+            output,
+        } => {
+            let resolved_work_dir = work_dir;
+            let data = report::collect_report_data(&task_file, resolved_work_dir.as_deref())
+                .with_context(|| {
+                    format!("Failed to build report data from '{}'", task_file.display())
+                })?;
+            report::write_report(&output, &data)?;
+            println!("Report written to {}", output.display());
         }
 
         Commands::Tasks { action } => match action {
@@ -973,6 +1020,9 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 };
                 task_manager::append_task(&task_file, new_task)?;
                 println!("Task '{}' added to {}.", id, task_file.display());
