@@ -117,6 +117,9 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         };
         let json = serde_json::to_string(&task).unwrap();
         let loaded: Task = serde_json::from_str(&json).unwrap();
@@ -152,6 +155,7 @@ mod tests {
             }],
             pending_issues: vec![],
             review_requested: None,
+            pending_merge_issues: vec![],
             task_statuses: std::collections::HashMap::new(),
         };
         let json = serde_json::to_string_pretty(&state).unwrap();
