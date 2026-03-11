@@ -21,12 +21,14 @@ pub struct IterationResult {
 /// Process one iteration for a repository.
 ///
 /// 1. Read `.wreck-it/config.toml` from the default branch to discover the
-///    state branch name and ralph contexts.
+///    state branch name, task branch name, and ralph contexts.
 /// 2. For each ralph context (or the default single-ralph), read the task file
-///    and state file from the state branch.
+///    from the task branch (or state branch as fallback) and the state file
+///    from the state branch.
 /// 3. Advance the state machine: select the next pending task, mark it
 ///    in-progress, bump the iteration counter.
-/// 4. Write updated task and state files back to the state branch.
+/// 4. Write updated state file back to the state branch (task files are no
+///    longer mutated at runtime).
 pub async fn process_iteration(
     client: &GitHubClient,
     default_branch: &str,
@@ -55,9 +57,11 @@ pub async fn process_iteration(
 
     let mut summaries = Vec::new();
     let mut any_changed = false;
+    let task_branch = config.effective_task_branch();
 
     for ctx in &contexts {
-        let result = process_ralph(client, &config.state_branch, ctx).await?;
+        let result =
+            process_ralph(client, &config.state_branch, task_branch, ctx).await?;
         if result.changed {
             any_changed = true;
         }
@@ -118,14 +122,19 @@ async fn read_json_file<T: serde::de::DeserializeOwned>(
 }
 
 /// Process a single ralph context: read tasks + state, advance, write back.
+///
+/// Tasks are read from `task_branch` (which may be the same as the state
+/// branch for backward compatibility).  Only the state file is written back;
+/// task definition files are treated as read-only at runtime.
 async fn process_ralph(
     client: &GitHubClient,
     state_branch: &str,
+    task_branch: &str,
     ctx: &RalphContext,
 ) -> Result<IterationResult, String> {
-    // Read task file.
-    let (mut tasks, tasks_sha) =
-        match read_json_file::<Vec<Task>>(client, state_branch, &ctx.task_file).await? {
+    // Read task file from the task branch.
+    let (mut tasks, _tasks_sha) =
+        match read_json_file::<Vec<Task>>(client, task_branch, &ctx.task_file).await? {
             Some(pair) => pair,
             None => {
                 return Ok(IterationResult {
@@ -159,22 +168,6 @@ async fn process_ralph(
             task_id,
             task_description,
         } => {
-            // Write updated task file.
-            let tasks_json = serde_json::to_string_pretty(&tasks)
-                .map_err(|e| format!("Failed to serialize tasks: {e}"))?;
-            client
-                .put_file(
-                    &ctx.task_file,
-                    state_branch,
-                    &tasks_json,
-                    &format!(
-                        "wreck-it: start task '{}' (iteration {})",
-                        task_id, state.iteration
-                    ),
-                    Some(&tasks_sha),
-                )
-                .await?;
-
             // Trigger the cloud agent: create an issue and assign Copilot.
             let issue_body = build_issue_body(&task_id, &task_description, &state.memory);
             let title = format!("[wreck-it] {} {}", ctx.name, task_id);
@@ -225,7 +218,7 @@ async fn process_ralph(
                 }
             }
 
-            // Write updated state file (includes issue_number and phase).
+            // Write updated state file (includes task_statuses, issue_number, phase).
             let state_json = serde_json::to_string_pretty(&state)
                 .map_err(|e| format!("Failed to serialize state: {e}"))?;
             let state_sha_opt = if state_sha.is_empty() {
@@ -291,9 +284,9 @@ fn build_issue_body(task_id: &str, task_description: &str, memory: &[String]) ->
 /// Process a merged pull request event.
 ///
 /// When a PR is merged, check whether it corresponds to a tracked task and
-/// mark that task as complete.  Then advance tracked PRs: merge any that
-/// are ready, enable auto-merge for those with required checks, and mark
-/// draft PRs as ready when the agent is no longer assigned.
+/// mark that task as complete in the state file.  Then advance tracked PRs:
+/// merge any that are ready, enable auto-merge for those with required checks,
+/// and mark draft PRs as ready when the agent is no longer assigned.
 pub async fn process_merged_pr(
     client: &GitHubClient,
     default_branch: &str,
@@ -321,10 +314,12 @@ pub async fn process_merged_pr(
 
     let mut summaries = Vec::new();
     let mut any_changed = false;
+    let task_branch = config.effective_task_branch();
 
     for ctx in &contexts {
         let result =
-            handle_merged_pr_for_ralph(client, &config.state_branch, ctx, pr_number).await?;
+            handle_merged_pr_for_ralph(client, &config.state_branch, task_branch, ctx, pr_number)
+                .await?;
         if result.changed {
             any_changed = true;
         }
@@ -340,16 +335,18 @@ pub async fn process_merged_pr(
 /// Handle a merged PR for a single ralph context.
 ///
 /// If the merged PR matches the currently tracked task, mark it complete
-/// and advance the state.
+/// in the state file and advance the state.  Task definition files are not
+/// modified.
 async fn handle_merged_pr_for_ralph(
     client: &GitHubClient,
     state_branch: &str,
+    task_branch: &str,
     ctx: &RalphContext,
     pr_number: u64,
 ) -> Result<IterationResult, String> {
-    // Read task file.
-    let (mut tasks, tasks_sha) =
-        match read_json_file::<Vec<Task>>(client, state_branch, &ctx.task_file).await? {
+    // Read task file from the task branch (read-only).
+    let (tasks, _tasks_sha) =
+        match read_json_file::<Vec<Task>>(client, task_branch, &ctx.task_file).await? {
             Some(pair) => pair,
             None => {
                 return Ok(IterationResult {
@@ -372,8 +369,10 @@ async fn handle_merged_pr_for_ralph(
     if state.pr_number == Some(pr_number) {
         // Direct match on the current task's PR.
         if let Some(ref task_id) = state.current_task_id {
-            if let Some(task) = tasks.iter_mut().find(|t| t.id == *task_id) {
-                task.status = TaskStatus::Completed;
+            if tasks.iter().any(|t| t.id == *task_id) {
+                state
+                    .task_statuses
+                    .insert(task_id.clone(), TaskStatus::Completed);
                 task_completed = true;
             }
         }
@@ -386,9 +385,16 @@ async fn handle_merged_pr_for_ralph(
     let mut resolved: Vec<u64> = Vec::new();
     for tracked in &state.tracked_prs {
         if tracked.pr_number == pr_number {
-            if let Some(task) = tasks.iter_mut().find(|t| t.id == tracked.task_id) {
-                if task.status != TaskStatus::Completed {
-                    task.status = TaskStatus::Completed;
+            if tasks.iter().any(|t| t.id == tracked.task_id) {
+                let current = state
+                    .task_statuses
+                    .get(&tracked.task_id)
+                    .copied()
+                    .unwrap_or(TaskStatus::Pending);
+                if current != TaskStatus::Completed {
+                    state
+                        .task_statuses
+                        .insert(tracked.task_id.clone(), TaskStatus::Completed);
                     task_completed = true;
                 }
             }
@@ -412,20 +418,7 @@ async fn handle_merged_pr_for_ralph(
         state.iteration, pr_number,
     ));
 
-    // Write updated task file.
-    let tasks_json = serde_json::to_string_pretty(&tasks)
-        .map_err(|e| format!("Failed to serialize tasks: {e}"))?;
-    client
-        .put_file(
-            &ctx.task_file,
-            state_branch,
-            &tasks_json,
-            &format!("wreck-it: complete task via PR #{}", pr_number),
-            Some(&tasks_sha),
-        )
-        .await?;
-
-    // Write updated state file.
+    // Write updated state file (task_statuses now includes the completed task).
     let state_json = serde_json::to_string_pretty(&state)
         .map_err(|e| format!("Failed to serialize state: {e}"))?;
     let state_sha_opt = if state_sha.is_empty() {
@@ -456,7 +449,7 @@ async fn handle_merged_pr_for_ralph(
 mod tests {
     use super::*;
     use crate::types::{AgentPhase, AgentRole, TaskKind, TaskRuntime, TaskStatus};
-    use wreck_it_core::iteration::{reset_recurring_tasks, select_next_task};
+    use wreck_it_core::iteration::{effective_status, reset_recurring_tasks, select_next_task};
 
     fn make_task(id: &str, status: TaskStatus, phase: u32, deps: Vec<&str>) -> Task {
         Task {
@@ -546,9 +539,13 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        let count = reset_recurring_tasks(&mut tasks, 200);
+        let mut state = HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 200);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::Pending);
     }
 
     #[test]
@@ -560,21 +557,26 @@ mod tests {
             t.last_attempt_at = Some(100);
             t
         }];
-        let count = reset_recurring_tasks(&mut tasks, 200);
+        let mut state = HeadlessState::default();
+        state
+            .task_statuses
+            .insert("a".into(), TaskStatus::Completed);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 200);
         assert_eq!(count, 0);
-        assert_eq!(tasks[0].status, TaskStatus::Completed);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::Completed);
 
-        let count = reset_recurring_tasks(&mut tasks, 3800);
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 3800);
         assert_eq!(count, 1);
-        assert_eq!(tasks[0].status, TaskStatus::Pending);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::Pending);
     }
 
     #[test]
     fn reset_recurring_skips_milestone() {
         let mut tasks = vec![make_task("a", TaskStatus::Completed, 1, vec![])];
-        let count = reset_recurring_tasks(&mut tasks, 9999);
+        let mut state = HeadlessState::default();
+        let count = reset_recurring_tasks(&mut tasks, &mut state, 9999);
         assert_eq!(count, 0);
-        assert_eq!(tasks[0].status, TaskStatus::Completed);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::Completed);
     }
 
     // ---- advance_iteration tests (shared core logic) ----
@@ -595,7 +597,7 @@ mod tests {
                 task_description: "task a".into(),
             }
         );
-        assert_eq!(tasks[0].status, TaskStatus::InProgress);
+        assert_eq!(effective_status(&tasks[0], &state), TaskStatus::InProgress);
         assert_eq!(state.current_task_id, Some("a".into()));
         assert_eq!(state.iteration, 1);
         assert_eq!(state.phase, AgentPhase::NeedsTrigger);
