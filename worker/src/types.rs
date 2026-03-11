@@ -125,6 +125,10 @@ mod tests {
         let loaded: Task = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.id, "1");
         assert_eq!(loaded.status, TaskStatus::Pending);
+    }
+
+    #[test]
+    fn headless_state_default() {
         let state = HeadlessState::default();
         assert_eq!(state.phase, AgentPhase::NeedsTrigger);
         assert_eq!(state.iteration, 0);

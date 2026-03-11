@@ -15,8 +15,14 @@ use crate::cloud_agent::{
     resolve_repo_info, CloudAgentClient, CloudAgentStatus, PrMergeStatus,
 };
 use crate::headless_config::{load_headless_config, HeadlessConfig};
-use crate::headless_state::{load_headless_state, save_headless_state, HeadlessState, PendingIssue, TrackedPr};
+use crate::headless_state::{load_headless_state, save_headless_state, HeadlessState, TrackedPr};
 use crate::repo_config::RalphConfig;
+use crate::state_worktree::{commit_and_push_state, ensure_state_worktree};
+use crate::types::Config;
+use anyhow::{Context, Result};
+use std::collections::HashSet;
+use std::path::Path;
+use wreck_it_core::state::PendingIssue;
 
 /// Default name for the repo-committed config file.
 const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
