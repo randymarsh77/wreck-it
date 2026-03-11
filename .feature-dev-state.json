@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 36,
-  "current_task_id": "eval-semantic-evaluation",
-  "issue_number": 243,
-  "last_prompt": "Evaluate the semantic evaluation feature end-to-end. Create a minimal task with `evaluation: { mode: \"semantic\" }` and a known git diff fixture, then run the unit-level evaluation function with a stubbed agent to verify verdict parsing and fallback logic. Confirm no regressions by running `cargo test --lib`. Review `cli/src/semantic_eval.rs` for prompt quality: does it provide enough context (diff, task description, criteria)? Does the verdict rationale get logged and displayed correctly? Write a brief evaluation summary as a comment block at the top of `cli/src/semantic_eval.rs` noting results, limitations (e.g. large diffs exceeding context window), and recommended follow-up work.",
+  "iteration": 37,
+  "current_task_id": "ideas-html-report",
+  "issue_number": 245,
+  "last_prompt": "Research and design an HTML report generator for wreck-it run summaries. The report should capture: overall run statistics (total tasks, completed/failed/pending counts, total cost, total tokens, elapsed time), a per-task timeline table (id, role, status, duration, cost, retries), a dependency graph rendered inline as an SVG or Mermaid diagram, and a section for failed tasks showing error output excerpts. Review existing data sources: `cli/src/cost_tracker.rs` (cost and token data), `cli/src/openclaw.rs` (provenance events), `cli/src/graph.rs` (dependency graph Mermaid output), and `core/src/task_manager.rs` (task state). Design a `ReportData` struct that aggregates all necessary data, a Handlebars or simple string-template approach for HTML generation, and a `wreck-it report --output report.html` CLI sub-command. Document the design as inline comments in a new stub file `cli/src/report.rs`.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -245,6 +245,10 @@
     "iteration 35: agent created PR #241 for task Some(\"test-semantic-evaluation\")",
     "iteration 35: marked PR #241 as ready for review",
     "iteration 35: merged PR #241 for task Some(\"test-semantic-evaluation\") (brute mode)",
-    "iteration 36: triggered cloud agent for task eval-semantic-evaluation (issue #243)"
+    "iteration 36: triggered cloud agent for task eval-semantic-evaluation (issue #243)",
+    "iteration 36: agent created PR #244 for task Some(\"eval-semantic-evaluation\")",
+    "iteration 36: marked PR #244 as ready for review",
+    "iteration 36: merged PR #244 for task Some(\"eval-semantic-evaluation\") (brute mode)",
+    "iteration 37: triggered cloud agent for task ideas-html-report (issue #245)"
   ]
 }

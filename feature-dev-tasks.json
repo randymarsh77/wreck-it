@@ -403,19 +403,20 @@
   {
     "id": "eval-semantic-evaluation",
     "description": "Evaluate the semantic evaluation feature end-to-end. Create a minimal task with `evaluation: { mode: \"semantic\" }` and a known git diff fixture, then run the unit-level evaluation function with a stubbed agent to verify verdict parsing and fallback logic. Confirm no regressions by running `cargo test --lib`. Review `cli/src/semantic_eval.rs` for prompt quality: does it provide enough context (diff, task description, criteria)? Does the verdict rationale get logged and displayed correctly? Write a brief evaluation summary as a comment block at the top of `cli/src/semantic_eval.rs` noting results, limitations (e.g. large diffs exceeding context window), and recommended follow-up work.",
-    "status": "pending",
+    "status": "completed",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
       "test-semantic-evaluation"
     ],
     "priority": 5,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1773193120
   },
   {
     "id": "ideas-html-report",
     "description": "Research and design an HTML report generator for wreck-it run summaries. The report should capture: overall run statistics (total tasks, completed/failed/pending counts, total cost, total tokens, elapsed time), a per-task timeline table (id, role, status, duration, cost, retries), a dependency graph rendered inline as an SVG or Mermaid diagram, and a section for failed tasks showing error output excerpts. Review existing data sources: `cli/src/cost_tracker.rs` (cost and token data), `cli/src/openclaw.rs` (provenance events), `cli/src/graph.rs` (dependency graph Mermaid output), and `core/src/task_manager.rs` (task state). Design a `ReportData` struct that aggregates all necessary data, a Handlebars or simple string-template approach for HTML generation, and a `wreck-it report --output report.html` CLI sub-command. Document the design as inline comments in a new stub file `cli/src/report.rs`.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "ideas",
     "priority": 3,
     "complexity": 2
