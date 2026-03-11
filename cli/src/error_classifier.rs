@@ -260,6 +260,7 @@ pub(crate) enum ErrorCategory {
 ///     ErrorCategory::ContextOverflow,
 /// );
 /// ```
+#[allow(dead_code)]
 pub(crate) struct ErrorClassifier;
 
 impl ErrorClassifier {
@@ -267,6 +268,7 @@ impl ErrorClassifier {
     ///
     /// The matching order matters: more-specific patterns are checked before
     /// more-general ones.
+    #[allow(dead_code)]
     pub(crate) fn classify(error_text: &str) -> ErrorCategory {
         let lower = error_text.to_lowercase();
 
@@ -352,6 +354,7 @@ impl ErrorClassifier {
 /// An optional `jitter_fraction` in `[0.0, 1.0]` adds up to that fraction of
 /// the calculated delay as uniform random jitter to prevent thundering-herd
 /// behaviour when many tasks fail simultaneously.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct BackoffParams {
     /// Delay before the first retry.
@@ -376,6 +379,7 @@ impl Default for BackoffParams {
 ///
 /// This is returned by [`recover`] and consumed by the caller in
 /// `ralph_loop.rs` to avoid scattering recovery logic across the loop body.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum RecoveryAction {
     /// Wait `delay` then retry the task without incrementing `failed_attempts`.
@@ -419,6 +423,7 @@ pub(crate) enum RecoveryAction {
 /// This function is intentionally pure (no I/O, no `async`) so that it can
 /// be unit-tested without mocking the runtime.  Actual side-effects (sleeping,
 /// HTTP calls, file writes) are the caller's responsibility.
+#[allow(dead_code)]
 pub(crate) fn recover(category: &ErrorCategory, attempt: u32) -> RecoveryAction {
     match category {
         // Transient: exponential backoff, do not penalise the attempt counter.

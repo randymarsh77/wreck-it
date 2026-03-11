@@ -621,10 +621,8 @@ pub(crate) async fn advance_tracked_prs(
                 }
                 // ── Validation gate (advance) ───────────────────────
                 if let Some(failure) = run_validation_command(ralph, work_dir)? {
-                    let combined_output =
-                        format!("{}\n{}", failure.stdout, failure.stderr);
-                    let category =
-                        classify_error(&combined_output, failure.exit_code, None);
+                    let combined_output = format!("{}\n{}", failure.stdout, failure.stderr);
+                    let category = classify_error(&combined_output, failure.exit_code, None);
                     match category {
                         ErrorCategory::Transient => {
                             let backoff_secs = ralph
@@ -635,8 +633,7 @@ pub(crate) async fn advance_tracked_prs(
                                  backing off {}s before retry",
                                 pr_number, backoff_secs,
                             );
-                            tokio::time::sleep(std::time::Duration::from_secs(backoff_secs))
-                                .await;
+                            tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
                             state.memory.push(format!(
                                 "advance: transient validation failure for PR #{} (task {}), \
                                  backed off {}s",
@@ -669,7 +666,8 @@ pub(crate) async fn advance_tracked_prs(
                             ));
                             continue;
                         }
-                        ErrorCategory::Permanent | ErrorCategory::ContextOverflow => { /* comment and continue below */ }
+                        ErrorCategory::Permanent | ErrorCategory::ContextOverflow => { /* comment and continue below */
+                        }
                     }
                     println!(
                         "[wreck-it] advance: validation failed for PR #{}, commenting on PR",
@@ -1682,7 +1680,8 @@ async fn run_needs_verification(
                 state.review_requested = None;
                 return Ok(StepOutcome::Continue);
             }
-            ErrorCategory::Permanent | ErrorCategory::ContextOverflow => { /* comment and yield below */ }
+            ErrorCategory::Permanent | ErrorCategory::ContextOverflow => { /* comment and yield below */
+            }
         }
         println!(
             "[wreck-it] validation failed for PR #{}, commenting on PR",
