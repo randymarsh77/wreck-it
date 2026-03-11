@@ -1,6 +1,9 @@
 name: 'wreck-it'
 description: 'Run wreck-it ralph loop in headless mode for CI environments'
 inputs:
+  command:
+    description: 'Command to run (default runs the headless ralph loop; set to "unstuck" to scan PRs for failing CI)'
+    required: false
   model_provider:
     description: 'Model provider to use (github-models, copilot, or llama)'
     required: false
@@ -23,6 +26,7 @@ runs:
   using: 'docker'
   image: 'docker://ghcr.io/randymarsh77/wreck-it:latest'
   env:
+    INPUT_COMMAND: ${{ inputs.command }}
     INPUT_MODEL_PROVIDER: ${{ inputs.model_provider }}
     INPUT_MAX_ITERATIONS: ${{ inputs.max_iterations }}
     INPUT_VERIFY_COMMAND: ${{ inputs.verify_command }}
