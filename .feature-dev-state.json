@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 39,
-  "current_task_id": "test-html-report",
-  "issue_number": 250,
-  "last_prompt": "Write unit tests for the HTML report generator implemented in `impl-html-report`. In `cli/src/report.rs` add a `#[cfg(test)]` module covering: (1) `generate_html` produces a non-empty string containing `<html>`, `<table>`, and at least one task row when given a `ReportData` with one completed task; (2) cost and token totals appear correctly in the summary section; (3) the Mermaid graph section is included only when the dependency graph is non-empty; (4) `write_report` creates the file at the specified path and its contents match `generate_html` output. Use `tempfile::tempdir()` for file-system tests. Also verify that the `report` CLI sub-command is registered and parses `--output` correctly. Run `cargo test --lib` to confirm all tests pass.",
+  "iteration": 40,
+  "current_task_id": "eval-html-report",
+  "issue_number": 253,
+  "last_prompt": "Evaluate the HTML report generator end-to-end. Run `wreck-it report --output /tmp/test-report.html --task-file <fixture-tasks.json>` (or invoke the function directly in a test) and confirm the generated file is valid HTML with correct task counts, cost summaries, and a Mermaid diagram block. Open or parse the HTML to verify it contains the expected sections. Check edge cases: empty task list, all-failed tasks, tasks with zero cost. Run `cargo test --lib` to confirm no regressions. Write a brief evaluation summary as a comment block at the top of `cli/src/report.rs` noting browser compatibility, file size for large task lists, and recommended enhancements (e.g. dark mode, exportable CSV).",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -257,6 +257,10 @@
     "iteration 38: agent created PR #249 for task Some(\"impl-html-report\")",
     "iteration 38: marked PR #249 as ready for review",
     "iteration 38: merged PR #249 for task Some(\"impl-html-report\") (brute mode)",
-    "iteration 39: triggered cloud agent for task test-html-report (issue #250)"
+    "iteration 39: triggered cloud agent for task test-html-report (issue #250)",
+    "iteration 39: agent created PR #251 for task Some(\"test-html-report\")",
+    "iteration 39: marked PR #251 as ready for review",
+    "iteration 39: merged PR #251 for task Some(\"test-html-report\") (brute mode)",
+    "iteration 40: triggered cloud agent for task eval-html-report (issue #253)"
   ]
 }

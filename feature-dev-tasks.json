@@ -437,18 +437,19 @@
   {
     "id": "test-html-report",
     "description": "Write unit tests for the HTML report generator implemented in `impl-html-report`. In `cli/src/report.rs` add a `#[cfg(test)]` module covering: (1) `generate_html` produces a non-empty string containing `<html>`, `<table>`, and at least one task row when given a `ReportData` with one completed task; (2) cost and token totals appear correctly in the summary section; (3) the Mermaid graph section is included only when the dependency graph is non-empty; (4) `write_report` creates the file at the specified path and its contents match `generate_html` output. Use `tempfile::tempdir()` for file-system tests. Also verify that the `report` CLI sub-command is registered and parses `--output` correctly. Run `cargo test --lib` to confirm all tests pass.",
-    "status": "pending",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-html-report"
     ],
     "priority": 3,
-    "complexity": 3
+    "complexity": 3,
+    "last_attempt_at": 1773198132
   },
   {
     "id": "eval-html-report",
     "description": "Evaluate the HTML report generator end-to-end. Run `wreck-it report --output /tmp/test-report.html --task-file <fixture-tasks.json>` (or invoke the function directly in a test) and confirm the generated file is valid HTML with correct task counts, cost summaries, and a Mermaid diagram block. Open or parse the HTML to verify it contains the expected sections. Check edge cases: empty task list, all-failed tasks, tasks with zero cost. Run `cargo test --lib` to confirm no regressions. Write a brief evaluation summary as a comment block at the top of `cli/src/report.rs` noting browser compatibility, file size for large task lists, and recommended enhancements (e.g. dark mode, exportable CSV).",
-    "status": "pending",
+    "status": "inprogress",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
