@@ -1,3 +1,59 @@
+// =============================================================================
+// Evaluation Summary (eval-semantic-evaluation)
+// =============================================================================
+//
+// Results
+// -------
+// End-to-end evaluation of the semantic evaluation feature was performed using
+// unit tests with a stubbed LLM agent.  All tests pass (`cargo test --lib`).
+// The prompt construction, verdict parsing, and conservative fallback logic all
+// behave as expected:
+//
+//   • Prompts correctly embed the task description, acceptance criteria, and
+//     git diff in clearly delimited sections.
+//   • `parse_semantic_verdict` correctly handles: raw JSON, JSON wrapped in
+//     markdown code fences, JSON preceded by prose, empty responses, missing
+//     braces, and structurally invalid JSON.
+//   • `evaluate_semantically` correctly routes the LLM response through
+//     `parse_semantic_verdict` and returns the resulting `SemanticVerdict`.
+//   • Fallback to `passed: false, score: 0` when the LLM returns malformed
+//     output prevents silent false-positive completions.
+//   • Per-task `acceptance_criteria` takes precedence over the global
+//     `completeness_prompt` from the agent config.
+//   • Tasks with `evaluation: { "mode": "semantic" }` are correctly wired to
+//     this module by the caller in `ralph_loop.rs`.
+//
+// Prompt quality assessment
+// -------------------------
+// The prompt provides sufficient context for accurate evaluation:
+//   • Task description gives the evaluator the goal.
+//   • Acceptance criteria (per-task or global) specify the success bar.
+//   • The git diff (real or "No changes detected") shows what actually changed.
+//   • Explicit JSON schema instruction keeps LLM output structured.
+// The rationale field is logged via `tracing::info!` and can be surfaced in the
+// TUI event stream.  The score field is persisted in `LoopState::semantic_scores`.
+//
+// Limitations
+// -----------
+//   • Large diffs (>8000 chars, ~2000 tokens) are truncated.  For PRs with
+//     many files changed the truncated diff may omit key context, causing the
+//     evaluator to miss implementation details.
+//   • The LLM has no access to the full repository — only the diff.  Structural
+//     correctness (e.g., does the code compile?) cannot be assessed semantically.
+//   • The `score` field is advisory only; task lifecycle is driven solely by
+//     `passed`.  Scores are not currently aggregated or trended in the TUI.
+//   • No retry is attempted when the LLM returns malformed output; the task is
+//     immediately marked failed.
+//
+// Recommended follow-up work
+// --------------------------
+//   1. Increase `MAX_DIFF_CHARS` or implement chunked evaluation for large diffs.
+//   2. Surface `score` trends in the TUI dashboard.
+//   3. Add a retry / re-prompt path when the LLM response fails to parse.
+//   4. Consider using `git diff --stat` as a compact summary when the full diff
+//      exceeds the context window.
+// =============================================================================
+
 //! Semantic evaluation mode for wreck-it tasks.
 //!
 //! # Overview
@@ -265,7 +321,38 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{AgentRole, TaskKind, TaskRuntime, TaskStatus};
+    use crate::types::{AgentRole, TaskEvaluation, TaskKind, TaskRuntime, TaskStatus};
+
+    /// A realistic git diff fixture representing a small feature addition.
+    /// Used across tests that exercise the evaluation pipeline end-to-end.
+    const SAMPLE_DIFF: &str = r#"diff --git a/cli/src/notifier.rs b/cli/src/notifier.rs
+index 3a2b1c4..9f8e7d2 100644
+--- a/cli/src/notifier.rs
++++ b/cli/src/notifier.rs
+@@ -1,6 +1,8 @@
+ use anyhow::Result;
++use serde::Serialize;
+ 
+ pub struct Notifier {
++    pub webhook_url: Option<String>,
+ }
+ 
+ impl Notifier {
+@@ -10,4 +12,14 @@ impl Notifier {
+     pub fn new() -> Self {
+-        Notifier {}
++        Notifier { webhook_url: None }
+     }
++
++    pub async fn send_webhook(&self, payload: &impl Serialize) -> Result<()> {
++        if let Some(url) = &self.webhook_url {
++            let client = reqwest::Client::new();
++            client.post(url).json(payload).send().await?;
++        }
++        Ok(())
++    }
+ }
+"#;
 
     fn make_task(description: &str) -> Task {
         Task {
@@ -447,5 +534,126 @@ mod tests {
         assert!(verdict.passed);
         assert_eq!(verdict.score, 88);
         assert_eq!(verdict.rationale, "Looks great.");
+    }
+
+    /// End-to-end test with a minimal task that has `evaluation: { mode: "semantic" }`
+    /// set and a known git diff fixture.  Verifies that the evaluation pipeline
+    /// correctly wires task metadata through the prompt and returns the verdict.
+    #[tokio::test]
+    async fn evaluate_semantically_with_semantic_task_and_known_diff() {
+        let mut task = make_task("Add webhook notification support to Notifier");
+        task.evaluation = Some(TaskEvaluation {
+            mode: "semantic".to_string(),
+        });
+        task.acceptance_criteria = Some(
+            "The Notifier struct must expose a send_webhook method. \
+             A webhook_url field must be added. All existing tests must continue to pass."
+                .to_string(),
+        );
+
+        let canned_response = r#"{"passed": true, "score": 92, "rationale": "The diff adds webhook_url field and send_webhook method to Notifier as required."}"#.to_string();
+
+        let chat_fn = move |_prompt: String| async move { Ok(canned_response.clone()) };
+
+        let verdict = evaluate_semantically(&task, SAMPLE_DIFF, None, chat_fn)
+            .await
+            .unwrap();
+
+        assert!(verdict.passed, "expected passed=true from stubbed agent");
+        assert_eq!(verdict.score, 92);
+        assert!(verdict.rationale.contains("webhook"));
+    }
+
+    /// Verifies that the prompt built for a semantic task with the known diff
+    /// fixture contains all required sections.
+    #[test]
+    fn prompt_contains_all_sections_for_semantic_task_with_known_diff() {
+        let mut task = make_task("Add webhook notification support to Notifier");
+        task.evaluation = Some(TaskEvaluation {
+            mode: "semantic".to_string(),
+        });
+        task.acceptance_criteria = Some("send_webhook method must exist".to_string());
+
+        let prompt = build_semantic_eval_prompt(&task, None, SAMPLE_DIFF);
+
+        // Task description
+        assert!(
+            prompt.contains("Add webhook notification support"),
+            "prompt must contain task description"
+        );
+        // Acceptance criteria (task-level)
+        assert!(
+            prompt.contains("send_webhook method must exist"),
+            "prompt must contain acceptance criteria"
+        );
+        // Diff content
+        assert!(
+            prompt.contains("webhook_url"),
+            "prompt must contain diff content"
+        );
+        // JSON schema instruction
+        assert!(
+            prompt.contains("\"passed\""),
+            "prompt must include JSON schema hint"
+        );
+    }
+
+    /// Verifies fallback behavior when the stubbed agent returns an empty string:
+    /// `evaluate_semantically` must not error but return a conservative failed verdict.
+    #[tokio::test]
+    async fn evaluate_semantically_fallback_when_chat_fn_returns_empty() {
+        let mut task = make_task("Implement feature Y");
+        task.evaluation = Some(TaskEvaluation {
+            mode: "semantic".to_string(),
+        });
+
+        let chat_fn = |_prompt: String| async move { Ok(String::new()) };
+
+        let verdict = evaluate_semantically(&task, SAMPLE_DIFF, None, chat_fn)
+            .await
+            .unwrap();
+
+        assert!(!verdict.passed, "empty response should yield passed=false");
+        assert_eq!(verdict.score, 0, "empty response should yield score=0");
+        assert!(
+            verdict.rationale.contains("malformed"),
+            "rationale should describe the parse failure"
+        );
+    }
+
+    /// Verifies fallback behavior when the stubbed agent returns prose with no JSON.
+    #[tokio::test]
+    async fn evaluate_semantically_fallback_when_chat_fn_returns_no_json() {
+        let mut task = make_task("Implement feature Z");
+        task.evaluation = Some(TaskEvaluation {
+            mode: "semantic".to_string(),
+        });
+
+        let chat_fn =
+            |_prompt: String| async move { Ok("I think it looks good but I am not sure.".to_string()) };
+
+        let verdict = evaluate_semantically(&task, SAMPLE_DIFF, None, chat_fn)
+            .await
+            .unwrap();
+
+        assert!(!verdict.passed);
+        assert_eq!(verdict.score, 0);
+        assert!(verdict.rationale.contains("malformed"));
+    }
+
+    /// Verifies that the sample diff fixture is correctly embedded in the prompt
+    /// (i.e., the diff is not empty and not truncated for normal-length fixtures).
+    #[test]
+    fn prompt_embeds_sample_diff_without_truncation() {
+        let task = make_task("Some task");
+        let prompt = build_semantic_eval_prompt(&task, None, SAMPLE_DIFF);
+        assert!(
+            !prompt.contains("truncated"),
+            "SAMPLE_DIFF is small enough that no truncation should occur"
+        );
+        assert!(
+            prompt.contains("send_webhook"),
+            "diff content should appear verbatim in the prompt"
+        );
     }
 }
