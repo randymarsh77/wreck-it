@@ -566,6 +566,7 @@ fn status_css_class(status: TaskStatus) -> String {
 
 /// Truncate an error excerpt to at most `max_chars` characters, appending
 /// `"…"` when truncated.
+#[cfg(test)]
 fn truncate_excerpt(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_string()

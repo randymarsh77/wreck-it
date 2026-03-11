@@ -144,7 +144,6 @@
 //!   the task lifecycle state machine.
 
 use crate::types::Task;
-use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of UTF-8 characters included from the git diff in the
@@ -276,12 +275,16 @@ pub fn parse_semantic_verdict(response: &str) -> SemanticVerdict {
 ///    [`parse_semantic_verdict`].
 ///
 /// The `chat_fn` parameter accepts a prompt string and returns the raw model
+#[cfg(test)]
+use anyhow::{Context, Result};
+
 /// response.  In production this is wired to
 /// `AgentClient::chat_via_http` / `AgentClient::critique_via_copilot`.
 /// In tests it can be replaced with a stub that returns canned JSON.
 ///
 /// The caller is responsible for collecting the git diff before calling this
 /// function (see `AgentClient::get_git_diff` in production).
+#[cfg(test)]
 pub async fn evaluate_semantically<F, Fut>(
     task: &Task,
     diff: &str,
