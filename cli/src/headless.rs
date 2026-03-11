@@ -998,9 +998,7 @@ fn format_validation_failure_comment(failure: &ValidationFailure) -> String {
         ));
     }
 
-    comment.push_str(
-        "\nPlease investigate the failure and push a fix.",
-    );
+    comment.push_str("\nPlease investigate the failure and push a fix.");
 
     comment
 }
