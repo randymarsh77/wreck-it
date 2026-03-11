@@ -556,6 +556,46 @@
       "pr_number": 485,
       "task_id": "merge-pr-174",
       "issue_number": 482
+    },
+    {
+      "pr_number": 488,
+      "task_id": "merge-pr-285",
+      "issue_number": 486
+    },
+    {
+      "pr_number": 490,
+      "task_id": "merge-pr-277",
+      "issue_number": 487
+    },
+    {
+      "pr_number": 492,
+      "task_id": "merge-pr-269",
+      "issue_number": 489
+    },
+    {
+      "pr_number": 494,
+      "task_id": "merge-pr-259",
+      "issue_number": 491
+    },
+    {
+      "pr_number": 496,
+      "task_id": "merge-pr-234",
+      "issue_number": 493
+    },
+    {
+      "pr_number": 498,
+      "task_id": "merge-pr-208",
+      "issue_number": 495
+    },
+    {
+      "pr_number": 500,
+      "task_id": "merge-pr-207",
+      "issue_number": 497
+    },
+    {
+      "pr_number": 501,
+      "task_id": "merge-pr-174",
+      "issue_number": 499
     }
   ],
   "pending_merge_issues": [
