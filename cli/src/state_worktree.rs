@@ -199,7 +199,7 @@ pub fn ensure_feature_branch(repo_root: &Path, branch: &str) -> Result<()> {
 /// Detect the default branch of the repository.
 ///
 /// Tries `origin/HEAD` first, then falls back to common names.
-fn detect_default_branch(repo_root: &Path) -> Result<String> {
+pub fn detect_default_branch(repo_root: &Path) -> Result<String> {
     // Try to read the symbolic ref of origin/HEAD.
     if let Ok(symbolic) = git_cmd(repo_root, &["symbolic-ref", "refs/remotes/origin/HEAD"]) {
         // e.g. "refs/remotes/origin/main" → "main"
