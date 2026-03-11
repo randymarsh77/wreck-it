@@ -416,15 +416,16 @@
   {
     "id": "ideas-html-report",
     "description": "Research and design an HTML report generator for wreck-it run summaries. The report should capture: overall run statistics (total tasks, completed/failed/pending counts, total cost, total tokens, elapsed time), a per-task timeline table (id, role, status, duration, cost, retries), a dependency graph rendered inline as an SVG or Mermaid diagram, and a section for failed tasks showing error output excerpts. Review existing data sources: `cli/src/cost_tracker.rs` (cost and token data), `cli/src/openclaw.rs` (provenance events), `cli/src/graph.rs` (dependency graph Mermaid output), and `core/src/task_manager.rs` (task state). Design a `ReportData` struct that aggregates all necessary data, a Handlebars or simple string-template approach for HTML generation, and a `wreck-it report --output report.html` CLI sub-command. Document the design as inline comments in a new stub file `cli/src/report.rs`.",
-    "status": "pending",
+    "status": "completed",
     "role": "ideas",
     "priority": 3,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1773194898
   },
   {
     "id": "impl-html-report",
     "description": "Implement the HTML report generator designed in `ideas-html-report`. Create `cli/src/report.rs` with: (1) a `ReportData` struct that aggregates task statuses from the task manager, cost/token data from `CostTracker`, and provenance events from openclaw if available; (2) a `generate_html(data: &ReportData) -> String` function that produces a self-contained HTML file using inline CSS and optional Mermaid JS (loaded from CDN) for the dependency graph section; (3) a `write_report(path: &Path, data: &ReportData)` helper that serialises the HTML to disk. Add a `report` sub-command to `cli/src/cli.rs` with `--output <PATH>` (default `wreck-it-report.html`) and `--task-file <PATH>` flags. Wire the sub-command in `cli/src/main.rs`. The HTML output must be self-contained (inline styles, no external dependencies except optional Mermaid CDN) and render correctly in modern browsers.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 2,
     "depends_on": [
       "ideas-html-report"

@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 37,
-  "current_task_id": "ideas-html-report",
-  "issue_number": 245,
-  "last_prompt": "Research and design an HTML report generator for wreck-it run summaries. The report should capture: overall run statistics (total tasks, completed/failed/pending counts, total cost, total tokens, elapsed time), a per-task timeline table (id, role, status, duration, cost, retries), a dependency graph rendered inline as an SVG or Mermaid diagram, and a section for failed tasks showing error output excerpts. Review existing data sources: `cli/src/cost_tracker.rs` (cost and token data), `cli/src/openclaw.rs` (provenance events), `cli/src/graph.rs` (dependency graph Mermaid output), and `core/src/task_manager.rs` (task state). Design a `ReportData` struct that aggregates all necessary data, a Handlebars or simple string-template approach for HTML generation, and a `wreck-it report --output report.html` CLI sub-command. Document the design as inline comments in a new stub file `cli/src/report.rs`.",
+  "iteration": 38,
+  "current_task_id": "impl-html-report",
+  "issue_number": 248,
+  "last_prompt": "Implement the HTML report generator designed in `ideas-html-report`. Create `cli/src/report.rs` with: (1) a `ReportData` struct that aggregates task statuses from the task manager, cost/token data from `CostTracker`, and provenance events from openclaw if available; (2) a `generate_html(data: &ReportData) -> String` function that produces a self-contained HTML file using inline CSS and optional Mermaid JS (loaded from CDN) for the dependency graph section; (3) a `write_report(path: &Path, data: &ReportData)` helper that serialises the HTML to disk. Add a `report` sub-command to `cli/src/cli.rs` with `--output <PATH>` (default `wreck-it-report.html`) and `--task-file <PATH>` flags. Wire the sub-command in `cli/src/main.rs`. The HTML output must be self-contained (inline styles, no external dependencies except optional Mermaid CDN) and render correctly in modern browsers.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -249,6 +249,10 @@
     "iteration 36: agent created PR #244 for task Some(\"eval-semantic-evaluation\")",
     "iteration 36: marked PR #244 as ready for review",
     "iteration 36: merged PR #244 for task Some(\"eval-semantic-evaluation\") (brute mode)",
-    "iteration 37: triggered cloud agent for task ideas-html-report (issue #245)"
+    "iteration 37: triggered cloud agent for task ideas-html-report (issue #245)",
+    "iteration 37: agent created PR #246 for task Some(\"ideas-html-report\")",
+    "iteration 37: marked PR #246 as ready for review",
+    "iteration 37: merged PR #246 for task Some(\"ideas-html-report\") (brute mode)",
+    "iteration 38: triggered cloud agent for task impl-html-report (issue #248)"
   ]
 }
