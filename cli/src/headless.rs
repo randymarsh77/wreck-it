@@ -869,8 +869,11 @@ fn run_validation_command(
 
     println!("[wreck-it] running validation command: {}", command);
 
-    // Intentional shell execution: this is a user-configured validation hook
-    // and must only be used with trusted command input.
+    // SECURITY: Intentional shell execution of a user-configured validation
+    // hook.  The `validation_command` value comes from the repository's
+    // `.wreck-it/config.toml` which is committed to the codebase.  It must
+    // only contain trusted input — never user-supplied or untrusted content —
+    // to prevent command injection vulnerabilities.
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = Command::new("cmd");
         c.args(["/C", command]);
@@ -947,17 +950,19 @@ fn format_validation_failure_comment(failure: &ValidationFailure) -> String {
 }
 
 /// Truncate a string to at most `max_len` bytes on a char boundary, appending
-/// an ellipsis marker when truncation occurs.
-fn truncate_output(s: &str, max_len: usize) -> &str {
+/// `" … [truncated]"` when truncation occurs.
+fn truncate_output(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
-        return s;
+        return s.to_string();
     }
     // Find the nearest char boundary at or before max_len.
     let mut end = max_len;
     while !s.is_char_boundary(end) && end > 0 {
         end -= 1;
     }
-    &s[..end]
+    let mut result = s[..end].to_string();
+    result.push_str("\n… [truncated]");
+    result
 }
 
 /// Mark a task as completed by its ID in the task file.
@@ -2509,6 +2514,7 @@ mod tests {
     fn truncate_output_at_limit() {
         let long = "a".repeat(200);
         let truncated = truncate_output(&long, 50);
-        assert_eq!(truncated.len(), 50);
+        assert!(truncated.starts_with(&"a".repeat(50)));
+        assert!(truncated.ends_with("… [truncated]"));
     }
 }
