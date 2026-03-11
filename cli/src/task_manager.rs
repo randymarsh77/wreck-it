@@ -251,8 +251,8 @@ mod tests {
                 parent_id: None,
                 labels: vec![],
                 system_prompt_override: None,
-            acceptance_criteria: None,
-            evaluation: None,
+                acceptance_criteria: None,
+                evaluation: None,
             },
             Task {
                 id: "2".to_string(),
@@ -276,8 +276,8 @@ mod tests {
                 parent_id: None,
                 labels: vec![],
                 system_prompt_override: None,
-            acceptance_criteria: None,
-            evaluation: None,
+                acceptance_criteria: None,
+                evaluation: None,
             },
         ];
 
