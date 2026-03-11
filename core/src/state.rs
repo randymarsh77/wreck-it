@@ -71,6 +71,19 @@ pub struct PendingIssue {
     pub merge_method: Option<String>,
 }
 
+/// An issue created by the merge ralph to resolve merge conflicts.
+///
+/// The merge ralph creates issues that assign a coding agent to fix
+/// conflicts on a PR.  These are persisted so that subsequent invocations
+/// can poll for the resulting PR and promote it to a [`TrackedPr`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingMergeIssue {
+    /// GitHub issue number that was created for conflict resolution.
+    pub issue_number: u64,
+    /// The wreck-it task ID (e.g. `"merge-pr-42"`).
+    pub task_id: String,
+}
+
 /// Persistent state that is committed to the repo between cron invocations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeadlessState {
@@ -123,6 +136,12 @@ pub struct HeadlessState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_requested: Option<bool>,
 
+    /// Issues created by the merge ralph that are waiting for the coding
+    /// agent to produce a PR.  Once a linked PR is detected, the entry is
+    /// promoted to [`tracked_prs`] and removed from this list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_merge_issues: Vec<PendingMergeIssue>,
+
     /// Per-task runtime status, keyed by task ID.
     ///
     /// This map is the authoritative source for task status when present.
@@ -147,6 +166,7 @@ impl Default for HeadlessState {
             tracked_prs: Vec::new(),
             pending_issues: Vec::new(),
             review_requested: None,
+            pending_merge_issues: Vec::new(),
             task_statuses: HashMap::new(),
         }
     }
