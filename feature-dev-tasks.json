@@ -379,7 +379,7 @@
   {
     "id": "impl-semantic-evaluation",
     "description": "Implement the semantic evaluation mode designed in `ideas-semantic-evaluation`. Create `cli/src/semantic_eval.rs` with an async `evaluate_semantically(task, diff, agent_client) -> SemanticVerdict` function where `SemanticVerdict = { passed: bool, score: u8, rationale: String }`. The function should construct a prompt that includes the task description, any acceptance criteria from `task.acceptance_criteria`, the git diff, and instructions to return a JSON verdict. Parse the agent response with lenient JSON extraction (scan for the first `{` block). Add `Semantic` variant to `EvaluationMode` in `core/src/types.rs`. Wire the new mode into the evaluation dispatch in `cli/src/agent.rs` (or wherever EvaluationMode is dispatched). Expose it via `evaluation: { mode: \"semantic\" }` in task JSON. Log the rationale at INFO level and surface the score in TUI task detail view.",
-    "status": "inprogress",
+    "status": "pending",
     "phase": 2,
     "depends_on": [
       "ideas-semantic-evaluation"
