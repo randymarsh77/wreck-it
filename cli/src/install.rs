@@ -259,6 +259,7 @@ mod tests {
                 brute_mode: None,
                 backend: None,
                 prompt_dir: None,
+                validation_command: None,
             }],
             ..RepoConfig::default()
         };

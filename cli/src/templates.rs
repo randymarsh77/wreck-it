@@ -229,6 +229,7 @@ mod tests {
                 backend: None,
 
                 prompt_dir: None,
+                validation_command: None,
             }],
             ..RepoConfig::default()
         };

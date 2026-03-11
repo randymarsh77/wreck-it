@@ -12,6 +12,7 @@ use crate::types::Config;
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::Path;
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Default name for the repo-committed config file.
@@ -612,6 +613,25 @@ pub(crate) async fn advance_tracked_prs(
                         continue;
                     }
                 }
+                // ── Validation gate (advance) ───────────────────────
+                if let Some(failure) = run_validation_command(ralph, work_dir)? {
+                    println!(
+                        "[wreck-it] advance: validation failed for PR #{}, commenting on PR",
+                        pr_number
+                    );
+                    let comment = format_validation_failure_comment(&failure);
+                    if let Err(e) = client.comment_on_pr(pr_number, &comment).await {
+                        println!(
+                            "[wreck-it] advance: failed to comment validation failure on PR #{}: {}",
+                            pr_number, e
+                        );
+                    }
+                    state.memory.push(format!(
+                        "advance: validation command failed for PR #{} (task {})",
+                        pr_number, tracked.task_id,
+                    ));
+                    continue;
+                }
                 // Check whether the base branch requires status checks.
                 let has_checks = match client.has_required_checks_for_pr(pr_number).await {
                     Ok(v) => v,
@@ -819,6 +839,130 @@ fn infer_task_id_from_title(title: &str) -> String {
         return trimmed.to_string();
     }
     UNKNOWN_TASK_ID.to_string()
+}
+
+/// Outcome of running a validation command.
+struct ValidationFailure {
+    /// The command that was executed.
+    command: String,
+    /// Process exit code, if available.
+    exit_code: Option<i32>,
+    /// Captured standard output.
+    stdout: String,
+    /// Captured standard error.
+    stderr: String,
+}
+
+/// Run the ralph-configured validation command in `work_dir`.
+///
+/// Returns `Ok(None)` when validation passes (exit code 0) or no command is
+/// configured.  Returns `Ok(Some(failure))` when the command exits non-zero.
+/// Returns `Err` only when the process cannot be spawned at all.
+fn run_validation_command(
+    ralph: Option<&RalphConfig>,
+    work_dir: &Path,
+) -> Result<Option<ValidationFailure>> {
+    let command = match ralph.and_then(|r| r.validation_command.as_deref()) {
+        Some(cmd) => cmd,
+        None => return Ok(None),
+    };
+
+    println!("[wreck-it] running validation command: {}", command);
+
+    // SECURITY: Intentional shell execution of a user-configured validation
+    // hook.  The `validation_command` value comes from the repository's
+    // `.wreck-it/config.toml` which is committed to the codebase.  It must
+    // only contain trusted input — never user-supplied or untrusted content —
+    // to prevent command injection vulnerabilities.
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut c = Command::new("cmd");
+        c.args(["/C", command]);
+        c
+    } else {
+        let mut c = Command::new("sh");
+        c.args(["-c", command]);
+        c
+    };
+
+    let output = cmd
+        .current_dir(work_dir)
+        .output()
+        .context("Failed to spawn validation command")?;
+
+    if output.status.success() {
+        println!("[wreck-it] validation command passed");
+        return Ok(None);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let exit_code = output.status.code();
+
+    println!(
+        "[wreck-it] validation command failed (exit code: {:?})",
+        exit_code,
+    );
+
+    Ok(Some(ValidationFailure {
+        command: command.to_string(),
+        exit_code,
+        stdout,
+        stderr,
+    }))
+}
+
+/// Format a PR comment for a validation command failure.
+fn format_validation_failure_comment(failure: &ValidationFailure) -> String {
+    let exit_str = failure
+        .exit_code
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let mut comment = format!(
+        "@copilot The validation command for this PR failed.\n\n\
+         **Command:** `{}`\n\
+         **Exit code:** {}\n",
+        failure.command, exit_str,
+    );
+
+    if !failure.stdout.is_empty() {
+        // Truncate to keep the comment within GitHub's size limits.
+        let stdout = truncate_output(&failure.stdout, 3000);
+        comment.push_str(&format!(
+            "\n<details><summary>stdout</summary>\n\n```\n{}\n```\n\n</details>\n",
+            stdout,
+        ));
+    }
+
+    if !failure.stderr.is_empty() {
+        let stderr = truncate_output(&failure.stderr, 3000);
+        comment.push_str(&format!(
+            "\n<details><summary>stderr</summary>\n\n```\n{}\n```\n\n</details>\n",
+            stderr,
+        ));
+    }
+
+    comment.push_str(
+        "\nPlease investigate the failure and push a fix.",
+    );
+
+    comment
+}
+
+/// Truncate a string to at most `max_len` bytes on a char boundary, appending
+/// `" … [truncated]"` when truncation occurs.
+fn truncate_output(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        return s.to_string();
+    }
+    // Find the nearest char boundary at or before max_len.
+    let mut end = max_len;
+    while !s.is_char_boundary(end) && end > 0 {
+        end -= 1;
+    }
+    let mut result = s[..end].to_string();
+    result.push_str("\n… [truncated]");
+    result
 }
 
 /// Mark a task as completed by its ID in the task file.
@@ -1433,6 +1577,29 @@ async fn run_needs_verification(
             );
             return Ok(StepOutcome::Yield);
         }
+    }
+
+    // ── Validation gate ─────────────────────────────────────────────
+    // Before proceeding to merge, run the configured validation command
+    // (if any).  A failing command blocks the merge and comments on the
+    // PR so the coding agent can address the issue.
+    if let Some(failure) = run_validation_command(ralph, work_dir)? {
+        println!(
+            "[wreck-it] validation failed for PR #{}, commenting on PR",
+            pr_number
+        );
+        let comment = format_validation_failure_comment(&failure);
+        if let Err(e) = client.comment_on_pr(pr_number, &comment).await {
+            println!(
+                "[wreck-it] failed to comment validation failure on PR #{}: {}",
+                pr_number, e
+            );
+        }
+        state.memory.push(format!(
+            "iteration {}: validation command failed for PR #{}",
+            state.iteration, pr_number,
+        ));
+        return Ok(StepOutcome::Yield);
     }
 
     // PR is mergeable.  Check for required checks to decide the strategy.
@@ -2209,5 +2376,145 @@ mod tests {
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Pending);
+    }
+
+    // ── Validation command tests ─────────────────────────────────────
+
+    #[test]
+    fn run_validation_command_returns_none_when_no_ralph() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = run_validation_command(None, dir.path()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn run_validation_command_returns_none_when_no_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let rc = RalphConfig {
+            name: "test".to_string(),
+            task_file: "tasks.json".to_string(),
+            state_file: "state.json".to_string(),
+            branch: None,
+            agent: None,
+            reviewers: None,
+            command: None,
+            brute_mode: None,
+            backend: None,
+            prompt_dir: None,
+            validation_command: None,
+        };
+        let result = run_validation_command(Some(&rc), dir.path()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn run_validation_command_passes_on_exit_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let rc = RalphConfig {
+            name: "test".to_string(),
+            task_file: "tasks.json".to_string(),
+            state_file: "state.json".to_string(),
+            branch: None,
+            agent: None,
+            reviewers: None,
+            command: None,
+            brute_mode: None,
+            backend: None,
+            prompt_dir: None,
+            validation_command: Some("true".to_string()),
+        };
+        let result = run_validation_command(Some(&rc), dir.path()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn run_validation_command_fails_on_nonzero_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let rc = RalphConfig {
+            name: "test".to_string(),
+            task_file: "tasks.json".to_string(),
+            state_file: "state.json".to_string(),
+            branch: None,
+            agent: None,
+            reviewers: None,
+            command: None,
+            brute_mode: None,
+            backend: None,
+            prompt_dir: None,
+            validation_command: Some("echo fail-output && exit 1".to_string()),
+        };
+        let result = run_validation_command(Some(&rc), dir.path()).unwrap();
+        let failure = result.expect("should report failure");
+        assert_eq!(failure.exit_code, Some(1));
+        assert!(failure.stdout.contains("fail-output"));
+        assert_eq!(failure.command, "echo fail-output && exit 1");
+    }
+
+    #[test]
+    fn run_validation_command_captures_stderr() {
+        let dir = tempfile::tempdir().unwrap();
+        let rc = RalphConfig {
+            name: "test".to_string(),
+            task_file: "tasks.json".to_string(),
+            state_file: "state.json".to_string(),
+            branch: None,
+            agent: None,
+            reviewers: None,
+            command: None,
+            brute_mode: None,
+            backend: None,
+            prompt_dir: None,
+            validation_command: Some("echo err-msg >&2 && exit 2".to_string()),
+        };
+        let result = run_validation_command(Some(&rc), dir.path()).unwrap();
+        let failure = result.expect("should report failure");
+        assert_eq!(failure.exit_code, Some(2));
+        assert!(failure.stderr.contains("err-msg"));
+    }
+
+    #[test]
+    fn format_validation_failure_comment_includes_command_and_output() {
+        let failure = ValidationFailure {
+            command: "cargo test".to_string(),
+            exit_code: Some(1),
+            stdout: "test failed\n".to_string(),
+            stderr: "error: compilation failed\n".to_string(),
+        };
+        let comment = format_validation_failure_comment(&failure);
+        assert!(comment.contains("@copilot"));
+        assert!(comment.contains("`cargo test`"));
+        assert!(comment.contains("1")); // exit code
+        assert!(comment.contains("test failed"));
+        assert!(comment.contains("compilation failed"));
+    }
+
+    #[test]
+    fn format_validation_failure_comment_handles_empty_output() {
+        let failure = ValidationFailure {
+            command: "false".to_string(),
+            exit_code: Some(1),
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        let comment = format_validation_failure_comment(&failure);
+        assert!(comment.contains("@copilot"));
+        assert!(comment.contains("`false`"));
+        // No stdout/stderr details sections when output is empty.
+        assert!(!comment.contains("<details><summary>stdout</summary>"));
+        assert!(!comment.contains("<details><summary>stderr</summary>"));
+    }
+
+    #[test]
+    fn truncate_output_within_limit() {
+        let short = "hello";
+        assert_eq!(truncate_output(short, 100), "hello");
+    }
+
+    #[test]
+    fn truncate_output_at_limit() {
+        let long = "a".repeat(200);
+        let truncated = truncate_output(&long, 50);
+        assert!(truncated.starts_with(&"a".repeat(50)));
+        assert!(truncated.ends_with("… [truncated]"));
     }
 }
