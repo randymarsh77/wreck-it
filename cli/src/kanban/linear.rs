@@ -111,7 +111,10 @@ impl LinearProvider {
             bail!("Linear API error ({status}): {text}");
         }
 
-        let gql: GqlResponse = resp.json().await.context("Failed to parse Linear response")?;
+        let gql: GqlResponse = resp
+            .json()
+            .await
+            .context("Failed to parse Linear response")?;
         if let Some(errors) = gql.errors {
             let msgs: Vec<_> = errors.iter().map(|e| e.message.as_str()).collect();
             bail!("Linear GraphQL errors: {}", msgs.join("; "));
@@ -148,18 +151,9 @@ impl KanbanProvider for LinearProvider {
         let data = self.gql(query, Some(vars)).await?;
         let issue = &data["issueCreate"]["issue"];
         Ok(KanbanIssue {
-            external_id: issue["id"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-            url: issue["url"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-            title: issue["title"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
+            external_id: issue["id"].as_str().unwrap_or_default().to_string(),
+            url: issue["url"].as_str().unwrap_or_default().to_string(),
+            title: issue["title"].as_str().unwrap_or_default().to_string(),
             description: issue["description"]
                 .as_str()
                 .unwrap_or_default()
@@ -260,18 +254,9 @@ impl KanbanProvider for LinearProvider {
             .await?;
         let issue = &data["issue"];
         Ok(KanbanIssue {
-            external_id: issue["id"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-            url: issue["url"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-            title: issue["title"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
+            external_id: issue["id"].as_str().unwrap_or_default().to_string(),
+            url: issue["url"].as_str().unwrap_or_default().to_string(),
+            title: issue["title"].as_str().unwrap_or_default().to_string(),
             description: issue["description"]
                 .as_str()
                 .unwrap_or_default()
@@ -279,11 +264,7 @@ impl KanbanProvider for LinearProvider {
         })
     }
 
-    async fn get_updates(
-        &self,
-        external_id: &str,
-        _since: Option<u64>,
-    ) -> Result<KanbanUpdates> {
+    async fn get_updates(&self, external_id: &str, _since: Option<u64>) -> Result<KanbanUpdates> {
         // Fetch the issue description + comments; caller compares with local state.
         let query = r#"
             query GetUpdates($id: String!) {
@@ -330,7 +311,10 @@ mod tests {
     #[test]
     fn status_mapping_covers_all_variants() {
         assert_eq!(status_to_linear_state(TaskStatus::Pending), "Todo");
-        assert_eq!(status_to_linear_state(TaskStatus::InProgress), "In Progress");
+        assert_eq!(
+            status_to_linear_state(TaskStatus::InProgress),
+            "In Progress"
+        );
         assert_eq!(status_to_linear_state(TaskStatus::Completed), "Done");
         assert_eq!(status_to_linear_state(TaskStatus::Failed), "Canceled");
     }
