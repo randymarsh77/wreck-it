@@ -97,6 +97,7 @@ mod tests {
     fn test_repo_config_roundtrip() {
         let cfg = RepoConfig {
             state_branch: "my-state".to_string(),
+            task_branch: None,
             state_root: ".my-state-dir".to_string(),
             ralphs: vec![],
         };
@@ -110,6 +111,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "custom-branch".to_string(),
+            task_branch: None,
             state_root: ".custom-root".to_string(),
             ralphs: vec![],
         };
@@ -172,6 +174,7 @@ mod tests {
     fn test_repo_config_with_ralphs_roundtrip() {
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![
                 RalphConfig {
@@ -184,6 +187,9 @@ mod tests {
                     command: None,
                     brute_mode: None,
                     backend: None,
+
+                    prompt_dir: None,
+                    validation_command: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -195,6 +201,9 @@ mod tests {
                     command: None,
                     brute_mode: None,
                     backend: None,
+
+                    prompt_dir: None,
+                    validation_command: None,
                 },
             ],
         };
@@ -243,6 +252,9 @@ name = "docs"
                     command: None,
                     brute_mode: None,
                     backend: None,
+
+                    prompt_dir: None,
+                    validation_command: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -254,6 +266,9 @@ name = "docs"
                     command: None,
                     brute_mode: None,
                     backend: None,
+
+                    prompt_dir: None,
+                    validation_command: None,
                 },
             ],
             ..RepoConfig::default()
@@ -273,6 +288,7 @@ name = "docs"
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
@@ -284,6 +300,9 @@ name = "docs"
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -310,6 +329,7 @@ state_file = ".docs-state.json"
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "feature-work".to_string(),
@@ -321,6 +341,9 @@ state_file = ".docs-state.json"
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -336,6 +359,7 @@ state_file = ".docs-state.json"
     fn test_ralph_config_branch_omitted_when_none() {
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
@@ -347,6 +371,9 @@ state_file = ".docs-state.json"
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -407,6 +434,7 @@ reviewers = ["alice", "bob"]
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "feature-work".to_string(),
@@ -418,6 +446,9 @@ reviewers = ["alice", "bob"]
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -431,6 +462,7 @@ reviewers = ["alice", "bob"]
     fn test_ralph_config_agent_omitted_when_none() {
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
@@ -442,6 +474,9 @@ reviewers = ["alice", "bob"]
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -480,6 +515,7 @@ command = "unstuck"
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "unstuck".to_string(),
@@ -491,6 +527,9 @@ command = "unstuck"
                 command: Some("unstuck".to_string()),
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -503,6 +542,7 @@ command = "unstuck"
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "brute".to_string(),
@@ -514,6 +554,9 @@ command = "unstuck"
                 command: None,
                 brute_mode: Some(true),
                 backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -525,6 +568,7 @@ command = "unstuck"
     fn test_ralph_config_brute_mode_omitted_when_none() {
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
+            task_branch: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
@@ -536,6 +580,9 @@ command = "unstuck"
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
