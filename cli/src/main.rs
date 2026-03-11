@@ -5,6 +5,7 @@ mod cli;
 mod cloud_agent;
 mod config_manager;
 mod cost_tracker;
+mod error_classifier;
 mod gastown_client;
 mod github_auth;
 mod github_client;
@@ -428,6 +429,8 @@ async fn main() -> Result<()> {
                         backend: None,
 
                         prompt_dir: None,
+                        validation_command: None,
+                        transient_backoff_secs: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -528,6 +531,8 @@ async fn main() -> Result<()> {
                         backend: None,
 
                         prompt_dir: None,
+                        validation_command: None,
+                        transient_backoff_secs: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }

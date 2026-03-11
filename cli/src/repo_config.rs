@@ -190,6 +190,7 @@ mod tests {
 
                     prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -204,6 +205,7 @@ mod tests {
 
                     prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
                 },
             ],
         };
@@ -255,6 +257,7 @@ name = "docs"
 
                     prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -269,6 +272,7 @@ name = "docs"
 
                     prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
                 },
             ],
             ..RepoConfig::default()
@@ -303,6 +307,7 @@ name = "docs"
 
                 prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -344,6 +349,7 @@ state_file = ".docs-state.json"
 
                 prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -374,6 +380,7 @@ state_file = ".docs-state.json"
 
                 prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -449,6 +456,7 @@ reviewers = ["alice", "bob"]
 
                 prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -477,6 +485,7 @@ reviewers = ["alice", "bob"]
 
                 prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();
@@ -530,6 +539,7 @@ command = "unstuck"
 
                 prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -557,6 +567,7 @@ command = "unstuck"
 
                 prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -583,6 +594,7 @@ command = "unstuck"
 
                 prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
             }],
         };
         let toml_str = toml::to_string_pretty(&cfg).unwrap();

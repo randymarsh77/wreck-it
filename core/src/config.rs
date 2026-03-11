@@ -161,6 +161,18 @@ pub struct RalphConfig {
     /// Example: `"cargo test --lib"`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation_command: Option<String>,
+
+    /// Backoff duration in seconds applied before retrying after a transient
+    /// validation failure (e.g. network timeout, rate-limit error).
+    ///
+    /// When the error classifier identifies a validation command failure as
+    /// `Transient`, the headless runner sleeps for this many seconds before
+    /// yielding to the next invocation.  This helps avoid hammering a
+    /// temporarily unavailable service.
+    ///
+    /// Defaults to `30` seconds when not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transient_backoff_secs: Option<u64>,
 }
 
 fn default_state_branch() -> String {
@@ -291,6 +303,35 @@ name = "docs"
         assert!(
             !serialized.contains("validation_command"),
             "validation_command should be absent: {serialized}"
+        );
+    }
+
+    #[test]
+    fn transient_backoff_secs_roundtrips_via_toml() {
+        let toml_str = r#"
+name = "ci-check"
+transient_backoff_secs = 60
+"#;
+        let cfg: RalphConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.transient_backoff_secs, Some(60));
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            serialized.contains("transient_backoff_secs"),
+            "transient_backoff_secs should be present: {serialized}"
+        );
+    }
+
+    #[test]
+    fn transient_backoff_secs_omitted_from_toml_when_none() {
+        let toml_str = r#"
+name = "docs"
+"#;
+        let cfg: RalphConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.transient_backoff_secs.is_none());
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            !serialized.contains("transient_backoff_secs"),
+            "transient_backoff_secs should be absent: {serialized}"
         );
     }
 }

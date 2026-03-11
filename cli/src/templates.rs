@@ -230,6 +230,7 @@ mod tests {
 
                 prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
             }],
             ..RepoConfig::default()
         };
