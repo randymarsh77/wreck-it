@@ -34,6 +34,7 @@ test-e2e.sh
 .wreck-it/*
 !.wreck-it/config.toml
 !.wreck-it/plans/
+!.wreck-it/prompts/
 
 # Site build artifacts
 site/docs/node_modules/

@@ -88,11 +88,8 @@ pub async fn run_merge(
         repo_owner, repo_name, backend,
     );
 
-    let mut client = CloudAgentClient::new(
-        github_token.clone(),
-        repo_owner.clone(),
-        repo_name.clone(),
-    );
+    let mut client =
+        CloudAgentClient::new(github_token.clone(), repo_owner.clone(), repo_name.clone());
     client.resolve_authenticated_login().await;
 
     // --- Phase 1: promote pending issues whose agents have created PRs ---
@@ -154,13 +151,9 @@ pub async fn run_merge(
 
         let result = match backend {
             BACKEND_CLI => {
-                resolve_via_cli(work_dir, &pr_detail, &github_token, &repo_owner, &repo_name)
-                    .await
+                resolve_via_cli(work_dir, &pr_detail, &github_token, &repo_owner, &repo_name).await
             }
-            _ => {
-                resolve_via_cloud_agent(&client, &pr_detail, &mut state)
-                    .await
-            }
+            _ => resolve_via_cloud_agent(&client, &pr_detail, &mut state).await,
         };
 
         match result {
@@ -401,9 +394,7 @@ async fn fetch_pr_detail(
     // `mergeable` is null while GitHub is still computing it; treat null as
     // "no conflicts detected yet".
     let mergeable = pr_json["mergeable"].as_bool().unwrap_or(true);
-    let mergeable_state = pr_json["mergeable_state"]
-        .as_str()
-        .unwrap_or("unknown");
+    let mergeable_state = pr_json["mergeable_state"].as_str().unwrap_or("unknown");
     let has_conflicts = !mergeable || mergeable_state == "dirty";
 
     let _ = (repo_owner, repo_name); // used by the caller context
@@ -422,10 +413,7 @@ async fn fetch_pr_detail(
 fn build_merge_context(detail: &PrDetail, recent_base_commits: &str, diff_summary: &str) -> String {
     let mut ctx = String::new();
 
-    ctx.push_str(&format!(
-        "## PR #{}: {}\n\n",
-        detail.number, detail.title,
-    ));
+    ctx.push_str(&format!("## PR #{}: {}\n\n", detail.number, detail.title,));
 
     if !detail.body.is_empty() {
         ctx.push_str("### PR Description\n\n");
@@ -477,12 +465,7 @@ async fn resolve_via_cloud_agent(
          {}\n\n\
          ---\n\
          *Triggered by wreck-it merge ralph*",
-        detail.number,
-        detail.head_ref,
-        detail.base_ref,
-        detail.head_ref,
-        detail.base_ref,
-        context,
+        detail.number, detail.head_ref, detail.base_ref, detail.head_ref, detail.base_ref, context,
     );
 
     let task_id = format!("merge-pr-{}", detail.number);
@@ -494,6 +477,7 @@ async fn resolve_via_cloud_agent(
             &issue_body,
             &[],
             Some(&detail.head_ref),
+            None,
         )
         .await?;
 
@@ -582,10 +566,7 @@ async fn resolve_via_cli(
 }
 
 /// Fetch recent commit messages on the base branch via the GitHub REST API.
-async fn fetch_recent_base_commits_via_api(
-    client: &CloudAgentClient,
-    base_ref: &str,
-) -> String {
+async fn fetch_recent_base_commits_via_api(client: &CloudAgentClient, base_ref: &str) -> String {
     match client.fetch_recent_commits(base_ref, 10).await {
         Ok(commits) => commits,
         Err(e) => {
