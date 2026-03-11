@@ -391,18 +391,19 @@
   {
     "id": "test-semantic-evaluation",
     "description": "Write unit tests for the semantic evaluation feature implemented in `impl-semantic-evaluation`. In `cli/src/semantic_eval.rs` add a `#[cfg(test)]` module covering: (1) successful parsing of a well-formed JSON verdict `{ passed: true, score: 9, rationale: \"...\" }`, (2) lenient extraction when the agent wraps JSON in markdown code fences, (3) fallback to `passed: false, score: 0` when the response is unparseable, (4) that `evaluate_semantically` returns `SemanticVerdict` with expected fields when given a mock agent response. Use a mock or stub for the agent client to avoid real API calls. Also verify that setting `evaluation: { mode: \"semantic\" }` on a task triggers `evaluate_semantically` in the dispatch path. Run `cargo test --lib` to confirm all tests pass.",
-    "status": "pending",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-semantic-evaluation"
     ],
     "priority": 5,
-    "complexity": 3
+    "complexity": 3,
+    "last_attempt_at": 1773191985
   },
   {
     "id": "eval-semantic-evaluation",
     "description": "Evaluate the semantic evaluation feature end-to-end. Create a minimal task with `evaluation: { mode: \"semantic\" }` and a known git diff fixture, then run the unit-level evaluation function with a stubbed agent to verify verdict parsing and fallback logic. Confirm no regressions by running `cargo test --lib`. Review `cli/src/semantic_eval.rs` for prompt quality: does it provide enough context (diff, task description, criteria)? Does the verdict rationale get logged and displayed correctly? Write a brief evaluation summary as a comment block at the top of `cli/src/semantic_eval.rs` noting results, limitations (e.g. large diffs exceeding context window), and recommended follow-up work.",
-    "status": "pending",
+    "status": "inprogress",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
