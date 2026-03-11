@@ -897,3 +897,83 @@ warn_at_percent = 80   # log a warning when 80% of budget is consumed
 - Gastown: Cloud-native agent orchestration runtime — durable execution, heartbeat watchdog, streaming checkpoints, workflow versioning.
 - Openclaw: Interpretable multi-agent planning — re-plan triggers, counterfactual explainer, provenance diffing, policy-based escalation.
 - SWE-bench (Chen et al., 2024): https://arxiv.org/abs/2310.06770 — benchmark for evaluating software engineering agents on real GitHub issues.
+
+---
+
+## 9. Copilot CLI Autopilot Mode — Integration with Ralph Orchestration
+
+> **Date**: 2026-03-07
+> **Source**: GitHub Copilot CLI docs — https://docs.github.com/en/copilot/concepts/agents/copilot-cli/autopilot
+
+### 9.1 What is Autopilot Mode?
+
+GitHub Copilot CLI has an **autopilot mode** that allows the agent to work through multi-step tasks autonomously without waiting for user input after each step. The agent continues until:
+
+- It determines the task is complete
+- A problem occurs that prevents further progress
+- The maximum continuation limit is reached (`--max-autopilot-continues`)
+- The user interrupts with Ctrl+C
+
+**Programmatic invocation**:
+
+```shell
+copilot --autopilot --yolo --max-autopilot-continues 10 -p "YOUR PROMPT HERE"
+```
+
+Key flags:
+
+| Flag | Purpose |
+|---|---|
+| `--autopilot` | Enable autonomous multi-step continuation |
+| `--yolo` / `--allow-all` | Grant all tool/file/URL permissions without per-tool prompts |
+| `-p PROMPT` | Programmatic mode — process prompt and exit |
+| `--max-autopilot-continues N` | Safety limit on continuation steps (prevents runaway loops) |
+| `--silent` | Output only the agent response (useful for scripting) |
+| `--no-ask-user` | Disable clarifying questions (agent makes all decisions) |
+| `--agent AGENT` | Specify a custom agent profile |
+| `--model MODEL` | Override the default AI model |
+
+### 9.2 How It Differs from Existing Modes
+
+| Aspect | Copilot SDK (current) | Copilot Autopilot (new) |
+|---|---|---|
+| **Interaction** | Single prompt → single response | Multi-step autonomous execution |
+| **Tool use** | SDK manages internally | Full shell, file, git access |
+| **File edits** | Returns text; wreck-it applies | Copilot edits files directly |
+| **Git operations** | wreck-it runs `git add`, `git commit` | Copilot can run git commands itself |
+| **Test running** | wreck-it runs verification | Copilot can run tests autonomously |
+| **Multi-step tasks** | Limited to single LLM turn | Agent iterates until task is complete |
+| **Cost** | 1 premium request per prompt | Multiple requests per continuation |
+
+### 9.3 Integration with wreck-it
+
+The `CopilotAutopilot` model provider is now available alongside the existing `Copilot`, `GithubModels`, and `Llama` providers. It works as follows:
+
+1. **Task execution**: Instead of using the Copilot SDK's session-based IPC, wreck-it spawns `copilot --autopilot --yolo --silent -p <prompt>` as a subprocess in the task's working directory.
+
+2. **Autonomy**: The Copilot CLI agent handles the full execution lifecycle — reading files, writing code, running tests, making corrections — without wreck-it needing to orchestrate individual steps.
+
+3. **Configuration**: Use `--model-provider copilot-autopilot` on the CLI, or set `"model_provider": "copilotautopilot"` in the config. The optional `--max-autopilot-continues` flag maps to the CLI's `--max-autopilot-continues` safety limit.
+
+4. **Evaluation and critique**: Evaluation (completeness checks, precondition assessment, critic reviews) falls back to the HTTP-based GitHub Models API, since those are simple single-turn LLM calls that don't benefit from autopilot's multi-step execution.
+
+### 9.4 When to Use Each Mode
+
+| Use case | Recommended provider |
+|---|---|
+| Simple, atomic code changes | `copilot` (SDK) or `github-models` |
+| Complex multi-step implementation | `copilot-autopilot` |
+| CI/CD headless orchestration (cloud) | Cloud agent (issue assignment) |
+| Fast iteration with local models | `llama` |
+
+### 9.5 Future Integration Opportunities
+
+1. **Fleet mode integration** (`/fleet`): Copilot CLI's `/fleet` command parallelises subtasks via subagents. This maps naturally to wreck-it's multi-ralph architecture — a single ralph could use `/fleet` internally for parallelisable work within a single task.
+
+2. **ACP protocol**: The Agent Client Protocol (`copilot --acp`) provides a structured NDJSON-over-stdio protocol for programmatic control. This could replace the subprocess-based integration with richer session management, streaming updates, and fine-grained permission control.
+
+3. **Custom agent profiles**: Copilot CLI supports custom agents defined in `.github/agents/`. wreck-it's ralph role system (implementer, reviewer, planner, ideas) could map to Copilot custom agent profiles, letting each ralph specialisation use a purpose-built agent.
+
+4. **Session resume**: Copilot CLI supports `--resume` to continue previous sessions. This could integrate with wreck-it's agent memory system for cross-iteration context preservation.
+
+5. **Delegate command**: Copilot CLI's `/delegate` command pushes work to the cloud-based Copilot coding agent. This provides a bridge between wreck-it's local execution and cloud agent orchestration.
