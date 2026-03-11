@@ -40,6 +40,7 @@ mod prompt_loader;
 mod provenance;
 mod ralph_loop;
 mod replanner;
+mod report;
 mod repo_config;
 mod semantic_eval;
 mod state_worktree;

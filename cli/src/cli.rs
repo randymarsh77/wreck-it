@@ -273,6 +273,31 @@ pub enum Commands {
         output: Option<PathBuf>,
     },
 
+    /// Generate a self-contained HTML run-summary report.
+    ///
+    /// The report captures overall run statistics (total / completed / failed /
+    /// pending task counts, estimated cost, token totals), a per-task timeline
+    /// table, the dependency graph rendered as a Mermaid diagram, and a
+    /// collapsible section for failed tasks showing error excerpts (when
+    /// provenance data is available).
+    ///
+    /// Example:
+    ///   wreck-it report --task-file tasks.json --output report.html
+    Report {
+        /// Path to the task file to read (default: tasks.json)
+        #[arg(short, long, default_value = "tasks.json")]
+        task_file: PathBuf,
+
+        /// Working directory containing .wreck-it-provenance/ records
+        /// (used to populate retry counts and error excerpts).
+        #[arg(short, long)]
+        work_dir: Option<PathBuf>,
+
+        /// Path to write the HTML report (default: report.html)
+        #[arg(short, long, default_value = "report.html")]
+        output: PathBuf,
+    },
+
     // ── `wreck-it tasks` sub-command family ────────────────────────────────
     //
     // Design overview
