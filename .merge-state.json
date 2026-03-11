@@ -4,29 +4,16 @@
   "memory": [
     "advance: marked PR #585 (task merge-pr-259) as ready for review",
     "advance: marked PR #587 (task merge-pr-208) as ready for review",
-    "advance: marked PR #588 (task merge-pr-207) as ready for review"
+    "advance: marked PR #588 (task merge-pr-207) as ready for review",
+    "advance: merged PR #585",
+    "advance: merged PR #587",
+    "advance: merged PR #588"
   ],
   "tracked_prs": [
     {
-      "pr_number": 585,
-      "task_id": "merge-pr-259",
-      "issue_number": 583
-    },
-    {
-      "pr_number": 587,
-      "task_id": "merge-pr-208",
-      "issue_number": 584
-    },
-    {
-      "pr_number": 588,
-      "task_id": "merge-pr-207",
-      "issue_number": 586
-    }
-  ],
-  "pending_merge_issues": [
-    {
-      "issue_number": 589,
-      "task_id": "merge-pr-174"
+      "pr_number": 590,
+      "task_id": "merge-pr-174",
+      "issue_number": 589
     }
   ]
 }
