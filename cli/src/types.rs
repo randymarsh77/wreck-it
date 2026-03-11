@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 // Re-export shared types from wreck-it-core so that the rest of the crate
 // can continue to use `crate::types::Task`, etc. without changes.
+#[cfg(test)]
+pub use wreck_it_core::types::TaskEvaluation;
 pub use wreck_it_core::types::{
     AgentRole, ArtefactKind, Task, TaskArtefact, TaskKind, TaskRuntime, TaskStatus,
 };
