@@ -49,6 +49,7 @@ fn status_to_trello_list(status: TaskStatus) -> &'static str {
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct TrelloCard {
     id: String,
     name: String,
@@ -65,11 +66,13 @@ struct TrelloList {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct TrelloComment {
     data: TrelloCommentData,
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct TrelloCommentData {
     text: Option<String>,
 }
@@ -271,18 +274,11 @@ impl KanbanProvider for TrelloProvider {
         })
     }
 
-    async fn get_updates(
-        &self,
-        external_id: &str,
-        _since: Option<u64>,
-    ) -> Result<KanbanUpdates> {
+    async fn get_updates(&self, external_id: &str, _since: Option<u64>) -> Result<KanbanUpdates> {
         let card = self.get_issue(external_id).await?;
 
         // Fetch comments (commentCard actions).
-        let url = format!(
-            "{}/cards/{external_id}/actions",
-            self.api_base
-        );
+        let url = format!("{}/cards/{external_id}/actions", self.api_base);
         let resp = http()
             .get(&url)
             .query(&self.auth_params())
@@ -293,10 +289,7 @@ impl KanbanProvider for TrelloProvider {
 
         let comments = if resp.status().is_success() {
             let actions: Vec<TrelloComment> = resp.json().await.unwrap_or_default();
-            actions
-                .iter()
-                .filter_map(|a| a.data.text.clone())
-                .collect()
+            actions.iter().filter_map(|a| a.data.text.clone()).collect()
         } else {
             Vec::new()
         };
@@ -380,7 +373,10 @@ mod tests {
         first_body: &'static str,
         second_status: &'static str,
         second_body: &'static str,
-    ) -> (String, impl std::future::Future<Output = (Vec<u8>, Vec<u8>)>) {
+    ) -> (
+        String,
+        impl std::future::Future<Output = (Vec<u8>, Vec<u8>)>,
+    ) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let url = format!("http://127.0.0.1:{port}");
@@ -439,13 +435,8 @@ mod tests {
         let lists_body = r#"[{"id":"list1","name":"To Do"},{"id":"list2","name":"In Progress"}]"#;
         let card_body = r#"{"id":"card1","name":"[t1] desc","desc":"desc","url":"https://trello.com/c/card1","idList":"list1"}"#;
 
-        let (url, req_fut) = mock_server_multi(
-            "HTTP/1.1 200 OK",
-            lists_body,
-            "HTTP/1.1 200 OK",
-            card_body,
-        )
-        .await;
+        let (url, req_fut) =
+            mock_server_multi("HTTP/1.1 200 OK", lists_body, "HTTP/1.1 200 OK", card_body).await;
 
         let provider = TrelloProvider::new("key:token", "board1", &url);
         let (result, (raw1, _raw2)) = tokio::join!(provider.create_issue("t1", "desc"), req_fut);
@@ -483,10 +474,7 @@ mod tests {
         let (url, req_fut) = mock_server("HTTP/1.1 401 Unauthorized", resp).await;
 
         let provider = TrelloProvider::new("bad:bad", "board1", &url);
-        let (result, _) = tokio::join!(
-            provider.add_comment("card1", "Hello"),
-            req_fut
-        );
+        let (result, _) = tokio::join!(provider.add_comment("card1", "Hello"), req_fut);
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("401"));
