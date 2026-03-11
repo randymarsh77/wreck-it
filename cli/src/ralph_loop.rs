@@ -1155,8 +1155,8 @@ mod tests {
                 parent_id: None,
                 labels: vec![],
                 system_prompt_override: None,
-            acceptance_criteria: None,
-            evaluation: None,
+                acceptance_criteria: None,
+                evaluation: None,
             },
             Task {
                 id: "old".to_string(),
@@ -1180,8 +1180,8 @@ mod tests {
                 parent_id: None,
                 labels: vec![],
                 system_prompt_override: None,
-            acceptance_criteria: None,
-            evaluation: None,
+                acceptance_criteria: None,
+                evaluation: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -1223,8 +1223,8 @@ mod tests {
                 parent_id: None,
                 labels: vec![],
                 system_prompt_override: None,
-            acceptance_criteria: None,
-            evaluation: None,
+                acceptance_criteria: None,
+                evaluation: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
