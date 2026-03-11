@@ -117,15 +117,14 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         };
         let json = serde_json::to_string(&task).unwrap();
         let loaded: Task = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.id, "1");
         assert_eq!(loaded.status, TaskStatus::Pending);
-    }
-
-    #[test]
-    fn headless_state_default() {
         let state = HeadlessState::default();
         assert_eq!(state.phase, AgentPhase::NeedsTrigger);
         assert_eq!(state.iteration, 0);
