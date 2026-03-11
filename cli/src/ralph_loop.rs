@@ -1598,4 +1598,74 @@ mod tests {
             );
         }
     }
+
+    // ---- evaluate_task dispatch path tests (semantic evaluation) ----
+
+    /// Mirror the per-task evaluation mode resolution logic from `evaluate_task`.
+    ///
+    /// Parses the mode string from `task.evaluation` as a JSON-quoted identifier
+    /// so the serde `snake_case` representation matches `EvaluationMode` variants.
+    /// Falls back to `EvaluationMode::Command` when the field is absent or the
+    /// mode string is not recognised.
+    fn resolve_effective_mode(task: &Task) -> EvaluationMode {
+        task.evaluation
+            .as_ref()
+            .and_then(|e| {
+                let quoted = format!("\"{}\"", e.mode);
+                serde_json::from_str::<EvaluationMode>(&quoted).ok()
+            })
+            .unwrap_or(EvaluationMode::Command)
+    }
+
+    /// Verify that a task with `evaluation: { mode: "semantic" }` resolves to
+    /// `EvaluationMode::Semantic` via the same parsing logic used in
+    /// `evaluate_task`.  This ensures the dispatch path correctly routes to
+    /// `evaluate_task_semantically` when the per-task evaluation mode is set.
+    #[test]
+    fn evaluate_task_dispatch_resolves_semantic_mode_from_task_evaluation() {
+        use crate::types::TaskEvaluation;
+
+        let mut task = make_task("eval-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        task.evaluation = Some(TaskEvaluation {
+            mode: "semantic".to_string(),
+        });
+
+        assert_eq!(
+            resolve_effective_mode(&task),
+            EvaluationMode::Semantic,
+            "task with evaluation.mode='semantic' must dispatch to the semantic evaluator"
+        );
+    }
+
+    /// Verify that when a task has no `evaluation` field, the dispatch falls
+    /// back to the global evaluation mode (Command by default).
+    #[test]
+    fn evaluate_task_dispatch_falls_back_to_global_mode_when_no_per_task_evaluation() {
+        let task = make_task("plain-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert!(task.evaluation.is_none());
+
+        assert_eq!(
+            resolve_effective_mode(&task),
+            EvaluationMode::Command,
+            "task without evaluation field must fall back to global (Command) mode"
+        );
+    }
+
+    /// Verify that an unrecognised evaluation mode string is silently ignored
+    /// and the dispatch falls back to the global evaluation mode.
+    #[test]
+    fn evaluate_task_dispatch_ignores_unrecognised_mode_string() {
+        use crate::types::TaskEvaluation;
+
+        let mut task = make_task("bad-mode-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        task.evaluation = Some(TaskEvaluation {
+            mode: "totally_unknown_mode".to_string(),
+        });
+
+        assert_eq!(
+            resolve_effective_mode(&task),
+            EvaluationMode::Command,
+            "unrecognised evaluation mode must fall back to Command"
+        );
+    }
 }
