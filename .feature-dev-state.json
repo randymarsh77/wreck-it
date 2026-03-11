@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 42,
   "current_task_id": "impl-error-classification",
   "issue_number": 258,
+  "pr_number": 259,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/259",
   "last_prompt": "Implement the error classification and smart recovery system designed in `ideas-error-classification`. Create `cli/src/error_classifier.rs` with: (1) an `ErrorCategory` enum (`Transient`, `Permanent`, `NeedsReplan`, `ContextOverflow`); (2) a `classify_error(output: &str, exit_code: Option<i32>, http_status: Option<u16>) -> ErrorCategory` function using pattern matching on keywords (\"rate limit\", \"429\", \"timeout\" → Transient; \"error[E\", \"FAILED\" → Permanent; \"context length\", \"max_tokens\" → ContextOverflow; otherwise NeedsReplan); (3) a `RecoveryAction` enum with backoff delay for Transient, critic injection for Permanent, immediate replan for NeedsReplan, and task-split hint for ContextOverflow. Wire `classify_error` into the failure handling path in `cli/src/headless.rs` so that Transient errors trigger a configurable backoff (default 30s) before retry, and NeedsReplan errors bypass the `replan_threshold` counter to immediately invoke the re-planner.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -269,6 +271,17 @@
     "iteration 41: agent created PR #257 for task Some(\"ideas-error-classification\")",
     "iteration 41: marked PR #257 as ready for review",
     "iteration 41: merged PR #257 for task Some(\"ideas-error-classification\") (brute mode)",
-    "iteration 42: triggered cloud agent for task impl-error-classification (issue #258)"
+    "iteration 42: triggered cloud agent for task impl-error-classification (issue #258)",
+    "iteration 42: agent created PR #259 for task Some(\"impl-error-classification\")",
+    "iteration 42: marked PR #259 as ready for review",
+    "iteration 42: PR #259 not yet mergeable",
+    "iteration 42: PR #259 not yet mergeable"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 259,
+      "task_id": "impl-error-classification",
+      "issue_number": 258
+    }
   ]
 }
