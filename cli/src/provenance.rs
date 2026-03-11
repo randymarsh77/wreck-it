@@ -332,7 +332,7 @@ mod tests {
         std::fs::write(secondary_dir.path().join("feature.rs"), "fn foo() {}\n").unwrap();
 
         let default_hash = git_diff_hash(default_dir.path());
-        let secondary_hash = git_diff_hash(secondary_dir.path());
+        let _secondary_hash = git_diff_hash(secondary_dir.path());
 
         // The secondary repo now has an untracked file; git diff HEAD does not
         // capture untracked files, so the diff is still empty.  Commit the file

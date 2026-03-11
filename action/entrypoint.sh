@@ -13,16 +13,21 @@ if [ -n "${INPUT_COPILOT_TOKEN}" ]; then
   echo "[wreck-it] Copilot token configured"
 fi
 
-echo "[wreck-it] running headless iteration in $(pwd)"
+if [ "${INPUT_COMMAND}" = "unstuck" ]; then
+  echo "[wreck-it] running unstuck command in $(pwd)"
+  wreck-it unstuck --work-dir "."
+else
+  echo "[wreck-it] running headless iteration in $(pwd)"
 
-# wreck-it automatically creates a worktree at .wreck-it/state for the state
-# branch.  All config, task, and state file I/O happens there; agent work
-# uses this (the default branch) checkout.
-wreck-it run --headless \
-  --work-dir "." \
-  ${INPUT_MODEL_PROVIDER:+--model-provider "$INPUT_MODEL_PROVIDER"} \
-  ${INPUT_MAX_ITERATIONS:+--max-iterations "$INPUT_MAX_ITERATIONS"} \
-  ${INPUT_VERIFY_COMMAND:+--verify-command "$INPUT_VERIFY_COMMAND"}
+  # wreck-it automatically creates a worktree at .wreck-it/state for the state
+  # branch.  All config, task, and state file I/O happens there; agent work
+  # uses this (the default branch) checkout.
+  wreck-it run --headless \
+    --work-dir "." \
+    ${INPUT_MODEL_PROVIDER:+--model-provider "$INPUT_MODEL_PROVIDER"} \
+    ${INPUT_MAX_ITERATIONS:+--max-iterations "$INPUT_MAX_ITERATIONS"} \
+    ${INPUT_VERIFY_COMMAND:+--verify-command "$INPUT_VERIFY_COMMAND"}
+fi
 
 STATE_BRANCH="${INPUT_STATE_BRANCH:-wreck-it-state}"
 
