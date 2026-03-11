@@ -281,10 +281,7 @@ name = "ci-check"
 validation_command = "cargo test --lib"
 "#;
         let cfg: RalphConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(
-            cfg.validation_command.as_deref(),
-            Some("cargo test --lib"),
-        );
+        assert_eq!(cfg.validation_command.as_deref(), Some("cargo test --lib"),);
         let serialized = toml::to_string_pretty(&cfg).unwrap();
         assert!(
             serialized.contains("validation_command"),
