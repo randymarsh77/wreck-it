@@ -42,6 +42,7 @@ fn status_to_jira_transition(status: TaskStatus) -> &'static str {
 // ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct JiraIssueResponse {
     id: String,
     key: String,
@@ -51,6 +52,7 @@ struct JiraIssueResponse {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct JiraFields {
     summary: Option<String>,
     description: Option<serde_json::Value>,
@@ -68,11 +70,13 @@ struct JiraTransitionsResponse {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct JiraComment {
     body: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct JiraCommentsResponse {
     comments: Vec<JiraComment>,
 }
@@ -132,12 +136,14 @@ impl JiraProvider {
     ///
     /// ADF is a complex JSON structure; for simplicity we extract all `"text"`
     /// nodes recursively and join them.
+    #[allow(dead_code)]
     fn adf_to_text(adf: &serde_json::Value) -> String {
         let mut parts = Vec::new();
         Self::extract_text_nodes(adf, &mut parts);
         parts.join("\n")
     }
 
+    #[allow(dead_code)]
     fn extract_text_nodes(node: &serde_json::Value, out: &mut Vec<String>) {
         if let Some(text) = node["text"].as_str() {
             out.push(text.to_string());
@@ -172,9 +178,8 @@ impl KanbanProvider for JiraProvider {
 
     async fn create_issue(&self, task_id: &str, description: &str) -> Result<KanbanIssue> {
         let summary = format!("[{task_id}] {description}");
-        let body_text = format!(
-            "Automatically created by wreck-it to track task {task_id}.\n\n{description}"
-        );
+        let body_text =
+            format!("Automatically created by wreck-it to track task {task_id}.\n\n{description}");
 
         let payload = serde_json::json!({
             "fields": {
@@ -355,11 +360,7 @@ impl KanbanProvider for JiraProvider {
         })
     }
 
-    async fn get_updates(
-        &self,
-        external_id: &str,
-        _since: Option<u64>,
-    ) -> Result<KanbanUpdates> {
+    async fn get_updates(&self, external_id: &str, _since: Option<u64>) -> Result<KanbanUpdates> {
         // Fetch issue + comments.
         let issue = self.get_issue(external_id).await?;
 
