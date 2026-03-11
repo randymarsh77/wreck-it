@@ -1933,6 +1933,11 @@ impl CloudAgentClient {
             .context("Failed to resolve ref to SHA")?;
 
         if !ref_resp.status().is_success() {
+            tracing::warn!(
+                "Failed to resolve ref '{}' ({})",
+                git_ref,
+                ref_resp.status(),
+            );
             return Ok(false);
         }
 
@@ -1955,6 +1960,11 @@ impl CloudAgentClient {
             .context("Failed to list check runs for ref")?;
 
         if !resp.status().is_success() {
+            tracing::warn!(
+                "Failed to list check runs for ref '{}' ({})",
+                git_ref,
+                resp.status(),
+            );
             return Ok(false);
         }
 
@@ -1992,6 +2002,10 @@ impl CloudAgentClient {
             .context("Failed to search issues")?;
 
         if !resp.status().is_success() {
+            tracing::warn!(
+                "Issue search request failed ({})",
+                resp.status(),
+            );
             return Ok(None);
         }
 

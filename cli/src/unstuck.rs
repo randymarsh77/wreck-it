@@ -104,6 +104,9 @@ pub async fn run_unstuck(config: &Config) -> Result<()> {
     );
 
     // ── Check the main / default branch ─────────────────────────────
+    // Errors are logged inside check_main_branch; we intentionally avoid
+    // propagating them so that a transient API failure doesn't prevent the
+    // overall unstuck command from succeeding.
     check_main_branch(&client, work_dir).await;
 
     Ok(())
