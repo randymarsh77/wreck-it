@@ -72,9 +72,9 @@ impl TaskPlanner {
 
     async fn call_llm(&self, prompt: &str, model_override: Option<&str>) -> Result<String> {
         match self.model_provider {
-            ModelProvider::GithubModels | ModelProvider::Llama => {
-                self.call_via_http(prompt, model_override).await
-            }
+            ModelProvider::GithubModels
+            | ModelProvider::Llama
+            | ModelProvider::CopilotAutopilot => self.call_via_http(prompt, model_override).await,
             ModelProvider::Copilot => self.call_via_copilot_sdk(prompt).await,
         }
     }
@@ -290,6 +290,9 @@ pub fn parse_and_validate_plan(raw: &str) -> Result<Vec<Task>> {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
+                acceptance_criteria: None,
+                evaluation: None,
             })
         })
         .collect::<Result<Vec<Task>>>()?;
