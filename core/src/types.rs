@@ -35,6 +35,26 @@ pub struct TaskArtefact {
     pub path: String,
 }
 
+/// Per-task evaluation configuration.
+///
+/// Controls how the task-completion evaluator decides whether an agent's
+/// implementation is acceptable.  When absent the global `evaluation_mode`
+/// from the headless config is used.
+///
+/// # Task JSON example
+/// ```json
+/// { "evaluation": { "mode": "semantic" } }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskEvaluation {
+    /// Evaluation mode name.  Valid values mirror [`EvaluationMode`] variants
+    /// serialised with `snake_case`: `"command"`, `"agent_file"`, `"semantic"`.
+    ///
+    /// An unrecognised value is silently ignored and the global evaluation mode
+    /// from the headless config is used as a fallback.
+    pub mode: String,
+}
+
 // ---------------------------------------------------------------------------
 // Task enums
 // ---------------------------------------------------------------------------
@@ -88,6 +108,7 @@ pub enum AgentRole {
 
 /// Status of an individual task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "lowercase")]
 pub enum TaskStatus {
     Pending,
@@ -205,6 +226,33 @@ pub struct Task {
     /// Free-form labels for categorization (e.g. board columns, tags).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
+
+    /// Optional system prompt override for this specific task.
+    ///
+    /// When set, the `prompt_loader` module uses this string verbatim as the
+    /// system prompt for the agent invocation, bypassing both the global
+    /// role-based template and any file found in `prompt_dir`.
+    ///
+    /// Supports variable interpolation with `{{task_id}}`, `{{repo}}`, and
+    /// `{{role}}` placeholders (see `prompt_loader::interpolate`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_prompt_override: Option<String>,
+
+    /// Optional acceptance criteria for the task.
+    ///
+    /// When present, the semantic evaluator includes these criteria in the
+    /// evaluation prompt so the LLM can judge the diff against specific
+    /// requirements rather than relying solely on the task description.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_criteria: Option<String>,
+
+    /// Per-task evaluation configuration.
+    ///
+    /// Overrides the global `evaluation_mode` from the headless config for
+    /// this specific task.  Use `{ "mode": "semantic" }` to enable semantic
+    /// evaluation even when the global mode is `command`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluation: Option<TaskEvaluation>,
 }
 
 fn is_default_role(r: &AgentRole) -> bool {
@@ -523,6 +571,9 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         }
     }
 
@@ -576,5 +627,81 @@ mod tests {
         let t: Task = serde_json::from_str(json).unwrap();
         assert!(t.timeout_seconds.is_none());
         assert!(t.max_retries.is_none());
+    }
+
+    // ---- Task: acceptance_criteria / evaluation ----
+
+    #[test]
+    fn task_acceptance_criteria_defaults_to_none() {
+        let t = make_minimal_task("t1");
+        assert!(t.acceptance_criteria.is_none());
+    }
+
+    #[test]
+    fn task_acceptance_criteria_roundtrip_via_serde() {
+        let mut t = make_minimal_task("t1");
+        t.acceptance_criteria = Some("All tests must pass".to_string());
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(json.contains("\"acceptance_criteria\":\"All tests must pass\""));
+        let back: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            back.acceptance_criteria.as_deref(),
+            Some("All tests must pass")
+        );
+    }
+
+    #[test]
+    fn task_acceptance_criteria_omitted_when_none() {
+        let t = make_minimal_task("t1");
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(
+            !json.contains("acceptance_criteria"),
+            "key should be absent: {json}"
+        );
+    }
+
+    #[test]
+    fn task_evaluation_defaults_to_none() {
+        let t = make_minimal_task("t1");
+        assert!(t.evaluation.is_none());
+    }
+
+    #[test]
+    fn task_evaluation_roundtrip_via_serde() {
+        let mut t = make_minimal_task("t1");
+        t.evaluation = Some(TaskEvaluation {
+            mode: "semantic".to_string(),
+        });
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(json.contains("\"evaluation\":{\"mode\":\"semantic\"}"));
+        let back: Task = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.evaluation.unwrap().mode, "semantic");
+    }
+
+    #[test]
+    fn task_evaluation_omitted_when_none() {
+        let t = make_minimal_task("t1");
+        let json = serde_json::to_string(&t).unwrap();
+        assert!(
+            !json.contains("\"evaluation\""),
+            "key should be absent: {json}"
+        );
+    }
+
+    #[test]
+    fn task_evaluation_deserialises_from_json_task_file() {
+        let json = r#"{
+            "id": "my-task",
+            "description": "Do the thing",
+            "status": "pending",
+            "evaluation": { "mode": "semantic" },
+            "acceptance_criteria": "The diff must include a test file"
+        }"#;
+        let t: Task = serde_json::from_str(json).unwrap();
+        assert_eq!(t.evaluation.unwrap().mode, "semantic");
+        assert_eq!(
+            t.acceptance_criteria.as_deref(),
+            Some("The diff must include a test file")
+        );
     }
 }
