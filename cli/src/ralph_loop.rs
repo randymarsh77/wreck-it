@@ -8,7 +8,7 @@ use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{
-    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus,
+    Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus, DEFAULT_AUTOPILOT_MODEL,
     DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
@@ -25,6 +25,7 @@ fn model_name(provider: &ModelProvider) -> String {
         ModelProvider::Copilot => "copilot".to_string(),
         ModelProvider::Llama => DEFAULT_LLAMA_MODEL.to_string(),
         ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL.to_string(),
+        ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL.to_string(),
     }
 }
 
@@ -136,11 +137,12 @@ impl RalphLoop {
             ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL,
             ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
             ModelProvider::Copilot => "copilot",
+            ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL,
         };
         let (inp, out) = model_pricing(model_str);
         let cost_tracker = Arc::new(Mutex::new(CostTracker::new(inp, out)));
 
-        let agent = AgentClient::with_evaluation(
+        let agent = AgentClient::with_evaluation_and_autopilot(
             config.model_provider.clone(),
             config.api_endpoint.clone(),
             config.api_token.clone(),
@@ -149,6 +151,11 @@ impl RalphLoop {
             config.evaluation_mode,
             config.completeness_prompt.clone(),
             config.completion_marker_file.to_string_lossy().to_string(),
+            config.max_autopilot_continues,
+        )
+        .with_prompt_dir(
+            config.prompt_dir.clone(),
+            config.github_repo.clone().unwrap_or_default(),
         )
         .with_cost_tracker(Arc::clone(&cost_tracker));
 
@@ -665,10 +672,41 @@ impl RalphLoop {
     }
 
     /// Evaluate a task using the configured evaluation mode.
+    ///
+    /// The evaluation mode is resolved in the following priority order:
+    /// 1. Per-task `evaluation.mode` from the task JSON.
+    /// 2. Global evaluation mode from the agent configuration.
     async fn evaluate_task(&mut self, task_idx: usize) -> Result<bool> {
-        if self.agent.evaluation_mode() == EvaluationMode::AgentFile {
-            let task = self.state.tasks[task_idx].clone();
+        let task = self.state.tasks[task_idx].clone();
+
+        // Resolve the effective evaluation mode (per-task overrides global).
+        let effective_mode = task
+            .evaluation
+            .as_ref()
+            .and_then(|e| {
+                // Parse the mode string as a JSON-quoted string so the serde
+                // snake_case representation ("command", "agent_file", "semantic")
+                // matches the EvaluationMode enum's serde serialization format.
+                let quoted = format!("\"{}\"", e.mode);
+                serde_json::from_str::<EvaluationMode>(&quoted).ok()
+            })
+            .unwrap_or_else(|| self.agent.evaluation_mode());
+
+        if effective_mode == EvaluationMode::AgentFile {
             return self.agent.evaluate_completeness(&task).await;
+        }
+        if effective_mode == EvaluationMode::Semantic {
+            let verdict = self.agent.evaluate_task_semantically(&task).await?;
+            // Persist the score for the TUI task detail view.
+            self.state
+                .semantic_scores
+                .insert(task.id.clone(), verdict.score);
+            // Surface the rationale in the loop log so it appears in the TUI.
+            self.state.add_log(format!(
+                "Semantic verdict for [{}]: passed={}, score={}, rationale={}",
+                task.id, verdict.passed, verdict.score, verdict.rationale
+            ));
+            return Ok(verdict.passed);
         }
         self.agent.run_tests()
     }
@@ -798,7 +836,7 @@ impl RalphLoop {
         for (idx, task, ts) in task_data {
             // Resolve per-task working directory for multi-repo orchestration.
             let task_work_dir = self.resolve_work_dir(&task);
-            let agent = AgentClient::with_evaluation(
+            let mut agent = AgentClient::with_evaluation_and_autopilot(
                 self.config.model_provider.clone(),
                 self.config.api_endpoint.clone(),
                 self.config.api_token.clone(),
@@ -810,10 +848,10 @@ impl RalphLoop {
                     .completion_marker_file
                     .to_string_lossy()
                     .to_string(),
+                self.config.max_autopilot_continues,
             )
             .with_work_dir(task_work_dir.to_string_lossy().to_string())
             .with_cost_tracker(Arc::clone(&self.cost_tracker));
-            let mut agent = agent;
             let handle = tokio::spawn(async move {
                 // Wrap execution in a per-task timeout when `timeout_seconds` is set.
                 let result = if let Some(timeout_secs) = task.timeout_seconds {
@@ -1095,6 +1133,9 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         }
     }
 
@@ -1209,6 +1250,9 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
+                acceptance_criteria: None,
+                evaluation: None,
             },
             Task {
                 id: "old".to_string(),
@@ -1231,6 +1275,9 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
+                acceptance_criteria: None,
+                evaluation: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -1271,6 +1318,9 @@ mod tests {
                 precondition_prompt: None,
                 parent_id: None,
                 labels: vec![],
+                system_prompt_override: None,
+                acceptance_criteria: None,
+                evaluation: None,
             },
         ];
         let ready = TaskScheduler::schedule(&tasks);
@@ -1643,5 +1693,75 @@ mod tests {
                 id
             );
         }
+    }
+
+    // ---- evaluate_task dispatch path tests (semantic evaluation) ----
+
+    /// Mirror the per-task evaluation mode resolution logic from `evaluate_task`.
+    ///
+    /// Parses the mode string from `task.evaluation` as a JSON-quoted identifier
+    /// so the serde `snake_case` representation matches `EvaluationMode` variants.
+    /// Falls back to `EvaluationMode::Command` when the field is absent or the
+    /// mode string is not recognised.
+    fn resolve_effective_mode(task: &Task) -> EvaluationMode {
+        task.evaluation
+            .as_ref()
+            .and_then(|e| {
+                let quoted = format!("\"{}\"", e.mode);
+                serde_json::from_str::<EvaluationMode>(&quoted).ok()
+            })
+            .unwrap_or(EvaluationMode::Command)
+    }
+
+    /// Verify that a task with `evaluation: { mode: "semantic" }` resolves to
+    /// `EvaluationMode::Semantic` via the same parsing logic used in
+    /// `evaluate_task`.  This ensures the dispatch path correctly routes to
+    /// `evaluate_task_semantically` when the per-task evaluation mode is set.
+    #[test]
+    fn evaluate_task_dispatch_resolves_semantic_mode_from_task_evaluation() {
+        use crate::types::TaskEvaluation;
+
+        let mut task = make_task("eval-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        task.evaluation = Some(TaskEvaluation {
+            mode: "semantic".to_string(),
+        });
+
+        assert_eq!(
+            resolve_effective_mode(&task),
+            EvaluationMode::Semantic,
+            "task with evaluation.mode='semantic' must dispatch to the semantic evaluator"
+        );
+    }
+
+    /// Verify that when a task has no `evaluation` field, the dispatch falls
+    /// back to the global evaluation mode (Command by default).
+    #[test]
+    fn evaluate_task_dispatch_falls_back_to_global_mode_when_no_per_task_evaluation() {
+        let task = make_task("plain-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        assert!(task.evaluation.is_none());
+
+        assert_eq!(
+            resolve_effective_mode(&task),
+            EvaluationMode::Command,
+            "task without evaluation field must fall back to global (Command) mode"
+        );
+    }
+
+    /// Verify that an unrecognised evaluation mode string is silently ignored
+    /// and the dispatch falls back to the global evaluation mode.
+    #[test]
+    fn evaluate_task_dispatch_ignores_unrecognised_mode_string() {
+        use crate::types::TaskEvaluation;
+
+        let mut task = make_task("bad-mode-task", TaskStatus::Pending, 0, 1, 0, vec![]);
+        task.evaluation = Some(TaskEvaluation {
+            mode: "totally_unknown_mode".to_string(),
+        });
+
+        assert_eq!(
+            resolve_effective_mode(&task),
+            EvaluationMode::Command,
+            "unrecognised evaluation mode must fall back to Command"
+        );
     }
 }
