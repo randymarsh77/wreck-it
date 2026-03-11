@@ -16,6 +16,7 @@
 
 mod agent;
 mod agent_memory;
+mod error_classifier;
 mod artefact_store;
 mod cli;
 mod cloud_agent;
