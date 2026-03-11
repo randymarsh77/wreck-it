@@ -944,9 +944,7 @@ async fn main() -> Result<()> {
             .with_context(|| {
                 format!("Failed to build report data from '{}'", task_file.display())
             })?;
-            let html = report::generate_html(&data);
-            std::fs::write(&output, &html)
-                .with_context(|| format!("Failed to write report to '{}'", output.display()))?;
+            report::write_report(&output, &data)?;
             println!("Report written to {}", output.display());
         }
 
