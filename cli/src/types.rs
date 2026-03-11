@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 // Re-export shared types from wreck-it-core so that the rest of the crate
 // can continue to use `crate::types::Task`, etc. without changes.
+#[cfg(test)]
+pub use wreck_it_core::types::TaskEvaluation;
 pub use wreck_it_core::types::{
     AgentRole, ArtefactKind, Task, TaskArtefact, TaskKind, TaskRuntime, TaskStatus,
 };
@@ -48,6 +50,10 @@ pub enum EvaluationMode {
     Command,
     /// Ask an agent to evaluate completeness; it writes a marker file if done.
     AgentFile,
+    /// Ask an agent to read the task description alongside the git diff and
+    /// return a structured JSON verdict `{ passed: bool, score: u8,
+    /// rationale: String }`.  The verdict is surfaced in TUI and logs.
+    Semantic,
 }
 
 /// Result of a critic evaluation of a git diff against a task description.
@@ -182,6 +188,18 @@ pub struct Config {
     /// appropriate repo.  See `docs/multi-repo.md` for the full design.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub work_dirs: HashMap<String, String>,
+
+    /// Optional path to a directory containing per-role system prompt template
+    /// files and per-task overrides.  When set, the `prompt_loader` module
+    /// resolves and injects custom prompts before each agent invocation,
+    /// falling back to built-in defaults when no matching file is found.
+    ///
+    /// When `None`, downstream code uses `.wreck-it/prompts` as the conventional
+    /// default directory (i.e. no automatic directory creation occurs; it only
+    /// takes effect if the directory is present and the value is explicitly set).
+    /// The value may be overridden at runtime via the `--prompt-dir` CLI flag.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_dir: Option<String>,
 }
 
 fn default_max_iterations() -> usize {
@@ -240,6 +258,7 @@ impl Default for Config {
             github_repo: None,
             max_cost_usd: None,
             work_dirs: HashMap::new(),
+            prompt_dir: None,
         }
     }
 }
@@ -255,6 +274,14 @@ pub struct LoopState {
     pub logs: Vec<String>,
     /// Number of consecutive task failures since the last success or re-plan.
     pub consecutive_failures: u32,
+    /// Semantic evaluation scores keyed by task id (0–100).  Populated when
+    /// `EvaluationMode::Semantic` is used; absent for other evaluation modes.
+    ///
+    /// The range 0–100 mirrors the `score` field in [`SemanticVerdict`]; the
+    /// LLM is instructed to return values in this range.  The `u8` storage
+    /// type accepts up to 255, so values slightly above 100 are possible if
+    /// the model ignores the instruction.
+    pub semantic_scores: HashMap<String, u8>,
 }
 
 impl LoopState {
@@ -267,6 +294,7 @@ impl LoopState {
             running: false,
             logs: Vec::new(),
             consecutive_failures: 0,
+            semantic_scores: HashMap::new(),
         }
     }
 
@@ -355,6 +383,9 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         }
     }
 
@@ -903,12 +934,22 @@ mod tests {
     #[test]
     fn config_work_dirs_roundtrip() {
         let mut config = Config::default();
-        config.work_dirs.insert("frontend".to_string(), "/repos/frontend".to_string());
-        config.work_dirs.insert("backend".to_string(), "/repos/backend".to_string());
+        config
+            .work_dirs
+            .insert("frontend".to_string(), "/repos/frontend".to_string());
+        config
+            .work_dirs
+            .insert("backend".to_string(), "/repos/backend".to_string());
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
-        assert_eq!(loaded.work_dirs.get("frontend").map(String::as_str), Some("/repos/frontend"));
-        assert_eq!(loaded.work_dirs.get("backend").map(String::as_str), Some("/repos/backend"));
+        assert_eq!(
+            loaded.work_dirs.get("frontend").map(String::as_str),
+            Some("/repos/frontend")
+        );
+        assert_eq!(
+            loaded.work_dirs.get("backend").map(String::as_str),
+            Some("/repos/backend")
+        );
     }
 
     #[test]
@@ -916,5 +957,18 @@ mod tests {
         let json = r#"{"max_iterations":5}"#;
         let config: Config = serde_json::from_str(json).unwrap();
         assert!(config.work_dirs.is_empty());
+    }
+
+    #[test]
+    fn loop_state_semantic_scores_defaults_to_empty() {
+        let state = LoopState::new(10);
+        assert!(state.semantic_scores.is_empty());
+    }
+
+    #[test]
+    fn loop_state_semantic_scores_stores_and_retrieves_score() {
+        let mut state = LoopState::new(10);
+        state.semantic_scores.insert("my-task".to_string(), 85);
+        assert_eq!(state.semantic_scores.get("my-task").copied(), Some(85));
     }
 }
