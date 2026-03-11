@@ -429,19 +429,10 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
-                        validation_command: None,
                         prompt_dir: None,
                         validation_command: None,
                         transient_backoff_secs: None,
                     });
-                    println!("Added ralph '{}' to config", ralph_name);
-                }
-                save_repo_config(&work_dir, &repo_cfg)?;
-
-                println!(
-                    "Cloud agent will generate the plan and write it to .wreck-it/plans/{}",
-                    plan_filename,
-                );
                 println!(
                     "Run `wreck-it run --headless --ralph {}` to migrate and execute the plan.",
                     ralph_name,
@@ -531,7 +522,6 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
-                        validation_command: None,
                         prompt_dir: None,
                         validation_command: None,
                         transient_backoff_secs: None,
