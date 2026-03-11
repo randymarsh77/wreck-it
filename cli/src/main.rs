@@ -25,6 +25,7 @@ mod prompt_loader;
 mod provenance;
 mod ralph_loop;
 mod replanner;
+mod report;
 mod repo_config;
 mod semantic_eval;
 mod state_worktree;
@@ -928,6 +929,25 @@ async fn main() -> Result<()> {
                 }
                 None => print!("{content}"),
             }
+        }
+
+        Commands::Report {
+            task_file,
+            work_dir,
+            output,
+        } => {
+            let resolved_work_dir = work_dir;
+            let data = report::collect_report_data(
+                &task_file,
+                resolved_work_dir.as_deref(),
+            )
+            .with_context(|| {
+                format!("Failed to build report data from '{}'", task_file.display())
+            })?;
+            let html = report::generate_html(&data);
+            std::fs::write(&output, &html)
+                .with_context(|| format!("Failed to write report to '{}'", output.display()))?;
+            println!("Report written to {}", output.display());
         }
 
         Commands::Tasks { action } => match action {
