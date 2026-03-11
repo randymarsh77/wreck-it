@@ -425,7 +425,7 @@
   {
     "id": "impl-html-report",
     "description": "Implement the HTML report generator designed in `ideas-html-report`. Create `cli/src/report.rs` with: (1) a `ReportData` struct that aggregates task statuses from the task manager, cost/token data from `CostTracker`, and provenance events from openclaw if available; (2) a `generate_html(data: &ReportData) -> String` function that produces a self-contained HTML file using inline CSS and optional Mermaid JS (loaded from CDN) for the dependency graph section; (3) a `write_report(path: &Path, data: &ReportData)` helper that serialises the HTML to disk. Add a `report` sub-command to `cli/src/cli.rs` with `--output <PATH>` (default `wreck-it-report.html`) and `--task-file <PATH>` flags. Wire the sub-command in `cli/src/main.rs`. The HTML output must be self-contained (inline styles, no external dependencies except optional Mermaid CDN) and render correctly in modern browsers.",
-    "status": "inprogress",
+    "status": "pending",
     "phase": 2,
     "depends_on": [
       "ideas-html-report"
