@@ -189,8 +189,8 @@ mod tests {
                     backend: None,
 
                     prompt_dir: None,
-                validation_command: None,
-                transient_backoff_secs: None,
+                    validation_command: None,
+                    transient_backoff_secs: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -204,8 +204,8 @@ mod tests {
                     backend: None,
 
                     prompt_dir: None,
-                validation_command: None,
-                transient_backoff_secs: None,
+                    validation_command: None,
+                    transient_backoff_secs: None,
                 },
             ],
         };
@@ -256,8 +256,8 @@ name = "docs"
                     backend: None,
 
                     prompt_dir: None,
-                validation_command: None,
-                transient_backoff_secs: None,
+                    validation_command: None,
+                    transient_backoff_secs: None,
                 },
                 RalphConfig {
                     name: "coverage".to_string(),
@@ -271,8 +271,8 @@ name = "docs"
                     backend: None,
 
                     prompt_dir: None,
-                validation_command: None,
-                transient_backoff_secs: None,
+                    validation_command: None,
+                    transient_backoff_secs: None,
                 },
             ],
             ..RepoConfig::default()
