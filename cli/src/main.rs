@@ -9,7 +9,6 @@ mod gastown_client;
 mod github_auth;
 mod github_client;
 mod graph;
-mod kanban;
 mod headless;
 mod headless_config;
 mod headless_state;
