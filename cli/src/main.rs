@@ -4,6 +4,7 @@ mod artefact_store;
 mod cli;
 mod cloud_agent;
 mod config_manager;
+mod cost_tracker;
 mod gastown_client;
 mod github_auth;
 mod github_client;
@@ -14,16 +15,21 @@ mod headless_state;
 mod install;
 #[cfg(test)]
 mod integration_eval;
+mod merge;
 mod notifier;
 mod openclaw;
 mod plan_migration;
 mod plan_wizard;
 mod planner;
+mod prompt_loader;
 mod provenance;
 mod ralph_loop;
 mod replanner;
 mod repo_config;
+mod report;
+mod semantic_eval;
 mod state_worktree;
+mod task_cli;
 mod task_manager;
 mod templates;
 mod tui;
@@ -32,7 +38,7 @@ mod unstuck;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands};
+use cli::{Cli, Commands, TasksAction};
 use config_manager::{load_user_config, save_user_config};
 use ralph_loop::RalphLoop;
 use repo_config::{
@@ -75,10 +81,14 @@ async fn main() -> Result<()> {
             goal,
             reflection_rounds,
             replan_threshold,
+            max_autopilot_continues,
             notify_webhooks,
             github_issues,
             github_repo,
             github_token,
+            max_cost_usd,
+            work_dir_map,
+            prompt_dir,
         } => {
             // Determine work directory early so we can look for the repo config.
             let resolved_work_dir = work_dir
@@ -177,6 +187,9 @@ async fn main() -> Result<()> {
                 if let Some(replan_threshold) = replan_threshold {
                     config.replan_threshold = replan_threshold;
                 }
+                if let Some(max_autopilot_continues) = max_autopilot_continues {
+                    config.max_autopilot_continues = Some(max_autopilot_continues);
+                }
                 if config.model_provider == ModelProvider::Llama
                     && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
                 {
@@ -205,6 +218,31 @@ async fn main() -> Result<()> {
                 }
                 if let Some(token) = &github_token {
                     config.github_token = Some(token.clone());
+                }
+                if let Some(cost) = max_cost_usd {
+                    config.max_cost_usd = Some(cost);
+                }
+
+                // Parse `KEY=PATH` pairs from --work-dir-map into the config map.
+                for entry in &work_dir_map {
+                    if let Some((key, path)) = entry.split_once('=') {
+                        config.work_dirs.insert(key.to_string(), path.to_string());
+                    } else {
+                        eprintln!(
+                            "Warning: ignoring malformed --work-dir-map entry '{}' \
+                             (expected ROLE_OR_ID=PATH)",
+                            entry
+                        );
+                    }
+                }
+
+                // CLI --prompt-dir overrides config and ralph-level prompt_dir.
+                if let Some(ref pd) = prompt_dir {
+                    config.prompt_dir = Some(pd.clone());
+                } else if let Some(rc) = ralph_override {
+                    if let Some(ref pd) = rc.prompt_dir {
+                        config.prompt_dir = Some(pd.clone());
+                    }
                 }
 
                 config
@@ -254,6 +292,15 @@ async fn main() -> Result<()> {
                         if let Err(e) = unstuck::run_unstuck(&config).await {
                             println!(
                                 "[wreck-it] ralph '{}' (unstuck) failed: {}. Continuing…",
+                                rc.name, e
+                            );
+                        }
+                    } else if rc.command.as_deref() == Some("merge") {
+                        if let Err(e) =
+                            merge::run_merge(&config, rc.backend.as_deref(), Some(rc)).await
+                        {
+                            println!(
+                                "[wreck-it] ralph '{}' (merge) failed: {}. Continuing…",
                                 rc.name, e
                             );
                         }
@@ -381,6 +428,8 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
+                        validation_command: None,
+                        prompt_dir: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -479,6 +528,8 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
+                        validation_command: None,
+                        prompt_dir: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
                 }
@@ -514,6 +565,7 @@ async fn main() -> Result<()> {
                             prompt_with_default("State root directory", repo_config::CONFIG_DIR);
                         RepoConfig {
                             state_branch: branch,
+                            task_branch: None,
                             state_root: root,
                             ralphs: vec![],
                         }
@@ -595,6 +647,9 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 },
                 Task {
                     id: "2".to_string(),
@@ -617,6 +672,9 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 },
                 Task {
                     id: "3".to_string(),
@@ -639,6 +697,9 @@ async fn main() -> Result<()> {
                     precondition_prompt: None,
                     parent_id: None,
                     labels: vec![],
+                    system_prompt_override: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 },
             ];
 
@@ -835,6 +896,17 @@ async fn main() -> Result<()> {
             unstuck::run_unstuck(&config).await?;
         }
 
+        Commands::Merge { work_dir, backend } => {
+            let resolved_work_dir =
+                work_dir.unwrap_or_else(|| env::current_dir().unwrap_or_default());
+
+            let mut config = load_user_config().unwrap_or_default();
+            config.work_dir = resolved_work_dir;
+            config.api_token = config.api_token.or_else(|| env::var("GITHUB_TOKEN").ok());
+
+            merge::run_merge(&config, Some(&backend), None).await?;
+        }
+
         Commands::Graph {
             task_file,
             format,
@@ -860,6 +932,137 @@ async fn main() -> Result<()> {
                 None => print!("{content}"),
             }
         }
+
+        Commands::Report {
+            task_file,
+            work_dir,
+            output,
+        } => {
+            let resolved_work_dir = work_dir;
+            let data = report::collect_report_data(&task_file, resolved_work_dir.as_deref())
+                .with_context(|| {
+                    format!("Failed to build report data from '{}'", task_file.display())
+                })?;
+            report::write_report(&output, &data)?;
+            println!("Report written to {}", output.display());
+        }
+
+        Commands::Tasks { action } => match action {
+            // ── tasks list ───────────────────────────────────────────────
+            TasksAction::List { task_file, status } => {
+                let tasks = task_manager::load_tasks(&task_file).with_context(|| {
+                    format!("Failed to load task file: {}", task_file.display())
+                })?;
+
+                let filtered = task_cli::filter_tasks_by_status(&tasks, status);
+
+                if filtered.is_empty() {
+                    println!("No tasks found.");
+                } else {
+                    // Column widths (minimum header width, grow to content).
+                    let id_w = filtered
+                        .iter()
+                        .map(|t| t.id.len())
+                        .max()
+                        .unwrap_or(2)
+                        .max(2);
+                    let status_w = 11; // "in-progress"
+                    let role_w = 11; // "implementer"
+
+                    println!(
+                        "{:<id_w$}  {:<status_w$}  {:<role_w$}  {:>5}  {:>8}  DEPENDS_ON",
+                        "ID",
+                        "STATUS",
+                        "ROLE",
+                        "PHASE",
+                        "PRIORITY",
+                        id_w = id_w,
+                        status_w = status_w,
+                        role_w = role_w,
+                    );
+                    println!("{}", "-".repeat(id_w + status_w + role_w + 30));
+                    for t in &filtered {
+                        println!("{}", task_cli::format_task_row(t, id_w, status_w, role_w));
+                    }
+                    println!("\n{} task(s) listed.", filtered.len());
+                }
+            }
+
+            // ── tasks add ────────────────────────────────────────────────
+            TasksAction::Add {
+                task_file,
+                id,
+                description,
+                role,
+                phase,
+                priority,
+                depends_on,
+            } => {
+                let new_task = Task {
+                    id: id.clone(),
+                    description,
+                    status: types::TaskStatus::Pending,
+                    role,
+                    kind: types::TaskKind::default(),
+                    cooldown_seconds: None,
+                    phase,
+                    depends_on,
+                    priority,
+                    complexity: 1,
+                    timeout_seconds: None,
+                    max_retries: None,
+                    failed_attempts: 0,
+                    last_attempt_at: None,
+                    inputs: vec![],
+                    outputs: vec![],
+                    runtime: types::TaskRuntime::default(),
+                    precondition_prompt: None,
+                    parent_id: None,
+                    labels: vec![],
+                    system_prompt_override: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
+                };
+                task_manager::append_task(&task_file, new_task)?;
+                println!("Task '{}' added to {}.", id, task_file.display());
+            }
+
+            // ── tasks set-status ─────────────────────────────────────────
+            TasksAction::SetStatus {
+                task_file,
+                id,
+                status,
+            } => {
+                task_manager::set_task_status(&task_file, &id, status)?;
+                println!("Task '{}' status updated.", id);
+            }
+
+            // ── tasks validate ───────────────────────────────────────────
+            TasksAction::Validate { task_file } => {
+                let tasks = task_manager::load_tasks(&task_file).with_context(|| {
+                    format!("Failed to load task file: {}", task_file.display())
+                })?;
+
+                let issues = task_manager::validate_tasks(&tasks);
+
+                if issues.is_empty() {
+                    println!(
+                        "Task file '{}' is valid ({} task(s)).",
+                        task_file.display(),
+                        tasks.len()
+                    );
+                } else {
+                    for issue in &issues {
+                        eprintln!("error: {}", issue);
+                    }
+                    anyhow::bail!(
+                        "{} validation error(s) found in '{}'",
+                        issues.len(),
+                        task_file.display()
+                    );
+                }
+            }
+        },
     }
 
     Ok(())
