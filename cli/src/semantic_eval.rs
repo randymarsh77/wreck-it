@@ -266,21 +266,19 @@ pub fn parse_semantic_verdict(response: &str) -> SemanticVerdict {
     }
 }
 
+#[cfg(test)]
+use anyhow::{Context, Result};
+
 /// Run a semantic evaluation against a git diff.
 ///
-/// This is a testable wrapper that:
+/// This is a test-only wrapper that:
 /// 1. Builds the evaluation prompt via [`build_semantic_eval_prompt`].
 /// 2. Calls the provided `chat_fn` to get the LLM response.
 /// 3. Parses the response into a [`SemanticVerdict`] via
 ///    [`parse_semantic_verdict`].
 ///
 /// The `chat_fn` parameter accepts a prompt string and returns the raw model
-#[cfg(test)]
-use anyhow::{Context, Result};
-
-/// response.  In production this is wired to
-/// `AgentClient::chat_via_http` / `AgentClient::critique_via_copilot`.
-/// In tests it can be replaced with a stub that returns canned JSON.
+/// response.  In tests it can be replaced with a stub that returns canned JSON.
 ///
 /// The caller is responsible for collecting the git diff before calling this
 /// function (see `AgentClient::get_git_diff` in production).
