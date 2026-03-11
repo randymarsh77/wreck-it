@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 41,
-  "current_task_id": "ideas-error-classification",
-  "issue_number": 256,
-  "last_prompt": "Research and design an error classification and smart recovery system for wreck-it. Currently all task failures are treated identically: retried up to `max_retries` times and then re-planned after `replan_threshold` consecutive failures. Design a system that classifies errors into categories: `Transient` (e.g. rate-limit HTTP 429, network timeout), `Permanent` (e.g. compile error, test failure), `NeedsReplan` (e.g. task description ambiguous, wrong file targeted), and `ContextOverflow` (e.g. agent returned truncated output). Review `cli/src/headless.rs`, `cli/src/agent.rs`, and `cli/src/ralph_loop.rs` to identify where error handling occurs. For each error category, propose a recovery strategy: `Transient` → exponential backoff retry; `Permanent` → invoke critic with error output injected; `NeedsReplan` → immediate re-plan trigger; `ContextOverflow` → task splitting. Document the design as inline comments in a new stub file `cli/src/error_classifier.rs`.",
+  "iteration": 42,
+  "current_task_id": "impl-error-classification",
+  "issue_number": 258,
+  "last_prompt": "Implement the error classification and smart recovery system designed in `ideas-error-classification`. Create `cli/src/error_classifier.rs` with: (1) an `ErrorCategory` enum (`Transient`, `Permanent`, `NeedsReplan`, `ContextOverflow`); (2) a `classify_error(output: &str, exit_code: Option<i32>, http_status: Option<u16>) -> ErrorCategory` function using pattern matching on keywords (\"rate limit\", \"429\", \"timeout\" → Transient; \"error[E\", \"FAILED\" → Permanent; \"context length\", \"max_tokens\" → ContextOverflow; otherwise NeedsReplan); (3) a `RecoveryAction` enum with backoff delay for Transient, critic injection for Permanent, immediate replan for NeedsReplan, and task-split hint for ContextOverflow. Wire `classify_error` into the failure handling path in `cli/src/headless.rs` so that Transient errors trigger a configurable backoff (default 30s) before retry, and NeedsReplan errors bypass the `replan_threshold` counter to immediately invoke the re-planner.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -265,6 +265,10 @@
     "iteration 40: agent created PR #254 for task Some(\"eval-html-report\")",
     "iteration 40: marked PR #254 as ready for review",
     "iteration 40: merged PR #254 for task Some(\"eval-html-report\") (brute mode)",
-    "iteration 41: triggered cloud agent for task ideas-error-classification (issue #256)"
+    "iteration 41: triggered cloud agent for task ideas-error-classification (issue #256)",
+    "iteration 41: agent created PR #257 for task Some(\"ideas-error-classification\")",
+    "iteration 41: marked PR #257 as ready for review",
+    "iteration 41: merged PR #257 for task Some(\"ideas-error-classification\") (brute mode)",
+    "iteration 42: triggered cloud agent for task impl-error-classification (issue #258)"
   ]
 }
