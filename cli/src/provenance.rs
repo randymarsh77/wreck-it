@@ -272,4 +272,110 @@ mod tests {
         assert_eq!(records[0].timestamp, 1_700_000_000);
         assert_eq!(records[1].timestamp, 1_700_000_001);
     }
+
+    // ---- git_diff_hash multi-repo tests ----
+
+    /// Initialise a minimal git repository in `dir` with one committed file so
+    /// that `git diff HEAD` is valid.
+    fn init_git_repo(dir: &std::path::Path) {
+        Command::new("git")
+            .args(["init"])
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git init failed in {}: {}", dir.display(), e));
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git config user.email failed in {}: {}", dir.display(), e));
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git config user.name failed in {}: {}", dir.display(), e));
+        std::fs::write(dir.join("README.md"), "# test\n")
+            .unwrap_or_else(|e| panic!("failed to write README.md in {}: {}", dir.display(), e));
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git add failed in {}: {}", dir.display(), e));
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("git commit failed in {}: {}", dir.display(), e));
+    }
+
+    /// `git_diff_hash` must reflect the state of the directory it is called on.
+    /// When a task is mapped to a secondary repository, git operations (and
+    /// therefore the diff captured by provenance) correspond to that secondary
+    /// repo, not the default one.
+    #[test]
+    fn git_diff_hash_reads_from_specified_work_dir() {
+        let default_dir = tempdir().unwrap();
+        let secondary_dir = tempdir().unwrap();
+
+        init_git_repo(default_dir.path());
+        init_git_repo(secondary_dir.path());
+
+        // Both repos start clean – their hashes should be equal (both hash
+        // the empty string produced by `git diff HEAD` on a clean tree).
+        let clean_default = git_diff_hash(default_dir.path());
+        let clean_secondary = git_diff_hash(secondary_dir.path());
+        assert_eq!(
+            clean_default, clean_secondary,
+            "clean repos should produce the same diff hash"
+        );
+
+        // Introduce an uncommitted change in the secondary repo only.
+        std::fs::write(secondary_dir.path().join("feature.rs"), "fn foo() {}\n").unwrap();
+
+        let default_hash = git_diff_hash(default_dir.path());
+        let _secondary_hash = git_diff_hash(secondary_dir.path());
+
+        // The secondary repo now has an untracked file; git diff HEAD does not
+        // capture untracked files, so the diff is still empty.  Commit the file
+        // instead to produce a tracked modification.
+        Command::new("git")
+            .args(["add", "feature.rs"])
+            .current_dir(secondary_dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "add feature"])
+            .current_dir(secondary_dir.path())
+            .output()
+            .unwrap();
+        // Now modify the committed file so `git diff HEAD` is non-empty.
+        std::fs::write(
+            secondary_dir.path().join("feature.rs"),
+            "fn foo() { todo!() }\n",
+        )
+        .unwrap();
+
+        let default_hash_after = git_diff_hash(default_dir.path());
+        let secondary_hash_after = git_diff_hash(secondary_dir.path());
+
+        // The default repo is still clean – its hash is unchanged.
+        assert_eq!(
+            default_hash, default_hash_after,
+            "default repo must not be affected by changes in the secondary repo"
+        );
+
+        // The secondary repo has an uncommitted modification, so its hash
+        // must differ from a clean repo's hash.
+        assert_ne!(
+            secondary_hash_after, clean_secondary,
+            "secondary repo hash must reflect its uncommitted changes"
+        );
+
+        // The two repos now produce different hashes, confirming that
+        // git_diff_hash reads from whichever directory is passed to it – which
+        // is the directory resolved by work_dirs for the current task.
+        assert_ne!(
+            default_hash_after, secondary_hash_after,
+            "git_diff_hash must return different values for different repositories"
+        );
+    }
 }

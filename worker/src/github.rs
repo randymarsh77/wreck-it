@@ -58,6 +58,8 @@ pub enum PrMergeStatus {
     Mergeable,
     /// The PR has already been merged.
     AlreadyMerged,
+    /// The PR was closed without being merged.
+    ClosedNotMerged,
 }
 
 #[derive(Debug, Deserialize)]
@@ -676,7 +678,7 @@ impl GitHubClient {
         }
         let state = pr["state"].as_str().unwrap_or("unknown");
         if state != "open" {
-            return Ok(PrMergeStatus::NotMergeable);
+            return Ok(PrMergeStatus::ClosedNotMerged);
         }
         if pr["draft"].as_bool().unwrap_or(false) {
             return Ok(PrMergeStatus::Draft);
