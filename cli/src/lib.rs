@@ -47,6 +47,7 @@ mod state_worktree;
 mod task_cli;
 mod templates;
 mod tui;
+mod unstuck;
 
 pub mod ffi;
 pub mod project_api;
