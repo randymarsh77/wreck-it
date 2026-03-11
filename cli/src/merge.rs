@@ -407,6 +407,7 @@ async fn resolve_via_cli(
     Ok(())
 }
 
+
 /// Poll pending merge issues and promote them to tracked PRs when the coding
 /// agent has created a pull request.
 async fn promote_pending_merge_issues(
