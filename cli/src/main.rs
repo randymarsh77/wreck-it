@@ -26,8 +26,8 @@ mod prompt_loader;
 mod provenance;
 mod ralph_loop;
 mod replanner;
-mod report;
 mod repo_config;
+mod report;
 mod semantic_eval;
 mod state_worktree;
 mod task_cli;
@@ -297,7 +297,9 @@ async fn main() -> Result<()> {
                             );
                         }
                     } else if rc.command.as_deref() == Some("merge") {
-                        if let Err(e) = merge::run_merge(&config, rc.backend.as_deref(), Some(rc)).await {
+                        if let Err(e) =
+                            merge::run_merge(&config, rc.backend.as_deref(), Some(rc)).await
+                        {
                             println!(
                                 "[wreck-it] ralph '{}' (merge) failed: {}. Continuing…",
                                 rc.name, e
@@ -427,7 +429,7 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
-
+                        validation_command: None,
                         prompt_dir: None,
                         validation_command: None,
                         transient_backoff_secs: None,
@@ -529,7 +531,7 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
-
+                        validation_command: None,
                         prompt_dir: None,
                         validation_command: None,
                         transient_backoff_secs: None,
@@ -651,8 +653,8 @@ async fn main() -> Result<()> {
                     parent_id: None,
                     labels: vec![],
                     system_prompt_override: None,
-            acceptance_criteria: None,
-            evaluation: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 },
                 Task {
                     id: "2".to_string(),
@@ -676,8 +678,8 @@ async fn main() -> Result<()> {
                     parent_id: None,
                     labels: vec![],
                     system_prompt_override: None,
-            acceptance_criteria: None,
-            evaluation: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 },
                 Task {
                     id: "3".to_string(),
@@ -701,8 +703,8 @@ async fn main() -> Result<()> {
                     parent_id: None,
                     labels: vec![],
                     system_prompt_override: None,
-            acceptance_criteria: None,
-            evaluation: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 },
             ];
 
@@ -942,13 +944,10 @@ async fn main() -> Result<()> {
             output,
         } => {
             let resolved_work_dir = work_dir;
-            let data = report::collect_report_data(
-                &task_file,
-                resolved_work_dir.as_deref(),
-            )
-            .with_context(|| {
-                format!("Failed to build report data from '{}'", task_file.display())
-            })?;
+            let data = report::collect_report_data(&task_file, resolved_work_dir.as_deref())
+                .with_context(|| {
+                    format!("Failed to build report data from '{}'", task_file.display())
+                })?;
             report::write_report(&output, &data)?;
             println!("Report written to {}", output.display());
         }
@@ -1026,8 +1025,8 @@ async fn main() -> Result<()> {
                     parent_id: None,
                     labels: vec![],
                     system_prompt_override: None,
-            acceptance_criteria: None,
-            evaluation: None,
+                    acceptance_criteria: None,
+                    evaluation: None,
                 };
                 task_manager::append_task(&task_file, new_task)?;
                 println!("Task '{}' added to {}.", id, task_file.display());

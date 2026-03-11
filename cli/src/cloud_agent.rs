@@ -2002,10 +2002,7 @@ impl CloudAgentClient {
             .context("Failed to search issues")?;
 
         if !resp.status().is_success() {
-            tracing::warn!(
-                "Issue search request failed ({})",
-                resp.status(),
-            );
+            tracing::warn!("Issue search request failed ({})", resp.status(),);
             return Ok(None);
         }
 

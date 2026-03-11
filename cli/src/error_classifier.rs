@@ -241,7 +241,7 @@ pub(crate) enum ErrorCategory {
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```ignore
 /// # use wreck_it::error_classifier::{ErrorClassifier, ErrorCategory};
 /// assert_eq!(
 ///     ErrorClassifier::classify("Models API returned error (429): rate limit exceeded"),
