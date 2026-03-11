@@ -144,6 +144,23 @@ pub struct RalphConfig {
     /// Example: `.wreck-it/prompts`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_dir: Option<String>,
+
+    /// Optional shell command to validate PR changes before merging.
+    ///
+    /// When set, the headless runner executes this command in the repository
+    /// work directory during the `NeedsVerification` phase, before attempting
+    /// to merge a pull request.  The command is run via the system shell
+    /// (`sh -c` on Unix, `cmd /C` on Windows) so pipes, redirects, and other
+    /// shell features are available.
+    ///
+    /// If the command exits with a non-zero status, the PR is **not** merged.
+    /// Instead, a comment is posted on the PR at-mentioning `@copilot` with
+    /// the command, its exit code, and the captured stdout / stderr output so
+    /// the coding agent can address the failure.
+    ///
+    /// Example: `"cargo test --lib"`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_command: Option<String>,
 }
 
 fn default_state_branch() -> String {
@@ -243,5 +260,37 @@ state_branch = "my-state"
         let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
         assert!(cfg.task_branch.is_none());
         assert_eq!(cfg.effective_task_branch(), "my-state");
+    }
+
+    #[test]
+    fn validation_command_roundtrips_via_toml() {
+        let toml_str = r#"
+name = "ci-check"
+validation_command = "cargo test --lib"
+"#;
+        let cfg: RalphConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            cfg.validation_command.as_deref(),
+            Some("cargo test --lib"),
+        );
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            serialized.contains("validation_command"),
+            "validation_command should be present: {serialized}"
+        );
+    }
+
+    #[test]
+    fn validation_command_omitted_from_toml_when_none() {
+        let toml_str = r#"
+name = "docs"
+"#;
+        let cfg: RalphConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.validation_command.is_none());
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            !serialized.contains("validation_command"),
+            "validation_command should be absent: {serialized}"
+        );
     }
 }
