@@ -192,6 +192,27 @@ completion_marker_file = ".done"
     }
 
     #[test]
+    fn test_load_headless_config_with_semantic_evaluation() {
+        let dir = tempdir().unwrap();
+        let config_file = dir.path().join(".wreck-it.toml");
+        fs::write(
+            &config_file,
+            r#"
+evaluation_mode = "semantic"
+completeness_prompt = "All acceptance criteria must be addressed in the diff"
+"#,
+        )
+        .unwrap();
+
+        let config = load_headless_config(&config_file).unwrap();
+        assert_eq!(config.evaluation_mode, EvaluationMode::Semantic);
+        assert_eq!(
+            config.completeness_prompt.as_deref(),
+            Some("All acceptance criteria must be addressed in the diff")
+        );
+    }
+
+    #[test]
     fn test_load_headless_config_with_repo_info() {
         let dir = tempdir().unwrap();
         let config_file = dir.path().join(".wreck-it.toml");
