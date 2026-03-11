@@ -9,13 +9,13 @@ mod gastown_client;
 mod github_auth;
 mod github_client;
 mod graph;
-mod kanban;
 mod headless;
 mod headless_config;
 mod headless_state;
 mod install;
 #[cfg(test)]
 mod integration_eval;
+
 mod merge;
 mod notifier;
 mod openclaw;
