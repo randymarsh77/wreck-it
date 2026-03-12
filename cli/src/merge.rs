@@ -373,11 +373,7 @@ async fn resolve_via_cloud_agent(
             issue_number: detail.number,
             task_id,
             comment_only: true,
-            head_sha: if detail.head_sha.is_empty() {
-                None
-            } else {
-                Some(detail.head_sha.clone())
-            },
+            head_sha: Some(detail.head_sha.clone()).filter(|s| !s.is_empty()),
         });
     }
 
