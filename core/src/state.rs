@@ -8,6 +8,11 @@ use std::collections::HashMap;
 
 use crate::types::TaskStatus;
 
+/// Serde helper: skip serializing when `false` (the default for `bool`).
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
 /// Phases of a headless cloud agent iteration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -51,17 +56,28 @@ pub struct TrackedPr {
     pub review_requested: Option<bool>,
 }
 
-/// An issue created by the merge ralph to resolve merge conflicts.
+/// An entry created by the merge ralph to resolve merge conflicts.
 ///
-/// The merge ralph creates issues that assign a coding agent to fix
-/// conflicts on a PR.  These are persisted so that subsequent invocations
-/// can poll for the resulting PR and promote it to a [`TrackedPr`].
+/// When `comment_only` is `false` (the default / legacy behaviour), the
+/// merge ralph created a GitHub issue and assigned a coding agent to it.
+/// Subsequent invocations poll for the resulting PR and promote it to a
+/// [`TrackedPr`].
+///
+/// When `comment_only` is `true`, the merge ralph posted a `@copilot`
+/// comment directly on the conflicting PR instead of creating a separate
+/// issue.  These entries only serve as deduplication guards and are
+/// removed once the PR is no longer in a conflicting state (or is closed).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PendingMergeIssue {
-    /// GitHub issue number that was created for conflict resolution.
+    /// GitHub issue number that was created for conflict resolution, **or**
+    /// the PR number when `comment_only` is `true`.
     pub issue_number: u64,
     /// The wreck-it task ID (e.g. `"merge-pr-42"`).
     pub task_id: String,
+    /// When `true`, the entry represents a `@copilot` comment posted on
+    /// the PR (stored in `issue_number`) rather than a coding-agent issue.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub comment_only: bool,
 }
 
 /// Persistent state that is committed to the repo between cron invocations.

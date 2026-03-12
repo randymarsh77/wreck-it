@@ -1,9 +1,11 @@
 //! "Merge" command: scan open PRs for merge conflicts with the base branch
 //! and resolve them.
 //!
-//! When `backend = "cloud_agent"` (the default), the command creates a GitHub
-//! issue describing the conflict with full context (PR body, conflicting
-//! commit messages, and code diff) and assigns a coding agent to fix it.
+//! When `backend = "cloud_agent"` (the default), the command posts a
+//! `@copilot` comment directly on the conflicting PR, asking the coding
+//! agent to reapply the PR's changes on top of the latest base branch.
+//! This avoids the problem of creating a separate issue whose agent
+//! cannot perform a proper `git merge` across branches.
 //!
 //! When `backend = "cli"`, the command performs a local `git merge` of the
 //! base branch into the PR branch and pushes the result directly.
@@ -32,8 +34,8 @@ const BACKEND_CLI: &str = "cli";
 /// Run the merge logic: find open PRs with merge conflicts and resolve them.
 ///
 /// `backend` selects how conflicts are resolved – `"cloud_agent"` (default)
-/// assigns a coding agent via a new issue, while `"cli"` merges locally and
-/// pushes.
+/// posts a `@copilot` comment on the PR asking the agent to reapply changes,
+/// while `"cli"` merges locally and pushes.
 ///
 /// When `ralph` is provided, the merge command also loads/saves persistent
 /// state so that PRs created by previous runs are tracked and advanced
@@ -292,10 +294,16 @@ fn build_merge_context(detail: &PrDetail, recent_base_commits: &str, diff_summar
     ctx
 }
 
-/// Resolve merge conflicts by creating an issue and assigning a cloud agent.
+/// Resolve merge conflicts by posting a `@copilot` comment on the PR.
 ///
-/// On success, the resulting issue is recorded in `state.pending_merge_issues`
-/// so that subsequent invocations can poll for the created PR and advance it.
+/// Instead of creating a separate GitHub issue (which would start the
+/// coding agent on its own branch, unable to perform a real `git merge`),
+/// we comment directly on the conflicting PR.  The agent will work within
+/// the PR context and can reapply the changes on the latest base branch.
+///
+/// The PR number is recorded in `state.pending_merge_issues` (with
+/// `comment_only = true`) as a deduplication guard so that subsequent
+/// invocations do not post redundant comments.
 async fn resolve_via_cloud_agent(
     client: &CloudAgentClient,
     detail: &PrDetail,
@@ -307,43 +315,35 @@ async fn resolve_via_cloud_agent(
 
     let context = build_merge_context(detail, &recent_base_commits, &diff_summary);
 
-    let issue_body = format!(
-        "PR #{} (`{}` → `{}`) has merge conflicts that need to be resolved.\n\n\
-         Please check out the `{}` branch, merge `{}` into it, resolve all \
-         conflicts, and push the result.\n\n\
+    let comment = format!(
+        "@copilot This PR has merge conflicts with `{}`. Please resolve \
+         the conflicts by reapplying the changes in this PR on top of the \
+         latest `{}` branch.\n\n\
          {}\n\n\
          ---\n\
          *Triggered by wreck-it merge ralph*",
-        detail.number, detail.head_ref, detail.base_ref, detail.head_ref, detail.base_ref, context,
+        detail.base_ref, detail.base_ref, context,
     );
+
+    client.comment_on_pr(detail.number, &comment).await?;
 
     let task_id = format!("merge-pr-{}", detail.number);
 
-    let result = client
-        .trigger_agent(
-            "merge",
-            &task_id,
-            &issue_body,
-            &[],
-            Some(&detail.head_ref),
-            None,
-        )
-        .await?;
-
     println!(
-        "[wreck-it] merge: created issue #{} for PR #{} conflict resolution ({})",
-        result.issue_number, detail.number, result.issue_url,
+        "[wreck-it] merge: posted @copilot comment on PR #{} for conflict resolution",
+        detail.number,
     );
 
-    // Record the issue so we can poll for the resulting PR later.
+    // Record the comment so we don't re-post on the next invocation.
     if !state
         .pending_merge_issues
         .iter()
-        .any(|p| p.issue_number == result.issue_number)
+        .any(|p| p.task_id == task_id)
     {
         state.pending_merge_issues.push(PendingMergeIssue {
-            issue_number: result.issue_number,
+            issue_number: detail.number,
             task_id,
+            comment_only: true,
         });
     }
 
@@ -419,8 +419,15 @@ async fn resolve_via_cli(
     Ok(())
 }
 
-/// Poll pending merge issues and promote them to tracked PRs when the coding
-/// agent has created a pull request.
+/// Poll pending merge entries.
+///
+/// For **issue-based** entries (`comment_only = false`), poll the coding
+/// agent status and promote to tracked PRs when a pull request is created.
+///
+/// For **comment-based** entries (`comment_only = true`), check whether the
+/// PR still has merge conflicts.  Once the conflicts are resolved (or the
+/// PR is closed), the entry is removed so that a fresh comment can be
+/// posted if new conflicts appear in the future.
 async fn promote_pending_merge_issues(
     client: &CloudAgentClient,
     state: &mut crate::headless_state::HeadlessState,
@@ -430,13 +437,56 @@ async fn promote_pending_merge_issues(
     }
 
     println!(
-        "[wreck-it] merge: checking {} pending merge issue(s) for linked PRs",
+        "[wreck-it] merge: checking {} pending merge entries",
         state.pending_merge_issues.len(),
     );
 
     let mut promoted: Vec<u64> = Vec::new();
 
     for pending in &state.pending_merge_issues {
+        // ── Comment-only entries: check PR conflict status ──────────
+        if pending.comment_only {
+            match client.fetch_pr_json(pending.issue_number).await {
+                Ok(pr_json) => {
+                    let is_closed = pr_json["state"].as_str() == Some("closed");
+                    // When `mergeable` is null (GitHub still computing),
+                    // treat conservatively as "not yet mergeable" so we
+                    // keep the deduplication guard in place.
+                    let mergeable = pr_json["mergeable"].as_bool().unwrap_or(false);
+                    let mergeable_state =
+                        pr_json["mergeable_state"].as_str().unwrap_or("unknown");
+                    let still_conflicting = !mergeable || mergeable_state == "dirty";
+
+                    if is_closed {
+                        println!(
+                            "[wreck-it] merge: PR #{} is closed — removing comment guard",
+                            pending.issue_number,
+                        );
+                        promoted.push(pending.issue_number);
+                    } else if !still_conflicting {
+                        println!(
+                            "[wreck-it] merge: PR #{} conflicts resolved — removing comment guard",
+                            pending.issue_number,
+                        );
+                        promoted.push(pending.issue_number);
+                    } else {
+                        println!(
+                            "[wreck-it] merge: PR #{} still has conflicts — keeping comment guard",
+                            pending.issue_number,
+                        );
+                    }
+                }
+                Err(e) => {
+                    println!(
+                        "[wreck-it] merge: failed to check PR #{} status: {}",
+                        pending.issue_number, e,
+                    );
+                }
+            }
+            continue;
+        }
+
+        // ── Issue-based entries: poll agent status ──────────────────
         match client.check_agent_status(pending.issue_number).await {
             Ok(CloudAgentStatus::PrCreated { pr_number, .. }) => {
                 if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_number) {
@@ -493,7 +543,7 @@ async fn promote_pending_merge_issues(
         }
     }
 
-    // Remove promoted/completed issues from the pending list.
+    // Remove promoted/completed entries from the pending list.
     state
         .pending_merge_issues
         .retain(|p| !promoted.contains(&p.issue_number));
@@ -639,11 +689,13 @@ mod tests {
         let issue = PendingMergeIssue {
             issue_number: 99,
             task_id: "merge-pr-42".to_string(),
+            comment_only: false,
         };
         let json = serde_json::to_string(&issue).unwrap();
         let loaded: PendingMergeIssue = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.issue_number, 99);
         assert_eq!(loaded.task_id, "merge-pr-42");
+        assert!(!loaded.comment_only);
     }
 
     #[test]
@@ -668,6 +720,7 @@ mod tests {
         state.pending_merge_issues.push(PendingMergeIssue {
             issue_number: 100,
             task_id: "merge-pr-55".to_string(),
+            comment_only: false,
         });
         state.tracked_prs.push(TrackedPr {
             pr_number: 200,
@@ -711,6 +764,7 @@ mod tests {
         state.pending_merge_issues.push(PendingMergeIssue {
             issue_number: 100,
             task_id: "merge-pr-42".to_string(),
+            comment_only: false,
         });
         assert!(has_existing_work_for_task(&state, "merge-pr-42"));
         assert!(!has_existing_work_for_task(&state, "merge-pr-99"));
@@ -735,6 +789,7 @@ mod tests {
         state.pending_merge_issues.push(PendingMergeIssue {
             issue_number: 100,
             task_id: "merge-pr-42".to_string(),
+            comment_only: false,
         });
         state.tracked_prs.push(TrackedPr {
             pr_number: 200,
@@ -745,5 +800,53 @@ mod tests {
         assert!(has_existing_work_for_task(&state, "merge-pr-42"));
         assert!(has_existing_work_for_task(&state, "merge-pr-55"));
         assert!(!has_existing_work_for_task(&state, "merge-pr-99"));
+    }
+
+    #[test]
+    fn has_existing_work_detects_comment_only_entry() {
+        let mut state = crate::headless_state::HeadlessState::default();
+        state.pending_merge_issues.push(PendingMergeIssue {
+            issue_number: 42,
+            task_id: "merge-pr-42".to_string(),
+            comment_only: true,
+        });
+        assert!(has_existing_work_for_task(&state, "merge-pr-42"));
+        assert!(!has_existing_work_for_task(&state, "merge-pr-99"));
+    }
+
+    #[test]
+    fn comment_only_serde_roundtrip() {
+        let issue = PendingMergeIssue {
+            issue_number: 42,
+            task_id: "merge-pr-42".to_string(),
+            comment_only: true,
+        };
+        let json = serde_json::to_string(&issue).unwrap();
+        assert!(json.contains("comment_only"));
+        let loaded: PendingMergeIssue = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.issue_number, 42);
+        assert_eq!(loaded.task_id, "merge-pr-42");
+        assert!(loaded.comment_only);
+    }
+
+    #[test]
+    fn comment_only_defaults_to_false_on_deserialize() {
+        // Legacy entries without comment_only should deserialize with false.
+        let json = r#"{"issue_number":99,"task_id":"merge-pr-99"}"#;
+        let loaded: PendingMergeIssue = serde_json::from_str(json).unwrap();
+        assert_eq!(loaded.issue_number, 99);
+        assert!(!loaded.comment_only);
+    }
+
+    #[test]
+    fn comment_only_false_omitted_from_json() {
+        // When comment_only is false, it should be omitted from JSON output.
+        let issue = PendingMergeIssue {
+            issue_number: 99,
+            task_id: "merge-pr-99".to_string(),
+            comment_only: false,
+        };
+        let json = serde_json::to_string(&issue).unwrap();
+        assert!(!json.contains("comment_only"));
     }
 }
