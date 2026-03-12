@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::types::TaskStatus;
 
-/// Serde helper: returns `true` when the boolean value is `false`.
+/// Serde helper: skip serializing when `false` (the default for `bool`).
 fn is_false(v: &bool) -> bool {
     !*v
 }

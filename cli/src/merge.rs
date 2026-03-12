@@ -437,7 +437,7 @@ async fn promote_pending_merge_issues(
     }
 
     println!(
-        "[wreck-it] merge: checking {} pending merge entry/entries",
+        "[wreck-it] merge: checking {} pending merge entries",
         state.pending_merge_issues.len(),
     );
 
@@ -449,7 +449,10 @@ async fn promote_pending_merge_issues(
             match client.fetch_pr_json(pending.issue_number).await {
                 Ok(pr_json) => {
                     let is_closed = pr_json["state"].as_str() == Some("closed");
-                    let mergeable = pr_json["mergeable"].as_bool().unwrap_or(true);
+                    // When `mergeable` is null (GitHub still computing),
+                    // treat conservatively as "not yet mergeable" so we
+                    // keep the deduplication guard in place.
+                    let mergeable = pr_json["mergeable"].as_bool().unwrap_or(false);
                     let mergeable_state =
                         pr_json["mergeable_state"].as_str().unwrap_or("unknown");
                     let still_conflicting = !mergeable || mergeable_state == "dirty";
