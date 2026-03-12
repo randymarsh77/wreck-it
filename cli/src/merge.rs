@@ -1,9 +1,14 @@
 //! "Merge" command: scan open PRs for merge conflicts with the base branch
 //! and resolve them.
 //!
-//! When `backend = "cloud_agent"` (the default), the command creates a GitHub
-//! issue describing the conflict with full context (PR body, conflicting
-//! commit messages, and code diff) and assigns a coding agent to fix it.
+//! When `backend = "copilot_cli"` (the default), the command clones the
+//! repository into a subdirectory, checks out the PR branch, merges the
+//! base branch into it, invokes the Copilot CLI to resolve any conflicts,
+//! commits the result, and pushes to the PR branch.
+//!
+//! When `backend = "cloud_agent"`, the command posts a `@copilot` comment
+//! directly on the conflicting PR, asking the coding agent to reapply the
+//! PR's changes on top of the latest base branch.
 //!
 //! When `backend = "cli"`, the command performs a local `git merge` of the
 //! base branch into the PR branch and pushes the result directly.
@@ -26,14 +31,17 @@ use wreck_it_core::state::PendingMergeIssue;
 const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
 
 /// Supported backend values.
+const BACKEND_COPILOT_CLI: &str = "copilot_cli";
 const BACKEND_CLOUD_AGENT: &str = "cloud_agent";
 const BACKEND_CLI: &str = "cli";
 
 /// Run the merge logic: find open PRs with merge conflicts and resolve them.
 ///
-/// `backend` selects how conflicts are resolved – `"cloud_agent"` (default)
-/// assigns a coding agent via a new issue, while `"cli"` merges locally and
-/// pushes.
+/// `backend` selects how conflicts are resolved – `"copilot_cli"` (default)
+/// clones the repo into a subdirectory, merges the base branch into the PR
+/// branch, invokes the Copilot CLI to resolve conflicts, and pushes;
+/// `"cloud_agent"` posts a `@copilot` comment on the PR asking the agent to
+/// reapply changes; `"cli"` merges locally and pushes.
 ///
 /// When `ralph` is provided, the merge command also loads/saves persistent
 /// state so that PRs created by previous runs are tracked and advanced
@@ -44,7 +52,7 @@ pub async fn run_merge(
     ralph: Option<&RalphConfig>,
 ) -> Result<()> {
     let work_dir = &config.work_dir;
-    let backend = backend.unwrap_or(BACKEND_CLOUD_AGENT);
+    let backend = backend.unwrap_or(BACKEND_COPILOT_CLI);
 
     let github_token = config
         .api_token
@@ -141,10 +149,26 @@ pub async fn run_merge(
         );
 
         let result = match backend {
+            BACKEND_COPILOT_CLI => {
+                resolve_via_copilot_cli(
+                    work_dir,
+                    &pr_detail,
+                    &github_token,
+                    &repo_owner,
+                    &repo_name,
+                )
+                .await
+            }
             BACKEND_CLI => {
                 resolve_via_cli(work_dir, &pr_detail, &github_token, &repo_owner, &repo_name).await
             }
-            _ => resolve_via_cloud_agent(&client, &pr_detail, &mut state).await,
+            BACKEND_CLOUD_AGENT => resolve_via_cloud_agent(&client, &pr_detail, &mut state).await,
+            other => {
+                anyhow::bail!(
+                    "unknown merge backend '{}'; expected one of: copilot_cli, cloud_agent, cli",
+                    other,
+                );
+            }
         };
 
         match result {
@@ -292,10 +316,16 @@ fn build_merge_context(detail: &PrDetail, recent_base_commits: &str, diff_summar
     ctx
 }
 
-/// Resolve merge conflicts by creating an issue and assigning a cloud agent.
+/// Resolve merge conflicts by posting a `@copilot` comment on the PR.
 ///
-/// On success, the resulting issue is recorded in `state.pending_merge_issues`
-/// so that subsequent invocations can poll for the created PR and advance it.
+/// Instead of creating a separate GitHub issue (which would start the
+/// coding agent on its own branch, unable to perform a real `git merge`),
+/// we comment directly on the conflicting PR.  The agent will work within
+/// the PR context and can reapply the changes on the latest base branch.
+///
+/// The PR number is recorded in `state.pending_merge_issues` (with
+/// `comment_only = true`) as a deduplication guard so that subsequent
+/// invocations do not post redundant comments.
 async fn resolve_via_cloud_agent(
     client: &CloudAgentClient,
     detail: &PrDetail,
@@ -307,45 +337,281 @@ async fn resolve_via_cloud_agent(
 
     let context = build_merge_context(detail, &recent_base_commits, &diff_summary);
 
-    let issue_body = format!(
-        "PR #{} (`{}` → `{}`) has merge conflicts that need to be resolved.\n\n\
-         Please check out the `{}` branch, merge `{}` into it, resolve all \
-         conflicts, and push the result.\n\n\
+    let comment = format!(
+        "@copilot This PR has merge conflicts with `{}`. Please resolve \
+         the conflicts by reapplying the changes in this PR on top of the \
+         latest `{}` branch.\n\n\
          {}\n\n\
          ---\n\
          *Triggered by wreck-it merge ralph*",
-        detail.number, detail.head_ref, detail.base_ref, detail.head_ref, detail.base_ref, context,
+        detail.base_ref, detail.base_ref, context,
     );
+
+    client.comment_on_pr(detail.number, &comment).await?;
 
     let task_id = format!("merge-pr-{}", detail.number);
 
-    let result = client
-        .trigger_agent(
-            "merge",
-            &task_id,
-            &issue_body,
-            &[],
-            Some(&detail.head_ref),
-            None,
-        )
-        .await?;
-
     println!(
-        "[wreck-it] merge: created issue #{} for PR #{} conflict resolution ({})",
-        result.issue_number, detail.number, result.issue_url,
+        "[wreck-it] merge: posted @copilot comment on PR #{} for conflict resolution",
+        detail.number,
     );
 
-    // Record the issue so we can poll for the resulting PR later.
+    // Record the comment so we don't re-post on the next invocation.
     if !state
         .pending_merge_issues
         .iter()
-        .any(|p| p.issue_number == result.issue_number)
+        .any(|p| p.task_id == task_id)
     {
         state.pending_merge_issues.push(PendingMergeIssue {
-            issue_number: result.issue_number,
+            issue_number: detail.number,
             task_id,
+            comment_only: true,
         });
     }
+
+    Ok(())
+}
+
+/// Resolve merge conflicts by cloning the repo into a subdirectory, merging
+/// the base branch into the PR branch, invoking the Copilot CLI to resolve
+/// any conflicts, committing the result, and pushing to the PR branch.
+async fn resolve_via_copilot_cli(
+    work_dir: &Path,
+    detail: &PrDetail,
+    github_token: &str,
+    repo_owner: &str,
+    repo_name: &str,
+) -> Result<()> {
+    use std::process::Command;
+
+    let clone_dir = work_dir.join(format!(".merge-pr-{}", detail.number));
+
+    // Clean up any leftover subdirectory from a previous attempt.
+    if clone_dir.exists() {
+        std::fs::remove_dir_all(&clone_dir).context("Failed to remove stale merge subdirectory")?;
+    }
+
+    // Clone the repository into the subdirectory.
+    // Pass the token via a temporary git credential store file so it does not
+    // appear in the clone URL (which can leak in process listings and logs).
+    let clone_url = format!("https://github.com/{}/{}.git", repo_owner, repo_name,);
+
+    // Write an ephemeral credential store that git can read.
+    let cred_file = work_dir.join(format!(".merge-pr-{}-cred", detail.number));
+    std::fs::write(
+        &cred_file,
+        format!("https://x-access-token:{}@github.com\n", github_token,),
+    )
+    .context("Failed to write temporary credential file")?;
+
+    let cred_helper = format!(
+        "credential.helper=store --file={}",
+        cred_file.to_string_lossy(),
+    );
+
+    let clone_status = Command::new("git")
+        .args([
+            "-c",
+            &cred_helper,
+            "clone",
+            "--depth=50",
+            &clone_url,
+            &clone_dir.to_string_lossy(),
+        ])
+        .status()
+        .context("Failed to run `git clone`")?;
+    if !clone_status.success() {
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git clone failed");
+    }
+
+    // Persist the credential helper in the clone's local git config so that
+    // subsequent fetch/push commands are authenticated.
+    let set_config_status = Command::new("git")
+        .args([
+            "config",
+            "--local",
+            "credential.helper",
+            &format!("store --file={}", cred_file.to_string_lossy()),
+        ])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to configure git credentials in clone")?;
+    if !set_config_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git config for credential helper failed");
+    }
+
+    // Fetch the PR branch explicitly — the shallow clone only fetches the
+    // default branch (--depth implies --single-branch), so the PR's head ref
+    // won't be available locally without this step.
+    let fetch_head_status = Command::new("git")
+        .args(["fetch", "origin", &detail.head_ref])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to fetch PR head branch")?;
+    if !fetch_head_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git fetch origin {} failed", detail.head_ref);
+    }
+
+    // Check out the PR branch.
+    let checkout_status = Command::new("git")
+        .args(["checkout", &detail.head_ref])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to checkout PR branch")?;
+    if !checkout_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git checkout {} failed", detail.head_ref);
+    }
+
+    // Fetch the base branch.
+    let fetch_status = Command::new("git")
+        .args(["fetch", "origin", &detail.base_ref])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to fetch base branch")?;
+    if !fetch_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git fetch origin {} failed", detail.base_ref);
+    }
+
+    // Merge the base branch into the PR branch.
+    let merge_output = Command::new("git")
+        .args(["merge", &format!("origin/{}", detail.base_ref), "--no-edit"])
+        .current_dir(&clone_dir)
+        .output()
+        .context("Failed to run git merge")?;
+
+    if merge_output.status.success() {
+        // Merge succeeded without conflicts — push and clean up.
+        let push_status = Command::new("git")
+            .args(["push", "origin", &detail.head_ref])
+            .current_dir(&clone_dir)
+            .status()
+            .context("Failed to push merged branch")?;
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        if !push_status.success() {
+            anyhow::bail!("git push origin {} failed", detail.head_ref);
+        }
+        println!(
+            "[wreck-it] merge: cleanly merged {} into {} and pushed",
+            detail.base_ref, detail.head_ref,
+        );
+        return Ok(());
+    }
+
+    // Merge produced conflicts — invoke the Copilot CLI to resolve them.
+    println!("[wreck-it] merge: merge conflicts detected, invoking Copilot CLI to resolve…",);
+
+    let cli_path = crate::agent::resolve_copilot_cli_path().context(
+        "Could not find the 'copilot' binary on PATH. \
+         Install GitHub Copilot CLI (https://gh.io/copilot-install) \
+         or ensure it is available in your shell environment.",
+    )?;
+
+    let conflict_prompt = format!(
+        "There are merge conflicts in this repository after merging `origin/{}` into `{}`. \
+         Please resolve all merge conflicts in every file. For each conflicted file, \
+         pick the correct resolution that preserves the intent of both branches. \
+         After resolving, stage all changes with `git add .`.",
+        detail.base_ref, detail.head_ref,
+    );
+
+    use copilot_sdk_supercharged::*;
+
+    let config = SessionConfig {
+        request_permission: Some(false),
+        request_user_input: Some(false),
+        working_directory: Some(clone_dir.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+
+    let result = crate::agent::copilot_oneshot(
+        cli_path,
+        config,
+        conflict_prompt,
+        300_000, // 5 minute timeout for conflict resolution
+        "",
+    )
+    .await;
+
+    if let Err(e) = result {
+        // Abort the merge and clean up on failure.
+        let _ = Command::new("git")
+            .args(["merge", "--abort"])
+            .current_dir(&clone_dir)
+            .status();
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("Copilot CLI conflict resolution failed: {}", e);
+    }
+
+    // Check if all conflicts have been resolved (no conflict markers remain).
+    let diff_check = Command::new("git")
+        .args(["diff", "--check"])
+        .current_dir(&clone_dir)
+        .output()
+        .context("Failed to run git diff --check")?;
+
+    if !diff_check.status.success() {
+        let _ = Command::new("git")
+            .args(["merge", "--abort"])
+            .current_dir(&clone_dir)
+            .status();
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!(
+            "Copilot CLI did not fully resolve all merge conflicts between {} and {}",
+            detail.base_ref,
+            detail.head_ref,
+        );
+    }
+
+    // Commit the merge resolution.
+    let commit_status = Command::new("git")
+        .args([
+            "commit",
+            "--no-edit",
+            "-m",
+            &format!(
+                "Merge {} into {} (resolved by Copilot CLI)",
+                detail.base_ref, detail.head_ref,
+            ),
+        ])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to commit merge resolution")?;
+    if !commit_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git commit for merge resolution failed");
+    }
+
+    // Push to the PR branch.
+    let push_status = Command::new("git")
+        .args(["push", "origin", &detail.head_ref])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to push resolved merge")?;
+
+    let _ = std::fs::remove_dir_all(&clone_dir);
+    let _ = std::fs::remove_file(&cred_file);
+
+    if !push_status.success() {
+        anyhow::bail!("git push origin {} failed", detail.head_ref);
+    }
+
+    println!(
+        "[wreck-it] merge: resolved conflicts between {} and {} via Copilot CLI and pushed",
+        detail.base_ref, detail.head_ref,
+    );
 
     Ok(())
 }
@@ -419,8 +685,15 @@ async fn resolve_via_cli(
     Ok(())
 }
 
-/// Poll pending merge issues and promote them to tracked PRs when the coding
-/// agent has created a pull request.
+/// Poll pending merge entries.
+///
+/// For **issue-based** entries (`comment_only = false`), poll the coding
+/// agent status and promote to tracked PRs when a pull request is created.
+///
+/// For **comment-based** entries (`comment_only = true`), check whether the
+/// PR still has merge conflicts.  Once the conflicts are resolved (or the
+/// PR is closed), the entry is removed so that a fresh comment can be
+/// posted if new conflicts appear in the future.
 async fn promote_pending_merge_issues(
     client: &CloudAgentClient,
     state: &mut crate::headless_state::HeadlessState,
@@ -430,13 +703,55 @@ async fn promote_pending_merge_issues(
     }
 
     println!(
-        "[wreck-it] merge: checking {} pending merge issue(s) for linked PRs",
+        "[wreck-it] merge: checking {} pending merge entries",
         state.pending_merge_issues.len(),
     );
 
     let mut promoted: Vec<u64> = Vec::new();
 
     for pending in &state.pending_merge_issues {
+        // ── Comment-only entries: check PR conflict status ──────────
+        if pending.comment_only {
+            match client.fetch_pr_json(pending.issue_number).await {
+                Ok(pr_json) => {
+                    let is_closed = pr_json["state"].as_str() == Some("closed");
+                    // When `mergeable` is null (GitHub still computing),
+                    // treat conservatively as "not yet mergeable" so we
+                    // keep the deduplication guard in place.
+                    let mergeable = pr_json["mergeable"].as_bool().unwrap_or(false);
+                    let mergeable_state = pr_json["mergeable_state"].as_str().unwrap_or("unknown");
+                    let still_conflicting = !mergeable || mergeable_state == "dirty";
+
+                    if is_closed {
+                        println!(
+                            "[wreck-it] merge: PR #{} is closed — removing comment guard",
+                            pending.issue_number,
+                        );
+                        promoted.push(pending.issue_number);
+                    } else if !still_conflicting {
+                        println!(
+                            "[wreck-it] merge: PR #{} conflicts resolved — removing comment guard",
+                            pending.issue_number,
+                        );
+                        promoted.push(pending.issue_number);
+                    } else {
+                        println!(
+                            "[wreck-it] merge: PR #{} still has conflicts — keeping comment guard",
+                            pending.issue_number,
+                        );
+                    }
+                }
+                Err(e) => {
+                    println!(
+                        "[wreck-it] merge: failed to check PR #{} status: {}",
+                        pending.issue_number, e,
+                    );
+                }
+            }
+            continue;
+        }
+
+        // ── Issue-based entries: poll agent status ──────────────────
         match client.check_agent_status(pending.issue_number).await {
             Ok(CloudAgentStatus::PrCreated { pr_number, .. }) => {
                 if !state.tracked_prs.iter().any(|tp| tp.pr_number == pr_number) {
@@ -493,7 +808,7 @@ async fn promote_pending_merge_issues(
         }
     }
 
-    // Remove promoted/completed issues from the pending list.
+    // Remove promoted/completed entries from the pending list.
     state
         .pending_merge_issues
         .retain(|p| !promoted.contains(&p.issue_number));
@@ -530,10 +845,7 @@ async fn fetch_diff_summary_via_api(client: &CloudAgentClient, pr_number: u64) -
 /// Check whether we already have a pending merge issue or tracked PR for the
 /// given `task_id`.  This prevents creating duplicate issues when a conflict
 /// resolution is already in progress.
-fn has_existing_work_for_task(
-    state: &crate::headless_state::HeadlessState,
-    task_id: &str,
-) -> bool {
+fn has_existing_work_for_task(state: &crate::headless_state::HeadlessState, task_id: &str) -> bool {
     state
         .pending_merge_issues
         .iter()
@@ -630,6 +942,7 @@ mod tests {
 
     #[test]
     fn backend_constants_are_valid() {
+        assert_eq!(BACKEND_COPILOT_CLI, "copilot_cli");
         assert_eq!(BACKEND_CLOUD_AGENT, "cloud_agent");
         assert_eq!(BACKEND_CLI, "cli");
     }
@@ -639,11 +952,13 @@ mod tests {
         let issue = PendingMergeIssue {
             issue_number: 99,
             task_id: "merge-pr-42".to_string(),
+            comment_only: false,
         };
         let json = serde_json::to_string(&issue).unwrap();
         let loaded: PendingMergeIssue = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.issue_number, 99);
         assert_eq!(loaded.task_id, "merge-pr-42");
+        assert!(!loaded.comment_only);
     }
 
     #[test]
@@ -668,6 +983,7 @@ mod tests {
         state.pending_merge_issues.push(PendingMergeIssue {
             issue_number: 100,
             task_id: "merge-pr-55".to_string(),
+            comment_only: false,
         });
         state.tracked_prs.push(TrackedPr {
             pr_number: 200,
@@ -711,6 +1027,7 @@ mod tests {
         state.pending_merge_issues.push(PendingMergeIssue {
             issue_number: 100,
             task_id: "merge-pr-42".to_string(),
+            comment_only: false,
         });
         assert!(has_existing_work_for_task(&state, "merge-pr-42"));
         assert!(!has_existing_work_for_task(&state, "merge-pr-99"));
@@ -735,6 +1052,7 @@ mod tests {
         state.pending_merge_issues.push(PendingMergeIssue {
             issue_number: 100,
             task_id: "merge-pr-42".to_string(),
+            comment_only: false,
         });
         state.tracked_prs.push(TrackedPr {
             pr_number: 200,
@@ -745,5 +1063,53 @@ mod tests {
         assert!(has_existing_work_for_task(&state, "merge-pr-42"));
         assert!(has_existing_work_for_task(&state, "merge-pr-55"));
         assert!(!has_existing_work_for_task(&state, "merge-pr-99"));
+    }
+
+    #[test]
+    fn has_existing_work_detects_comment_only_entry() {
+        let mut state = crate::headless_state::HeadlessState::default();
+        state.pending_merge_issues.push(PendingMergeIssue {
+            issue_number: 42,
+            task_id: "merge-pr-42".to_string(),
+            comment_only: true,
+        });
+        assert!(has_existing_work_for_task(&state, "merge-pr-42"));
+        assert!(!has_existing_work_for_task(&state, "merge-pr-99"));
+    }
+
+    #[test]
+    fn comment_only_serde_roundtrip() {
+        let issue = PendingMergeIssue {
+            issue_number: 42,
+            task_id: "merge-pr-42".to_string(),
+            comment_only: true,
+        };
+        let json = serde_json::to_string(&issue).unwrap();
+        assert!(json.contains("comment_only"));
+        let loaded: PendingMergeIssue = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.issue_number, 42);
+        assert_eq!(loaded.task_id, "merge-pr-42");
+        assert!(loaded.comment_only);
+    }
+
+    #[test]
+    fn comment_only_defaults_to_false_on_deserialize() {
+        // Legacy entries without comment_only should deserialize with false.
+        let json = r#"{"issue_number":99,"task_id":"merge-pr-99"}"#;
+        let loaded: PendingMergeIssue = serde_json::from_str(json).unwrap();
+        assert_eq!(loaded.issue_number, 99);
+        assert!(!loaded.comment_only);
+    }
+
+    #[test]
+    fn comment_only_false_omitted_from_json() {
+        // When comment_only is false, it should be omitted from JSON output.
+        let issue = PendingMergeIssue {
+            issue_number: 99,
+            task_id: "merge-pr-99".to_string(),
+            comment_only: false,
+        };
+        let json = serde_json::to_string(&issue).unwrap();
+        assert!(!json.contains("comment_only"));
     }
 }
