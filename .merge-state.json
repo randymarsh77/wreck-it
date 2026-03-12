@@ -1,4 +1,11 @@
 {
   "phase": "needs_trigger",
-  "iteration": 0
+  "iteration": 0,
+  "pending_merge_issues": [
+    {
+      "issue_number": 259,
+      "task_id": "merge-pr-259",
+      "comment_only": true
+    }
+  ]
 }
