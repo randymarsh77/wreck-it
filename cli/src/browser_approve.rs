@@ -165,6 +165,10 @@ function generateTOTP(secret) {
 
 // ── Main ─────────────────────────────────────────────────────────────────
 
+// Shared timeout constants (milliseconds).
+const NAV_TIMEOUT = 15_000;
+const ELEMENT_TIMEOUT = 5_000;
+
 const {
   GITHUB_USERNAME,
   GITHUB_PASSWORD,
@@ -188,7 +192,7 @@ try {
   await page.click('[name="commit"]');
 
   // Wait for navigation after login submission.
-  await page.waitForLoadState("networkidle", { timeout: 15_000 });
+  await page.waitForLoadState("networkidle", { timeout: NAV_TIMEOUT });
 
   // ── Two-factor authentication ────────────────────────────────────────
   const currentUrl = page.url();
@@ -202,10 +206,10 @@ try {
     await totpInput.fill(code);
     // Some 2FA forms auto-submit; click the submit button if visible.
     const submitBtn = page.locator('button[type="submit"]');
-    if (await submitBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    if (await submitBtn.isVisible({ timeout: ELEMENT_TIMEOUT }).catch(() => false)) {
       await submitBtn.click();
     }
-    await page.waitForURL(/github\.com(?!.*two-factor)/, { timeout: 15_000 });
+    await page.waitForURL(/github\.com(?!.*two-factor)/, { timeout: NAV_TIMEOUT });
   }
 
   // ── Approve each workflow run ────────────────────────────────────────
@@ -213,7 +217,7 @@ try {
   for (const runId of runIds) {
     const runUrl = `https://github.com/${REPO_OWNER}/${REPO_NAME}/actions/runs/${runId}`;
     await page.goto(runUrl);
-    await page.waitForLoadState("networkidle", { timeout: 15_000 });
+    await page.waitForLoadState("networkidle", { timeout: NAV_TIMEOUT });
 
     // The approval banner typically contains a button labelled
     // "Approve and run".  Try a few common selectors.
@@ -223,12 +227,16 @@ try {
       .first();
 
     const visible = await approveBtn
-      .isVisible({ timeout: 5_000 })
+      .isVisible({ timeout: ELEMENT_TIMEOUT })
       .catch(() => false);
     if (visible) {
       await approveBtn.click();
-      // Wait briefly for the action to take effect.
-      await page.waitForTimeout(2_000);
+      // Wait for the approval banner to disappear, confirming the action
+      // took effect.  Falls back to a short delay if the banner does not
+      // disappear within the timeout.
+      await approveBtn
+        .waitFor({ state: "hidden", timeout: ELEMENT_TIMEOUT })
+        .catch(() => {});
       approved++;
       console.log(`APPROVED:${runId}`);
     } else {
@@ -283,9 +291,15 @@ mod tests {
 
     #[tokio::test]
     async fn browser_approve_errors_without_credentials() {
-        // Ensure the env vars are NOT set for this test.
-        std::env::remove_var(ENV_GITHUB_USERNAME);
-        std::env::remove_var(ENV_GITHUB_PASSWORD);
+        // When GITHUB_USERNAME is not set, the function should return an
+        // error that mentions the missing variable.  Rather than mutating
+        // process-wide environment state (which is not thread-safe and can
+        // interfere with parallel tests), we rely on CI / test environments
+        // not setting GITHUB_USERNAME.  If it happens to be set, we skip.
+        if std::env::var(ENV_GITHUB_USERNAME).is_ok() {
+            eprintln!("skipping: GITHUB_USERNAME is set in this environment");
+            return;
+        }
 
         let result = approve_workflow_runs_via_browser("owner", "repo", &[123]).await;
         assert!(result.is_err());
