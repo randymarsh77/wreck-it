@@ -484,11 +484,18 @@ async fn resolve_via_cloud_agent(
     );
 
     // Track the issue so we can pick up the resulting PR on the next run.
-    state.pending_issues.push(PendingIssue {
-        issue_number: result.issue_number,
-        task_id,
-        merge_method: Some("merge".to_string()),
-    });
+    // Guard against duplicates in case this is called more than once.
+    if !state
+        .pending_issues
+        .iter()
+        .any(|p| p.issue_number == result.issue_number)
+    {
+        state.pending_issues.push(PendingIssue {
+            issue_number: result.issue_number,
+            task_id,
+            merge_method: Some("merge".to_string()),
+        });
+    }
 
     Ok(())
 }
