@@ -245,16 +245,16 @@ pub enum Commands {
     },
 
     /// Scan open PRs for merge conflicts with the base branch and resolve
-    /// them.  Uses a cloud coding agent by default; pass `--backend cli` to
-    /// merge locally and push.
+    /// them.  Uses the Copilot CLI by default; pass `--backend cloud_agent`
+    /// to post a `@copilot` comment, or `--backend cli` to merge locally.
     Merge {
         /// Working directory (defaults to current directory)
         #[arg(short, long)]
         work_dir: Option<PathBuf>,
 
-        /// Backend to use for conflict resolution: "cloud_agent" (default)
-        /// or "cli".
-        #[arg(long, default_value = "cloud_agent")]
+        /// Backend to use for conflict resolution: "copilot_cli" (default),
+        /// "cloud_agent", or "cli".
+        #[arg(long, default_value = "copilot_cli")]
         backend: String,
     },
 

@@ -1,11 +1,14 @@
 //! "Merge" command: scan open PRs for merge conflicts with the base branch
 //! and resolve them.
 //!
-//! When `backend = "cloud_agent"` (the default), the command posts a
-//! `@copilot` comment directly on the conflicting PR, asking the coding
-//! agent to reapply the PR's changes on top of the latest base branch.
-//! This avoids the problem of creating a separate issue whose agent
-//! cannot perform a proper `git merge` across branches.
+//! When `backend = "copilot_cli"` (the default), the command clones the
+//! repository into a subdirectory, checks out the PR branch, merges the
+//! base branch into it, invokes the Copilot CLI to resolve any conflicts,
+//! commits the result, and pushes to the PR branch.
+//!
+//! When `backend = "cloud_agent"`, the command posts a `@copilot` comment
+//! directly on the conflicting PR, asking the coding agent to reapply the
+//! PR's changes on top of the latest base branch.
 //!
 //! When `backend = "cli"`, the command performs a local `git merge` of the
 //! base branch into the PR branch and pushes the result directly.
@@ -28,14 +31,17 @@ use wreck_it_core::state::PendingMergeIssue;
 const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
 
 /// Supported backend values.
+const BACKEND_COPILOT_CLI: &str = "copilot_cli";
 const BACKEND_CLOUD_AGENT: &str = "cloud_agent";
 const BACKEND_CLI: &str = "cli";
 
 /// Run the merge logic: find open PRs with merge conflicts and resolve them.
 ///
-/// `backend` selects how conflicts are resolved – `"cloud_agent"` (default)
-/// posts a `@copilot` comment on the PR asking the agent to reapply changes,
-/// while `"cli"` merges locally and pushes.
+/// `backend` selects how conflicts are resolved – `"copilot_cli"` (default)
+/// clones the repo into a subdirectory, merges the base branch into the PR
+/// branch, invokes the Copilot CLI to resolve conflicts, and pushes;
+/// `"cloud_agent"` posts a `@copilot` comment on the PR asking the agent to
+/// reapply changes; `"cli"` merges locally and pushes.
 ///
 /// When `ralph` is provided, the merge command also loads/saves persistent
 /// state so that PRs created by previous runs are tracked and advanced
@@ -46,7 +52,7 @@ pub async fn run_merge(
     ralph: Option<&RalphConfig>,
 ) -> Result<()> {
     let work_dir = &config.work_dir;
-    let backend = backend.unwrap_or(BACKEND_CLOUD_AGENT);
+    let backend = backend.unwrap_or(BACKEND_COPILOT_CLI);
 
     let github_token = config
         .api_token
@@ -143,10 +149,28 @@ pub async fn run_merge(
         );
 
         let result = match backend {
+            BACKEND_COPILOT_CLI => {
+                resolve_via_copilot_cli(
+                    work_dir,
+                    &pr_detail,
+                    &github_token,
+                    &repo_owner,
+                    &repo_name,
+                )
+                .await
+            }
             BACKEND_CLI => {
                 resolve_via_cli(work_dir, &pr_detail, &github_token, &repo_owner, &repo_name).await
             }
-            _ => resolve_via_cloud_agent(&client, &pr_detail, &mut state).await,
+            BACKEND_CLOUD_AGENT => {
+                resolve_via_cloud_agent(&client, &pr_detail, &mut state).await
+            }
+            other => {
+                anyhow::bail!(
+                    "unknown merge backend '{}'; expected one of: copilot_cli, cloud_agent, cli",
+                    other,
+                );
+            }
         };
 
         match result {
@@ -346,6 +370,248 @@ async fn resolve_via_cloud_agent(
             comment_only: true,
         });
     }
+
+    Ok(())
+}
+
+/// Resolve merge conflicts by cloning the repo into a subdirectory, merging
+/// the base branch into the PR branch, invoking the Copilot CLI to resolve
+/// any conflicts, committing the result, and pushing to the PR branch.
+async fn resolve_via_copilot_cli(
+    work_dir: &Path,
+    detail: &PrDetail,
+    github_token: &str,
+    repo_owner: &str,
+    repo_name: &str,
+) -> Result<()> {
+    use std::process::Command;
+
+    let clone_dir = work_dir.join(format!(".merge-pr-{}", detail.number));
+
+    // Clean up any leftover subdirectory from a previous attempt.
+    if clone_dir.exists() {
+        std::fs::remove_dir_all(&clone_dir).context("Failed to remove stale merge subdirectory")?;
+    }
+
+    // Clone the repository into the subdirectory.
+    // Pass the token via a temporary git credential store file so it does not
+    // appear in the clone URL (which can leak in process listings and logs).
+    let clone_url = format!(
+        "https://github.com/{}/{}.git",
+        repo_owner, repo_name,
+    );
+
+    // Write an ephemeral credential store that git can read.
+    let cred_file = work_dir.join(format!(".merge-pr-{}-cred", detail.number));
+    std::fs::write(
+        &cred_file,
+        format!(
+            "https://x-access-token:{}@github.com\n",
+            github_token,
+        ),
+    )
+    .context("Failed to write temporary credential file")?;
+
+    let cred_helper = format!(
+        "credential.helper=store --file={}",
+        cred_file.to_string_lossy(),
+    );
+
+    let clone_status = Command::new("git")
+        .args([
+            "-c",
+            &cred_helper,
+            "clone",
+            "--depth=50",
+            &clone_url,
+            &clone_dir.to_string_lossy(),
+        ])
+        .status()
+        .context("Failed to run `git clone`")?;
+    if !clone_status.success() {
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git clone failed");
+    }
+
+    // Persist the credential helper in the clone's local git config so that
+    // subsequent fetch/push commands are authenticated.
+    let set_config_status = Command::new("git")
+        .args([
+            "config",
+            "--local",
+            "credential.helper",
+            &format!("store --file={}", cred_file.to_string_lossy()),
+        ])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to configure git credentials in clone")?;
+    if !set_config_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git config for credential helper failed");
+    }
+
+    // Check out the PR branch.
+    let checkout_status = Command::new("git")
+        .args(["checkout", &detail.head_ref])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to checkout PR branch")?;
+    if !checkout_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git checkout {} failed", detail.head_ref);
+    }
+
+    // Fetch the base branch.
+    let fetch_status = Command::new("git")
+        .args(["fetch", "origin", &detail.base_ref])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to fetch base branch")?;
+    if !fetch_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git fetch origin {} failed", detail.base_ref);
+    }
+
+    // Merge the base branch into the PR branch.
+    let merge_output = Command::new("git")
+        .args([
+            "merge",
+            &format!("origin/{}", detail.base_ref),
+            "--no-edit",
+        ])
+        .current_dir(&clone_dir)
+        .output()
+        .context("Failed to run git merge")?;
+
+    if merge_output.status.success() {
+        // Merge succeeded without conflicts — push and clean up.
+        let push_status = Command::new("git")
+            .args(["push", "origin", &detail.head_ref])
+            .current_dir(&clone_dir)
+            .status()
+            .context("Failed to push merged branch")?;
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        if !push_status.success() {
+            anyhow::bail!("git push origin {} failed", detail.head_ref);
+        }
+        println!(
+            "[wreck-it] merge: cleanly merged {} into {} and pushed",
+            detail.base_ref, detail.head_ref,
+        );
+        return Ok(());
+    }
+
+    // Merge produced conflicts — invoke the Copilot CLI to resolve them.
+    println!(
+        "[wreck-it] merge: merge conflicts detected, invoking Copilot CLI to resolve…",
+    );
+
+    let cli_path = crate::agent::resolve_copilot_cli_path().context(
+        "Could not find the 'copilot' binary on PATH. \
+         Install GitHub Copilot CLI (https://gh.io/copilot-install) \
+         or ensure it is available in your shell environment.",
+    )?;
+
+    let conflict_prompt = format!(
+        "There are merge conflicts in this repository after merging `origin/{}` into `{}`. \
+         Please resolve all merge conflicts in every file. For each conflicted file, \
+         pick the correct resolution that preserves the intent of both branches. \
+         After resolving, stage all changes with `git add .`.",
+        detail.base_ref, detail.head_ref,
+    );
+
+    use copilot_sdk_supercharged::*;
+
+    let config = SessionConfig {
+        request_permission: Some(false),
+        request_user_input: Some(false),
+        working_directory: Some(clone_dir.to_string_lossy().to_string()),
+        ..Default::default()
+    };
+
+    let result = crate::agent::copilot_oneshot(
+        cli_path,
+        config,
+        conflict_prompt,
+        300_000, // 5 minute timeout for conflict resolution
+        "",
+    )
+    .await;
+
+    if let Err(e) = result {
+        // Abort the merge and clean up on failure.
+        let _ = Command::new("git")
+            .args(["merge", "--abort"])
+            .current_dir(&clone_dir)
+            .status();
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("Copilot CLI conflict resolution failed: {}", e);
+    }
+
+    // Check if all conflicts have been resolved (no conflict markers remain).
+    let diff_check = Command::new("git")
+        .args(["diff", "--check"])
+        .current_dir(&clone_dir)
+        .output()
+        .context("Failed to run git diff --check")?;
+
+    if !diff_check.status.success() {
+        let _ = Command::new("git")
+            .args(["merge", "--abort"])
+            .current_dir(&clone_dir)
+            .status();
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!(
+            "Copilot CLI did not fully resolve all merge conflicts between {} and {}",
+            detail.base_ref,
+            detail.head_ref,
+        );
+    }
+
+    // Commit the merge resolution.
+    let commit_status = Command::new("git")
+        .args([
+            "commit",
+            "--no-edit",
+            "-m",
+            &format!(
+                "Merge {} into {} (resolved by Copilot CLI)",
+                detail.base_ref, detail.head_ref,
+            ),
+        ])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to commit merge resolution")?;
+    if !commit_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git commit for merge resolution failed");
+    }
+
+    // Push to the PR branch.
+    let push_status = Command::new("git")
+        .args(["push", "origin", &detail.head_ref])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to push resolved merge")?;
+
+    let _ = std::fs::remove_dir_all(&clone_dir);
+    let _ = std::fs::remove_file(&cred_file);
+
+    if !push_status.success() {
+        anyhow::bail!("git push origin {} failed", detail.head_ref);
+    }
+
+    println!(
+        "[wreck-it] merge: resolved conflicts between {} and {} via Copilot CLI and pushed",
+        detail.base_ref, detail.head_ref,
+    );
 
     Ok(())
 }
@@ -680,6 +946,7 @@ mod tests {
 
     #[test]
     fn backend_constants_are_valid() {
+        assert_eq!(BACKEND_COPILOT_CLI, "copilot_cli");
         assert_eq!(BACKEND_CLOUD_AGENT, "cloud_agent");
         assert_eq!(BACKEND_CLI, "cli");
     }

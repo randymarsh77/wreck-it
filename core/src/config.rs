@@ -122,13 +122,16 @@ pub struct RalphConfig {
     /// Backend to use for this ralph context.
     ///
     /// Supported values:
+    /// - `"copilot_cli"` – clones the repo into a subdirectory, merges the
+    ///   base branch, invokes the Copilot CLI to resolve conflicts, and
+    ///   pushes.
     /// - `"cloud_agent"` – creates a GitHub issue describing the work and
     ///   assigns a coding agent to resolve it remotely.
     /// - `"cli"` – performs the work locally (e.g. git merge) and pushes the
     ///   result directly.
     ///
-    /// When omitted, the backend defaults to `"cloud_agent"` for commands
-    /// that support it.
+    /// When omitted, the backend defaults to `"copilot_cli"` for the merge
+    /// command and `"cloud_agent"` for other commands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
 
