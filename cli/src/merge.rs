@@ -451,6 +451,20 @@ async fn resolve_via_copilot_cli(
         anyhow::bail!("git config for credential helper failed");
     }
 
+    // Fetch the PR branch explicitly — the shallow clone only fetches the
+    // default branch (--depth implies --single-branch), so the PR's head ref
+    // won't be available locally without this step.
+    let fetch_head_status = Command::new("git")
+        .args(["fetch", "origin", &detail.head_ref])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to fetch PR head branch")?;
+    if !fetch_head_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git fetch origin {} failed", detail.head_ref);
+    }
+
     // Check out the PR branch.
     let checkout_status = Command::new("git")
         .args(["checkout", &detail.head_ref])
