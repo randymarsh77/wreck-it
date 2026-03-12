@@ -1,10 +1,4 @@
 {
   "phase": "needs_trigger",
-  "iteration": 0,
-  "memory": [
-  ],
-  "tracked_prs": [
-  ],
-  "pending_merge_issues": [
-  ]
+  "iteration": 0
 }
