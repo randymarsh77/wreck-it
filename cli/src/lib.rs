@@ -17,6 +17,7 @@
 mod agent;
 mod agent_memory;
 mod artefact_store;
+mod browser_approve;
 mod cli;
 mod cloud_agent;
 mod config_manager;

@@ -1473,6 +1473,7 @@ impl CloudAgentClient {
         }
 
         let mut approved_count: usize = 0;
+        let mut unapproved_run_ids: Vec<u64> = Vec::new();
 
         for run_id in &all_run_ids {
             // Attempt the REST approval endpoint.  This is the standard
@@ -1527,6 +1528,50 @@ impl CloudAgentClient {
             // as other cases where the `/approve` endpoint is not sufficient.
             if self.approve_pending_deployments(*run_id, pr_number).await {
                 approved_count += 1;
+            } else {
+                unapproved_run_ids.push(*run_id);
+            }
+        }
+
+        // ── Playwright browser-automation fallback ─────────────────────
+        //
+        // When the REST API and pending-deployments endpoints both fail
+        // (a known issue with the `/approve` endpoint), fall back to UI
+        // automation via Playwright.  This opens a headless browser,
+        // signs into GitHub (handling two-factor auth via TOTP), navigates
+        // to each workflow-run page, and clicks the "Approve and run"
+        // button.
+        if !unapproved_run_ids.is_empty() {
+            tracing::info!(
+                "Attempting Playwright browser fallback for {} unapproved run(s) on PR #{}",
+                unapproved_run_ids.len(),
+                pr_number,
+            );
+
+            match crate::browser_approve::approve_workflow_runs_via_browser(
+                &self.repo_owner,
+                &self.repo_name,
+                &unapproved_run_ids,
+            )
+            .await
+            {
+                Ok(browser_approved) => {
+                    approved_count += browser_approved;
+                    if browser_approved > 0 {
+                        tracing::info!(
+                            "Approved {} workflow run(s) via browser for PR #{}",
+                            browser_approved,
+                            pr_number,
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Browser-based workflow approval failed for PR #{}: {}",
+                        pr_number,
+                        e,
+                    );
+                }
             }
         }
 
