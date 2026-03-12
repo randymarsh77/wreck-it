@@ -162,9 +162,7 @@ pub async fn run_merge(
             BACKEND_CLI => {
                 resolve_via_cli(work_dir, &pr_detail, &github_token, &repo_owner, &repo_name).await
             }
-            BACKEND_CLOUD_AGENT => {
-                resolve_via_cloud_agent(&client, &pr_detail, &mut state).await
-            }
+            BACKEND_CLOUD_AGENT => resolve_via_cloud_agent(&client, &pr_detail, &mut state).await,
             other => {
                 anyhow::bail!(
                     "unknown merge backend '{}'; expected one of: copilot_cli, cloud_agent, cli",
@@ -396,19 +394,13 @@ async fn resolve_via_copilot_cli(
     // Clone the repository into the subdirectory.
     // Pass the token via a temporary git credential store file so it does not
     // appear in the clone URL (which can leak in process listings and logs).
-    let clone_url = format!(
-        "https://github.com/{}/{}.git",
-        repo_owner, repo_name,
-    );
+    let clone_url = format!("https://github.com/{}/{}.git", repo_owner, repo_name,);
 
     // Write an ephemeral credential store that git can read.
     let cred_file = work_dir.join(format!(".merge-pr-{}-cred", detail.number));
     std::fs::write(
         &cred_file,
-        format!(
-            "https://x-access-token:{}@github.com\n",
-            github_token,
-        ),
+        format!("https://x-access-token:{}@github.com\n", github_token,),
     )
     .context("Failed to write temporary credential file")?;
 
@@ -491,11 +483,7 @@ async fn resolve_via_copilot_cli(
 
     // Merge the base branch into the PR branch.
     let merge_output = Command::new("git")
-        .args([
-            "merge",
-            &format!("origin/{}", detail.base_ref),
-            "--no-edit",
-        ])
+        .args(["merge", &format!("origin/{}", detail.base_ref), "--no-edit"])
         .current_dir(&clone_dir)
         .output()
         .context("Failed to run git merge")?;
@@ -520,9 +508,7 @@ async fn resolve_via_copilot_cli(
     }
 
     // Merge produced conflicts — invoke the Copilot CLI to resolve them.
-    println!(
-        "[wreck-it] merge: merge conflicts detected, invoking Copilot CLI to resolve…",
-    );
+    println!("[wreck-it] merge: merge conflicts detected, invoking Copilot CLI to resolve…",);
 
     let cli_path = crate::agent::resolve_copilot_cli_path().context(
         "Could not find the 'copilot' binary on PATH. \
@@ -733,8 +719,7 @@ async fn promote_pending_merge_issues(
                     // treat conservatively as "not yet mergeable" so we
                     // keep the deduplication guard in place.
                     let mergeable = pr_json["mergeable"].as_bool().unwrap_or(false);
-                    let mergeable_state =
-                        pr_json["mergeable_state"].as_str().unwrap_or("unknown");
+                    let mergeable_state = pr_json["mergeable_state"].as_str().unwrap_or("unknown");
                     let still_conflicting = !mergeable || mergeable_state == "dirty";
 
                     if is_closed {
@@ -860,10 +845,7 @@ async fn fetch_diff_summary_via_api(client: &CloudAgentClient, pr_number: u64) -
 /// Check whether we already have a pending merge issue or tracked PR for the
 /// given `task_id`.  This prevents creating duplicate issues when a conflict
 /// resolution is already in progress.
-fn has_existing_work_for_task(
-    state: &crate::headless_state::HeadlessState,
-    task_id: &str,
-) -> bool {
+fn has_existing_work_for_task(state: &crate::headless_state::HeadlessState, task_id: &str) -> bool {
     state
         .pending_merge_issues
         .iter()
