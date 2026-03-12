@@ -394,13 +394,33 @@ async fn resolve_via_copilot_cli(
     }
 
     // Clone the repository into the subdirectory.
+    // Pass the token via a temporary git credential store file so it does not
+    // appear in the clone URL (which can leak in process listings and logs).
     let clone_url = format!(
-        "https://x-access-token:{}@github.com/{}/{}.git",
-        github_token, repo_owner, repo_name,
+        "https://github.com/{}/{}.git",
+        repo_owner, repo_name,
+    );
+
+    // Write an ephemeral credential store that git can read.
+    let cred_file = work_dir.join(format!(".merge-pr-{}-cred", detail.number));
+    std::fs::write(
+        &cred_file,
+        format!(
+            "https://x-access-token:{}@github.com\n",
+            github_token,
+        ),
+    )
+    .context("Failed to write temporary credential file")?;
+
+    let cred_helper = format!(
+        "credential.helper=store --file={}",
+        cred_file.to_string_lossy(),
     );
 
     let clone_status = Command::new("git")
         .args([
+            "-c",
+            &cred_helper,
             "clone",
             "--depth=50",
             &clone_url,
@@ -409,7 +429,26 @@ async fn resolve_via_copilot_cli(
         .status()
         .context("Failed to run `git clone`")?;
     if !clone_status.success() {
+        let _ = std::fs::remove_file(&cred_file);
         anyhow::bail!("git clone failed");
+    }
+
+    // Persist the credential helper in the clone's local git config so that
+    // subsequent fetch/push commands are authenticated.
+    let set_config_status = Command::new("git")
+        .args([
+            "config",
+            "--local",
+            "credential.helper",
+            &format!("store --file={}", cred_file.to_string_lossy()),
+        ])
+        .current_dir(&clone_dir)
+        .status()
+        .context("Failed to configure git credentials in clone")?;
+    if !set_config_status.success() {
+        let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
+        anyhow::bail!("git config for credential helper failed");
     }
 
     // Check out the PR branch.
@@ -420,6 +459,7 @@ async fn resolve_via_copilot_cli(
         .context("Failed to checkout PR branch")?;
     if !checkout_status.success() {
         let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
         anyhow::bail!("git checkout {} failed", detail.head_ref);
     }
 
@@ -431,6 +471,7 @@ async fn resolve_via_copilot_cli(
         .context("Failed to fetch base branch")?;
     if !fetch_status.success() {
         let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
         anyhow::bail!("git fetch origin {} failed", detail.base_ref);
     }
 
@@ -453,6 +494,7 @@ async fn resolve_via_copilot_cli(
             .status()
             .context("Failed to push merged branch")?;
         let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
         if !push_status.success() {
             anyhow::bail!("git push origin {} failed", detail.head_ref);
         }
@@ -507,6 +549,7 @@ async fn resolve_via_copilot_cli(
             .current_dir(&clone_dir)
             .status();
         let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
         anyhow::bail!("Copilot CLI conflict resolution failed: {}", e);
     }
 
@@ -523,6 +566,7 @@ async fn resolve_via_copilot_cli(
             .current_dir(&clone_dir)
             .status();
         let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
         anyhow::bail!(
             "Copilot CLI did not fully resolve all merge conflicts between {} and {}",
             detail.base_ref,
@@ -546,6 +590,7 @@ async fn resolve_via_copilot_cli(
         .context("Failed to commit merge resolution")?;
     if !commit_status.success() {
         let _ = std::fs::remove_dir_all(&clone_dir);
+        let _ = std::fs::remove_file(&cred_file);
         anyhow::bail!("git commit for merge resolution failed");
     }
 
@@ -557,14 +602,15 @@ async fn resolve_via_copilot_cli(
         .context("Failed to push resolved merge")?;
 
     let _ = std::fs::remove_dir_all(&clone_dir);
+    let _ = std::fs::remove_file(&cred_file);
 
     if !push_status.success() {
         anyhow::bail!("git push origin {} failed", detail.head_ref);
     }
 
     println!(
-        "[wreck-it] merge: resolved conflicts in {} via Copilot CLI and pushed to {}",
-        detail.head_ref, detail.head_ref,
+        "[wreck-it] merge: resolved conflicts between {} and {} via Copilot CLI and pushed",
+        detail.base_ref, detail.head_ref,
     );
 
     Ok(())
