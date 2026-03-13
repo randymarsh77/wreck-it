@@ -78,6 +78,13 @@ pub struct PendingMergeIssue {
     /// the PR (stored in `issue_number`) rather than a coding-agent issue.
     #[serde(default, skip_serializing_if = "is_false")]
     pub comment_only: bool,
+    /// The head commit SHA of the PR at the time the `@copilot` comment was
+    /// posted.  Used to detect whether the agent has pushed a change: if the
+    /// current head SHA differs from this value, the agent's work is done.
+    /// When the work is done but the PR still has conflicts, the
+    /// deduplication guard is removed so a fresh comment can be posted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_sha: Option<String>,
 }
 
 /// Persistent state that is committed to the repo between cron invocations.

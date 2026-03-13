@@ -238,6 +238,7 @@ struct PrDetail {
     title: String,
     body: String,
     head_ref: String,
+    head_sha: String,
     base_ref: String,
     has_conflicts: bool,
 }
@@ -255,6 +256,11 @@ async fn fetch_pr_detail(
     let body = pr_json["body"].as_str().unwrap_or("").to_string();
     let head_ref = pr_json
         .pointer("/head/ref")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let head_sha = pr_json
+        .pointer("/head/sha")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
@@ -277,6 +283,7 @@ async fn fetch_pr_detail(
         title,
         body,
         head_ref,
+        head_sha,
         base_ref,
         has_conflicts,
     })
@@ -366,6 +373,7 @@ async fn resolve_via_cloud_agent(
             issue_number: detail.number,
             task_id,
             comment_only: true,
+            head_sha: Some(detail.head_sha.clone()).filter(|s| !s.is_empty()),
         });
     }
 
@@ -735,10 +743,34 @@ async fn promote_pending_merge_issues(
                         );
                         promoted.push(pending.issue_number);
                     } else {
-                        println!(
-                            "[wreck-it] merge: PR #{} still has conflicts — keeping comment guard",
-                            pending.issue_number,
-                        );
+                        // The PR still has conflicts.  Check whether the
+                        // agent has finished working by comparing the current
+                        // head SHA with the one recorded when the comment was
+                        // posted.  A different SHA means a push occurred (the
+                        // agent attempted a fix) — remove the guard so a
+                        // fresh comment can be posted.
+                        let current_sha = pr_json
+                            .pointer("/head/sha")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let agent_pushed = pending
+                            .head_sha
+                            .as_deref()
+                            .is_some_and(|recorded| !recorded.is_empty() && recorded != current_sha);
+
+                        if agent_pushed {
+                            println!(
+                                "[wreck-it] merge: PR #{} still has conflicts but head SHA changed \
+                                 (agent work done) — removing comment guard to allow re-comment",
+                                pending.issue_number,
+                            );
+                            promoted.push(pending.issue_number);
+                        } else {
+                            println!(
+                                "[wreck-it] merge: PR #{} still has conflicts — keeping comment guard",
+                                pending.issue_number,
+                            );
+                        }
                     }
                 }
                 Err(e) => {
@@ -905,6 +937,7 @@ mod tests {
             title: "Add feature X".to_string(),
             body: "This PR adds feature X.".to_string(),
             head_ref: "feature-x".to_string(),
+            head_sha: "abc123".to_string(),
             base_ref: "main".to_string(),
             has_conflicts: true,
         };
@@ -928,6 +961,7 @@ mod tests {
             title: "Small fix".to_string(),
             body: String::new(),
             head_ref: "fix-typo".to_string(),
+            head_sha: "def456".to_string(),
             base_ref: "main".to_string(),
             has_conflicts: true,
         };
@@ -953,12 +987,14 @@ mod tests {
             issue_number: 99,
             task_id: "merge-pr-42".to_string(),
             comment_only: false,
+            head_sha: None,
         };
         let json = serde_json::to_string(&issue).unwrap();
         let loaded: PendingMergeIssue = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.issue_number, 99);
         assert_eq!(loaded.task_id, "merge-pr-42");
         assert!(!loaded.comment_only);
+        assert!(loaded.head_sha.is_none());
     }
 
     #[test]
@@ -984,6 +1020,7 @@ mod tests {
             issue_number: 100,
             task_id: "merge-pr-55".to_string(),
             comment_only: false,
+            head_sha: None,
         });
         state.tracked_prs.push(TrackedPr {
             pr_number: 200,
@@ -1028,6 +1065,7 @@ mod tests {
             issue_number: 100,
             task_id: "merge-pr-42".to_string(),
             comment_only: false,
+            head_sha: None,
         });
         assert!(has_existing_work_for_task(&state, "merge-pr-42"));
         assert!(!has_existing_work_for_task(&state, "merge-pr-99"));
@@ -1053,6 +1091,7 @@ mod tests {
             issue_number: 100,
             task_id: "merge-pr-42".to_string(),
             comment_only: false,
+            head_sha: None,
         });
         state.tracked_prs.push(TrackedPr {
             pr_number: 200,
@@ -1072,6 +1111,7 @@ mod tests {
             issue_number: 42,
             task_id: "merge-pr-42".to_string(),
             comment_only: true,
+            head_sha: Some("abc123".to_string()),
         });
         assert!(has_existing_work_for_task(&state, "merge-pr-42"));
         assert!(!has_existing_work_for_task(&state, "merge-pr-99"));
@@ -1083,13 +1123,16 @@ mod tests {
             issue_number: 42,
             task_id: "merge-pr-42".to_string(),
             comment_only: true,
+            head_sha: Some("abc123def456".to_string()),
         };
         let json = serde_json::to_string(&issue).unwrap();
         assert!(json.contains("comment_only"));
+        assert!(json.contains("head_sha"));
         let loaded: PendingMergeIssue = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.issue_number, 42);
         assert_eq!(loaded.task_id, "merge-pr-42");
         assert!(loaded.comment_only);
+        assert_eq!(loaded.head_sha.as_deref(), Some("abc123def456"));
     }
 
     #[test]
@@ -1104,12 +1147,58 @@ mod tests {
     #[test]
     fn comment_only_false_omitted_from_json() {
         // When comment_only is false, it should be omitted from JSON output.
+        // When head_sha is None, it should also be omitted.
         let issue = PendingMergeIssue {
             issue_number: 99,
             task_id: "merge-pr-99".to_string(),
             comment_only: false,
+            head_sha: None,
         };
         let json = serde_json::to_string(&issue).unwrap();
         assert!(!json.contains("comment_only"));
+        assert!(!json.contains("head_sha"));
+    }
+
+    #[test]
+    fn head_sha_defaults_to_none_on_deserialize() {
+        // Legacy entries without head_sha should deserialize with None.
+        let json = r#"{"issue_number":42,"task_id":"merge-pr-42","comment_only":true}"#;
+        let loaded: PendingMergeIssue = serde_json::from_str(json).unwrap();
+        assert_eq!(loaded.issue_number, 42);
+        assert!(loaded.comment_only);
+        assert!(loaded.head_sha.is_none());
+    }
+
+    #[test]
+    fn head_sha_serde_roundtrip() {
+        let issue = PendingMergeIssue {
+            issue_number: 42,
+            task_id: "merge-pr-42".to_string(),
+            comment_only: true,
+            head_sha: Some("abc123def456".to_string()),
+        };
+        let json = serde_json::to_string(&issue).unwrap();
+        assert!(json.contains(r#""head_sha":"abc123def456""#));
+        let loaded: PendingMergeIssue = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.head_sha.as_deref(), Some("abc123def456"));
+    }
+
+    #[test]
+    fn state_with_head_sha_backward_compat() {
+        // Existing state files with pending_merge_issues but no head_sha
+        // should still load correctly.
+        use crate::headless_state::load_headless_state;
+        let dir = tempfile::tempdir().unwrap();
+        let state_file = dir.path().join(".merge-state.json");
+        std::fs::write(
+            &state_file,
+            r#"{"phase":"needs_trigger","iteration":0,"pending_merge_issues":[{"issue_number":42,"task_id":"merge-pr-42","comment_only":true}]}"#,
+        )
+        .unwrap();
+
+        let loaded = load_headless_state(&state_file).unwrap();
+        assert_eq!(loaded.pending_merge_issues.len(), 1);
+        assert!(loaded.pending_merge_issues[0].comment_only);
+        assert!(loaded.pending_merge_issues[0].head_sha.is_none());
     }
 }
