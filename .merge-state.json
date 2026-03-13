@@ -6,6 +6,18 @@
       "issue_number": 259,
       "task_id": "merge-pr-259",
       "comment_only": true
+    },
+    {
+      "issue_number": 207,
+      "task_id": "merge-pr-207",
+      "comment_only": true,
+      "head_sha": "d1320e9d5b01c12ba966059db0659015e6518c62"
+    },
+    {
+      "issue_number": 174,
+      "task_id": "merge-pr-174",
+      "comment_only": true,
+      "head_sha": "0c5f0984d88112e3f57af34a59846522966ceb16"
     }
   ]
 }
