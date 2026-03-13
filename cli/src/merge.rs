@@ -270,9 +270,9 @@ async fn fetch_pr_detail(
         .unwrap_or("main")
         .to_string();
 
-    // `mergeable` is null while GitHub is still computing it; treat null as
-    // "no conflicts detected yet".
-    let mergeable = pr_json["mergeable"].as_bool().unwrap_or(true);
+    // `mergeable` is null while GitHub is still computing it; treat null
+    // conservatively as "not yet mergeable" so we don't skip real conflicts.
+    let mergeable = pr_json["mergeable"].as_bool().unwrap_or(false);
     let mergeable_state = pr_json["mergeable_state"].as_str().unwrap_or("unknown");
     let has_conflicts = !mergeable || mergeable_state == "dirty";
 
@@ -753,10 +753,9 @@ async fn promote_pending_merge_issues(
                             .pointer("/head/sha")
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
-                        let agent_pushed = pending
-                            .head_sha
-                            .as_deref()
-                            .is_some_and(|recorded| !recorded.is_empty() && recorded != current_sha);
+                        let agent_pushed = pending.head_sha.as_deref().is_some_and(|recorded| {
+                            !recorded.is_empty() && recorded != current_sha
+                        });
 
                         if agent_pushed {
                             println!(
@@ -1181,6 +1180,47 @@ mod tests {
         assert!(json.contains(r#""head_sha":"abc123def456""#));
         let loaded: PendingMergeIssue = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.head_sha.as_deref(), Some("abc123def456"));
+    }
+
+    /// Helper: replicate the conflict-detection logic from `fetch_pr_detail`
+    /// so we can unit-test it without a real HTTP client.
+    fn has_conflicts_from_json(pr_json: &serde_json::Value) -> bool {
+        let mergeable = pr_json["mergeable"].as_bool().unwrap_or(false);
+        let mergeable_state = pr_json["mergeable_state"].as_str().unwrap_or("unknown");
+        !mergeable || mergeable_state == "dirty"
+    }
+
+    #[test]
+    fn conflict_detected_when_mergeable_is_false() {
+        let json = serde_json::json!({ "mergeable": false, "mergeable_state": "dirty" });
+        assert!(has_conflicts_from_json(&json));
+    }
+
+    #[test]
+    fn no_conflict_when_mergeable_is_true_and_clean() {
+        let json = serde_json::json!({ "mergeable": true, "mergeable_state": "clean" });
+        assert!(!has_conflicts_from_json(&json));
+    }
+
+    #[test]
+    fn conflict_detected_when_mergeable_is_null() {
+        // GitHub returns null while computing merge status.
+        // We must treat this conservatively as "has conflicts" to avoid
+        // skipping PRs that actually have conflicts.
+        let json = serde_json::json!({ "mergeable": null, "mergeable_state": "unknown" });
+        assert!(has_conflicts_from_json(&json));
+    }
+
+    #[test]
+    fn conflict_detected_when_mergeable_field_missing() {
+        let json = serde_json::json!({ "mergeable_state": "unknown" });
+        assert!(has_conflicts_from_json(&json));
+    }
+
+    #[test]
+    fn conflict_detected_when_state_is_dirty_even_if_mergeable_true() {
+        let json = serde_json::json!({ "mergeable": true, "mergeable_state": "dirty" });
+        assert!(has_conflicts_from_json(&json));
     }
 
     #[test]
