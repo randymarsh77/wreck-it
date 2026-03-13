@@ -1704,11 +1704,14 @@ impl CloudAgentClient {
                 true
             }
             Ok(resp) => {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
                 tracing::warn!(
-                    "Failed to rerun workflow run {} (PR #{}) ({})",
+                    "Failed to rerun workflow run {} (PR #{}) ({}): {}",
                     run_id,
                     pr_number,
-                    resp.status(),
+                    status,
+                    body,
                 );
                 false
             }
