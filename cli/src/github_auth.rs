@@ -227,11 +227,13 @@ pub fn build_plan_issue_body(goal: &str, plan_filename: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::ENV_LOCK;
 
     // ---- resolve_github_token tests ----
 
     #[tokio::test]
     async fn resolve_from_config_token() {
+        let _guard = ENV_LOCK.lock().unwrap();
         // Clear env to avoid interference from CI environment.
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
@@ -247,6 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_skips_empty_config_token() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
         let had_oauth = std::env::var("WRECK_IT_OAUTH_CLIENT_ID").ok();
@@ -266,6 +269,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_falls_through_when_no_sources() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
         let had_oauth = std::env::var("WRECK_IT_OAUTH_CLIENT_ID").ok();

@@ -286,11 +286,13 @@ pub fn client_from_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::ENV_LOCK;
 
     // ── resolve_token ────────────────────────────────────────────────────────
 
     #[test]
     fn resolve_token_prefers_env_over_config() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::set_var("GITHUB_TOKEN", "env-token");
 
@@ -306,6 +308,7 @@ mod tests {
 
     #[test]
     fn resolve_token_falls_back_to_config() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
 
@@ -319,6 +322,7 @@ mod tests {
 
     #[test]
     fn resolve_token_returns_none_when_no_sources() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
 
@@ -332,6 +336,7 @@ mod tests {
 
     #[test]
     fn resolve_token_ignores_empty_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::set_var("GITHUB_TOKEN", "");
 
@@ -354,6 +359,7 @@ mod tests {
 
     #[test]
     fn client_from_config_returns_none_when_repo_missing() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
 
@@ -367,6 +373,7 @@ mod tests {
 
     #[test]
     fn client_from_config_returns_none_when_no_token() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
 
@@ -380,6 +387,7 @@ mod tests {
 
     #[test]
     fn client_from_config_returns_client_when_configured() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
 
