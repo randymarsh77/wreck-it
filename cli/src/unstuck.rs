@@ -1,12 +1,15 @@
 //! "Unstuck" command: scan open PRs **and the main branch** for failing CI
 //! checks.  For PRs it comments `@copilot` to request fixes.  For the main
 //! branch it opens a GitHub issue (if one doesn't already exist) and assigns
-//! a coding agent to fix the build.
+//! a coding agent to fix the build.  When an issue already exists and the
+//! agent has created a PR, the command advances that PR toward merge —
+//! converting from draft, approving workflows, enabling auto-merge, and
+//! commenting `@copilot` when checks are failing.
 //!
 //! This can be used as a standalone CLI command (`wreck-it unstuck`) or as a
 //! ralph command (`command = "unstuck"` in `[[ralphs]]`).
 
-use crate::cloud_agent::{resolve_repo_info, CloudAgentClient};
+use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus, PrMergeStatus};
 use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::state_worktree::{detect_default_branch, ensure_state_worktree};
 use crate::types::Config;
@@ -163,9 +166,12 @@ async fn check_main_branch(client: &CloudAgentClient, work_dir: &Path) {
     match client.find_open_issue_by_title(&issue_title).await {
         Ok(Some(existing)) => {
             println!(
-                "[wreck-it] unstuck: issue #{} already tracks the failing '{}' build — skipping",
+                "[wreck-it] unstuck: issue #{} already tracks the failing '{}' build — checking for linked PR",
                 existing, default_branch,
             );
+            // The agent may have created a PR from this issue.  Try to
+            // find and advance it toward merge.
+            advance_issue_pr(client, existing).await;
         }
         Ok(None) => {
             // No existing issue – create one and assign an agent.
@@ -198,6 +204,166 @@ async fn check_main_branch(client: &CloudAgentClient, work_dir: &Path) {
             println!(
                 "[wreck-it] unstuck: failed to search for existing issues: {}",
                 e,
+            );
+        }
+    }
+}
+
+/// Given an existing issue created by the unstuck workflow, check whether the
+/// agent has created a linked PR and advance it toward merge — mirroring the
+/// behaviour of the normal ralph lifecycle (convert from draft, approve
+/// workflows, enable auto-merge, comment `@copilot` on failures).
+async fn advance_issue_pr(client: &CloudAgentClient, issue_number: u64) {
+    let status = match client.check_agent_status(issue_number).await {
+        Ok(s) => s,
+        Err(e) => {
+            println!(
+                "[wreck-it] unstuck: failed to check agent status for issue #{}: {}",
+                issue_number, e,
+            );
+            return;
+        }
+    };
+
+    let pr_number = match status {
+        CloudAgentStatus::PrCreated { pr_number, .. } => pr_number,
+        CloudAgentStatus::PrCreatedAgentWorking { pr_number, .. } => {
+            println!(
+                "[wreck-it] unstuck: issue #{} — agent created PR #{} but is still working",
+                issue_number, pr_number,
+            );
+            return;
+        }
+        CloudAgentStatus::Working => {
+            println!(
+                "[wreck-it] unstuck: issue #{} — agent is still working, no PR yet",
+                issue_number,
+            );
+            return;
+        }
+        CloudAgentStatus::CompletedNoPr => {
+            println!(
+                "[wreck-it] unstuck: issue #{} — agent completed without creating a PR",
+                issue_number,
+            );
+            return;
+        }
+    };
+
+    println!(
+        "[wreck-it] unstuck: issue #{} has linked PR #{} — advancing",
+        issue_number, pr_number,
+    );
+
+    let merge_status = match client.check_pr_merge_status(pr_number).await {
+        Ok(s) => s,
+        Err(e) => {
+            println!(
+                "[wreck-it] unstuck: failed to check merge status for PR #{}: {}",
+                pr_number, e,
+            );
+            return;
+        }
+    };
+
+    match merge_status {
+        PrMergeStatus::Draft => {
+            println!(
+                "[wreck-it] unstuck: PR #{} is a draft — marking ready for review",
+                pr_number,
+            );
+            if let Err(e) = client.mark_pr_ready_for_review(pr_number).await {
+                println!(
+                    "[wreck-it] unstuck: failed to mark PR #{} ready: {}",
+                    pr_number, e,
+                );
+            }
+        }
+        PrMergeStatus::AgentWorkInProgress => {
+            println!(
+                "[wreck-it] unstuck: PR #{} — agent is still working, skipping",
+                pr_number,
+            );
+        }
+        PrMergeStatus::NotMergeable => {
+            // Check for failing CI checks first.
+            let has_failures = match client.has_failing_checks_for_pr(pr_number).await {
+                Ok(v) => v,
+                Err(e) => {
+                    println!(
+                        "[wreck-it] unstuck: failed to check failing checks for PR #{}: {}",
+                        pr_number, e,
+                    );
+                    false
+                }
+            };
+            if has_failures {
+                println!(
+                    "[wreck-it] unstuck: PR #{} has failing checks — requesting @copilot fix",
+                    pr_number,
+                );
+                if let Err(e) = client
+                    .comment_on_pr(
+                        pr_number,
+                        "@copilot The CI checks on this PR are failing. \
+                         Please investigate the failures and push a fix.",
+                    )
+                    .await
+                {
+                    println!(
+                        "[wreck-it] unstuck: failed to comment on PR #{}: {}",
+                        pr_number, e,
+                    );
+                }
+            } else {
+                println!(
+                    "[wreck-it] unstuck: PR #{} not yet mergeable — approving workflows and enabling auto-merge",
+                    pr_number,
+                );
+                if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                    println!(
+                        "[wreck-it] unstuck: failed to approve workflows for PR #{}: {}",
+                        pr_number, e,
+                    );
+                }
+                if let Err(e) = client.enable_auto_merge(pr_number).await {
+                    println!(
+                        "[wreck-it] unstuck: failed to enable auto-merge for PR #{}: {}",
+                        pr_number, e,
+                    );
+                }
+            }
+        }
+        PrMergeStatus::Mergeable => {
+            // Approve any pending workflows and enable auto-merge so that
+            // required checks (if any) can complete before merge.
+            println!(
+                "[wreck-it] unstuck: PR #{} is mergeable — approving workflows and enabling auto-merge",
+                pr_number,
+            );
+            if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                println!(
+                    "[wreck-it] unstuck: failed to approve workflows for PR #{}: {}",
+                    pr_number, e,
+                );
+            }
+            if let Err(e) = client.enable_auto_merge(pr_number).await {
+                println!(
+                    "[wreck-it] unstuck: failed to enable auto-merge for PR #{}: {}",
+                    pr_number, e,
+                );
+            }
+        }
+        PrMergeStatus::AlreadyMerged => {
+            println!(
+                "[wreck-it] unstuck: PR #{} already merged — fix is in",
+                pr_number,
+            );
+        }
+        PrMergeStatus::ClosedNotMerged => {
+            println!(
+                "[wreck-it] unstuck: PR #{} was closed without merging",
+                pr_number,
             );
         }
     }
