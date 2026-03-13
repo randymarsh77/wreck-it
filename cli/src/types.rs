@@ -191,16 +191,6 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub work_dirs: HashMap<String, String>,
 
-    /// Kanban / project-management board integration.
-    ///
-    /// When configured, the ralph loop will create issues on the external
-    /// board when tasks start, transition them on completion/failure, and
-    /// attach links to associated GitHub Issues and PRs.
-    ///
-    /// See [`KanbanConfig`] for the available settings.
-    #[serde(default, skip_serializing_if = "is_default_kanban")]
-    pub kanban: KanbanConfig,
-
     /// Optional path to a directory containing per-role system prompt template
     /// files and per-task overrides.  When set, the `prompt_loader` module
     /// resolves and injects custom prompts before each agent invocation,
@@ -212,6 +202,16 @@ pub struct Config {
     /// The value may be overridden at runtime via the `--prompt-dir` CLI flag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_dir: Option<String>,
+
+    /// Kanban / project-management board integration.
+    ///
+    /// When configured, the ralph loop will create issues on the external
+    /// board when tasks start, transition them on completion/failure, and
+    /// attach links to associated GitHub Issues and PRs.
+    ///
+    /// See [`KanbanConfig`] for the available settings.
+    #[serde(default, skip_serializing_if = "is_default_kanban")]
+    pub kanban: KanbanConfig,
 }
 
 fn default_max_iterations() -> usize {
@@ -246,8 +246,8 @@ fn default_replan_threshold() -> u32 {
     DEFAULT_REPLAN_THRESHOLD
 }
 
-fn is_default_kanban(cfg: &KanbanConfig) -> bool {
-    cfg.provider.is_none()
+fn is_default_kanban(k: &KanbanConfig) -> bool {
+    *k == KanbanConfig::default()
 }
 
 impl Default for Config {
@@ -274,8 +274,8 @@ impl Default for Config {
             github_repo: None,
             max_cost_usd: None,
             work_dirs: HashMap::new(),
-            kanban: KanbanConfig::default(),
             prompt_dir: None,
+            kanban: KanbanConfig::default(),
         }
     }
 }

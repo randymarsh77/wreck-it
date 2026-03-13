@@ -82,7 +82,7 @@ impl std::fmt::Display for KanbanBackend {
 ///
 /// These fields live in the wreck-it `Config` and are used by
 /// [`provider_from_config`] to construct the appropriate backend.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct KanbanConfig {
     /// Which provider to use.  When `None` the integration is disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
