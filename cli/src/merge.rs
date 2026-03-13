@@ -753,10 +753,9 @@ async fn promote_pending_merge_issues(
                             .pointer("/head/sha")
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
-                        let agent_pushed = pending
-                            .head_sha
-                            .as_deref()
-                            .is_some_and(|recorded| !recorded.is_empty() && recorded != current_sha);
+                        let agent_pushed = pending.head_sha.as_deref().is_some_and(|recorded| {
+                            !recorded.is_empty() && recorded != current_sha
+                        });
 
                         if agent_pushed {
                             println!(
