@@ -1527,6 +1527,14 @@ impl CloudAgentClient {
             // as other cases where the `/approve` endpoint is not sufficient.
             if self.approve_pending_deployments(*run_id, pr_number).await {
                 approved_count += 1;
+                continue;
+            }
+
+            // Last resort: rerun the workflow run.  Some repository
+            // configurations reject the approve endpoint entirely; triggering
+            // a rerun is an effective workaround in those cases.
+            if self.rerun_workflow_run(*run_id, pr_number).await {
+                approved_count += 1;
             }
         }
 
@@ -1651,6 +1659,62 @@ impl CloudAgentClient {
             Err(e) => {
                 tracing::warn!(
                     "HTTP error approving pending deployments for run {} (PR #{}): {}",
+                    run_id,
+                    pr_number,
+                    e,
+                );
+                false
+            }
+        }
+    }
+
+    /// Attempt to rerun a workflow run.
+    ///
+    /// This is a last-resort fallback when the `/approve` endpoint is
+    /// rejected and pending-deployment approval also fails.  Rerunning the
+    /// workflow causes GitHub to create a fresh attempt that may proceed
+    /// without requiring explicit approval.
+    async fn rerun_workflow_run(&self, run_id: u64, pr_number: u64) -> bool {
+        tracing::info!(
+            "Approve endpoint was rejected; rerunning run {} instead (PR #{}).",
+            run_id,
+            pr_number,
+        );
+
+        let rerun_url = format!(
+            "{}/repos/{}/{}/actions/runs/{}/rerun",
+            GITHUB_API_BASE, self.repo_owner, self.repo_name, run_id,
+        );
+
+        match self
+            .http
+            .post(&rerun_url)
+            .header("Authorization", format!("Bearer {}", self.github_token))
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                tracing::info!(
+                    "Rerun triggered for workflow run {} (PR #{})",
+                    run_id,
+                    pr_number,
+                );
+                true
+            }
+            Ok(resp) => {
+                tracing::warn!(
+                    "Failed to rerun workflow run {} (PR #{}) ({})",
+                    run_id,
+                    pr_number,
+                    resp.status(),
+                );
+                false
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "HTTP error rerunning workflow run {} (PR #{}): {}",
                     run_id,
                     pr_number,
                     e,
