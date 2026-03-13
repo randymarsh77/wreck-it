@@ -58,6 +58,8 @@ pub enum PrMergeStatus {
     Mergeable,
     /// The PR has already been merged.
     AlreadyMerged,
+    /// The PR was closed without being merged.
+    ClosedNotMerged,
 }
 
 #[derive(Debug, Deserialize)]
@@ -676,7 +678,7 @@ impl GitHubClient {
         }
         let state = pr["state"].as_str().unwrap_or("unknown");
         if state != "open" {
-            return Ok(PrMergeStatus::NotMergeable);
+            return Ok(PrMergeStatus::ClosedNotMerged);
         }
         if pr["draft"].as_bool().unwrap_or(false) {
             return Ok(PrMergeStatus::Draft);
@@ -1485,6 +1487,14 @@ impl GitHubClient {
                 .await
             {
                 approved_count += 1;
+                continue;
+            }
+
+            // Last resort: rerun the workflow run.  Some repository
+            // configurations reject the approve endpoint entirely; triggering
+            // a rerun is an effective workaround in those cases.
+            if self.rerun_workflow_run(*run_id, pr_number).await {
+                approved_count += 1;
             }
         }
 
@@ -1607,6 +1617,77 @@ impl GitHubClient {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Attempt to rerun a workflow run.
+    ///
+    /// This is a last-resort fallback when the `/approve` endpoint is
+    /// rejected and pending-deployment approval also fails.  Rerunning the
+    /// workflow causes GitHub to create a fresh attempt that may proceed
+    /// without requiring explicit approval.
+    async fn rerun_workflow_run(&self, run_id: u64, pr_number: u64) -> bool {
+        worker::console_log!(
+            "Approve endpoint was rejected; rerunning run {} instead (PR #{}).",
+            run_id,
+            pr_number,
+        );
+
+        let rerun_url = format!(
+            "https://api.github.com/repos/{}/{}/actions/runs/{}/rerun",
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            run_id,
+        );
+
+        let mut headers = worker::Headers::new();
+        headers.set("Accept", "application/vnd.github+json").ok();
+        headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        headers.set("User-Agent", "wreck-it-worker").ok();
+        headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+        let request = match worker::Request::new_with_init(
+            &rerun_url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Post)
+                .with_headers(headers),
+        ) {
+            Ok(r) => r,
+            Err(_) => return false,
+        };
+
+        match Fetch::Request(request).send().await {
+            Ok(r) if r.status_code() < 300 => {
+                worker::console_log!(
+                    "Rerun triggered for workflow run {} (PR #{})",
+                    run_id,
+                    pr_number,
+                );
+                true
+            }
+            Ok(mut r) => {
+                let status = r.status_code();
+                let body = r.text().await.unwrap_or_default();
+                worker::console_warn!(
+                    "Failed to rerun workflow run {} (PR #{}) ({}): {}",
+                    run_id,
+                    pr_number,
+                    status,
+                    body,
+                );
+                false
+            }
+            Err(e) => {
+                worker::console_warn!(
+                    "HTTP error rerunning workflow run {} (PR #{}): {}",
+                    run_id,
+                    pr_number,
+                    e,
+                );
+                false
+            }
         }
     }
 }

@@ -233,6 +233,9 @@ mod tests {
                 command: None,
                 brute_mode: None,
                 backend: None,
+
+                prompt_dir: None,
+                validation_command: None,
             }],
             ..RepoConfig::default()
         };
@@ -244,7 +247,7 @@ mod tests {
         // The existing custom path should be preserved.
         assert_eq!(config.ralphs[0].task_file, "custom-docs.json");
 
-        // "features", "planner", and "feature-dev" should be added.
+        // "features", "planner", "cohesiveness", "feature-dev", and "merge" should be added.
         assert_eq!(result.ralphs_added.len(), 5);
         assert!(result.ralphs_added.contains(&"features".to_string()));
         assert!(result.ralphs_added.contains(&"planner".to_string()));
