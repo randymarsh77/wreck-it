@@ -54,6 +54,10 @@ fn engineering_team() -> Template {
         "planner-tasks.json".to_string(),
         include_str!("../../templates/engineering-team/planner-tasks.json"),
     );
+    files.insert(
+        "cohesiveness-tasks.json".to_string(),
+        include_str!("../../templates/engineering-team/cohesiveness-tasks.json"),
+    );
 
     Template { manifest, files }
 }
@@ -135,7 +139,7 @@ mod tests {
         let tmpl = find_template("engineering-team").expect("template should exist");
         assert_eq!(tmpl.manifest.name, "engineering-team");
         assert!(!tmpl.manifest.description.is_empty());
-        assert_eq!(tmpl.manifest.ralphs.len(), 5);
+        assert_eq!(tmpl.manifest.ralphs.len(), 6);
 
         let names: Vec<&str> = tmpl
             .manifest
@@ -146,6 +150,7 @@ mod tests {
         assert!(names.contains(&"docs"));
         assert!(names.contains(&"features"));
         assert!(names.contains(&"planner"));
+        assert!(names.contains(&"cohesiveness"));
         assert!(names.contains(&"feature-dev"));
         assert!(names.contains(&"merge"));
     }
@@ -157,6 +162,7 @@ mod tests {
         assert!(tmpl.files.contains_key("features-tasks.json"));
         assert!(tmpl.files.contains_key("feature-dev-tasks.json"));
         assert!(tmpl.files.contains_key("planner-tasks.json"));
+        assert!(tmpl.files.contains_key("cohesiveness-tasks.json"));
     }
 
     #[test]
@@ -184,8 +190,8 @@ mod tests {
 
         assert!(!result.written.is_empty());
         assert!(result.skipped.is_empty());
-        assert_eq!(result.ralphs_added.len(), 5);
-        assert_eq!(config.ralphs.len(), 5);
+        assert_eq!(result.ralphs_added.len(), 6);
+        assert_eq!(config.ralphs.len(), 6);
 
         // Verify files exist on disk.
         for name in &result.written {
@@ -242,10 +248,11 @@ mod tests {
         // The existing custom path should be preserved.
         assert_eq!(config.ralphs[0].task_file, "custom-docs.json");
 
-        // "features", "planner", "feature-dev", and "merge" should be added.
-        assert_eq!(result.ralphs_added.len(), 4);
+        // "features", "planner", "cohesiveness", "feature-dev", and "merge" should be added.
+        assert_eq!(result.ralphs_added.len(), 5);
         assert!(result.ralphs_added.contains(&"features".to_string()));
         assert!(result.ralphs_added.contains(&"planner".to_string()));
+        assert!(result.ralphs_added.contains(&"cohesiveness".to_string()));
         assert!(result.ralphs_added.contains(&"feature-dev".to_string()));
         assert!(result.ralphs_added.contains(&"merge".to_string()));
     }
@@ -266,6 +273,6 @@ mod tests {
         assert!(result.written.is_empty());
         assert!(!result.skipped.is_empty());
         assert!(result.ralphs_added.is_empty());
-        assert_eq!(config.ralphs.len(), 5);
+        assert_eq!(config.ralphs.len(), 6);
     }
 }

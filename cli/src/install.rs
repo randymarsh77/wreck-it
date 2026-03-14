@@ -146,7 +146,7 @@ mod tests {
         // Verify the config contains engineering-team ralphs.
         let content = std::fs::read_to_string(dir.path().join(".wreck-it/config.toml")).unwrap();
         let cfg: RepoConfig = toml::from_str(&content).unwrap();
-        assert_eq!(cfg.ralphs.len(), 5);
+        assert_eq!(cfg.ralphs.len(), 6);
     }
 
     #[test]
@@ -232,10 +232,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let result = install(dir.path()).unwrap();
 
-        assert_eq!(result.ralphs_added.len(), 5);
+        assert_eq!(result.ralphs_added.len(), 6);
         assert!(result.ralphs_added.contains(&"docs".to_string()));
         assert!(result.ralphs_added.contains(&"features".to_string()));
         assert!(result.ralphs_added.contains(&"planner".to_string()));
+        assert!(result.ralphs_added.contains(&"cohesiveness".to_string()));
         assert!(result.ralphs_added.contains(&"feature-dev".to_string()));
         assert!(result.ralphs_added.contains(&"merge".to_string()));
     }
@@ -268,8 +269,8 @@ mod tests {
 
         let result = install(dir.path()).unwrap();
 
-        // "docs" should not be duplicated; 4 new ralphs should be added.
-        assert_eq!(result.ralphs_added.len(), 4);
+        // "docs" should not be duplicated; 5 new ralphs should be added.
+        assert_eq!(result.ralphs_added.len(), 5);
         assert!(!result.ralphs_added.contains(&"docs".to_string()));
 
         // Verify existing docs config preserved.

@@ -11,6 +11,8 @@ pub use wreck_it_core::types::{
     AgentRole, ArtefactKind, Task, TaskArtefact, TaskKind, TaskRuntime, TaskStatus,
 };
 
+pub use crate::kanban::KanbanConfig;
+
 pub const DEFAULT_COPILOT_ENDPOINT: &str = "https://api.githubcopilot.com";
 pub const DEFAULT_LLAMA_ENDPOINT: &str = "http://localhost:11434/v1";
 pub const DEFAULT_GITHUB_MODELS_ENDPOINT: &str =
@@ -200,6 +202,16 @@ pub struct Config {
     /// The value may be overridden at runtime via the `--prompt-dir` CLI flag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_dir: Option<String>,
+
+    /// Kanban / project-management board integration.
+    ///
+    /// When configured, the ralph loop will create issues on the external
+    /// board when tasks start, transition them on completion/failure, and
+    /// attach links to associated GitHub Issues and PRs.
+    ///
+    /// See [`KanbanConfig`] for the available settings.
+    #[serde(default, skip_serializing_if = "is_default_kanban")]
+    pub kanban: KanbanConfig,
 }
 
 fn default_max_iterations() -> usize {
@@ -234,6 +246,10 @@ fn default_replan_threshold() -> u32 {
     DEFAULT_REPLAN_THRESHOLD
 }
 
+fn is_default_kanban(k: &KanbanConfig) -> bool {
+    *k == KanbanConfig::default()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -259,6 +275,7 @@ impl Default for Config {
             max_cost_usd: None,
             work_dirs: HashMap::new(),
             prompt_dir: None,
+            kanban: KanbanConfig::default(),
         }
     }
 }

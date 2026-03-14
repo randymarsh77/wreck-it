@@ -32,6 +32,7 @@ mod headless_state;
 mod install;
 #[cfg(test)]
 mod integration_eval;
+mod kanban;
 mod notifier;
 mod openclaw;
 mod plan_migration;
@@ -54,3 +55,13 @@ pub mod ffi;
 pub mod project_api;
 pub mod task_manager;
 pub mod types;
+
+/// Shared helpers for unit tests.
+#[cfg(test)]
+pub(crate) mod test_helpers {
+    use std::sync::Mutex;
+
+    /// Serialize any test that reads or writes environment variables so that
+    /// concurrent test threads cannot interfere with each other.
+    pub static ENV_LOCK: Mutex<()> = Mutex::new(());
+}
