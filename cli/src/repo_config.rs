@@ -186,6 +186,7 @@ mod tests {
                     reviewers: None,
                     command: None,
                     brute_mode: None,
+                    transient_backoff_secs: None,
                     backend: None,
 
                     prompt_dir: None,
@@ -200,6 +201,7 @@ mod tests {
                     reviewers: None,
                     command: None,
                     brute_mode: None,
+                    transient_backoff_secs: None,
                     backend: None,
 
                     prompt_dir: None,
@@ -251,6 +253,7 @@ name = "docs"
                     reviewers: None,
                     command: None,
                     brute_mode: None,
+                    transient_backoff_secs: None,
                     backend: None,
 
                     prompt_dir: None,
@@ -265,6 +268,7 @@ name = "docs"
                     reviewers: None,
                     command: None,
                     brute_mode: None,
+                    transient_backoff_secs: None,
                     backend: None,
 
                     prompt_dir: None,
@@ -299,6 +303,7 @@ name = "docs"
                 reviewers: None,
                 command: None,
                 brute_mode: None,
+                transient_backoff_secs: None,
                 backend: None,
 
                 prompt_dir: None,
@@ -340,6 +345,7 @@ state_file = ".docs-state.json"
                 reviewers: None,
                 command: None,
                 brute_mode: None,
+                transient_backoff_secs: None,
                 backend: None,
 
                 prompt_dir: None,
@@ -370,6 +376,7 @@ state_file = ".docs-state.json"
                 reviewers: None,
                 command: None,
                 brute_mode: None,
+                transient_backoff_secs: None,
                 backend: None,
 
                 prompt_dir: None,
@@ -445,6 +452,7 @@ reviewers = ["alice", "bob"]
                 reviewers: Some(vec!["reviewer1".to_string(), "reviewer2".to_string()]),
                 command: None,
                 brute_mode: None,
+                transient_backoff_secs: None,
                 backend: None,
 
                 prompt_dir: None,
@@ -473,6 +481,7 @@ reviewers = ["alice", "bob"]
                 reviewers: None,
                 command: None,
                 brute_mode: None,
+                transient_backoff_secs: None,
                 backend: None,
 
                 prompt_dir: None,
@@ -526,6 +535,7 @@ command = "unstuck"
                 reviewers: None,
                 command: Some("unstuck".to_string()),
                 brute_mode: None,
+                transient_backoff_secs: None,
                 backend: None,
 
                 prompt_dir: None,
@@ -557,6 +567,7 @@ command = "unstuck"
 
                 prompt_dir: None,
                 validation_command: None,
+                transient_backoff_secs: None,
             }],
         };
         save_repo_config(dir.path(), &cfg).unwrap();
@@ -579,6 +590,7 @@ command = "unstuck"
                 reviewers: None,
                 command: None,
                 brute_mode: None,
+                transient_backoff_secs: None,
                 backend: None,
 
                 prompt_dir: None,

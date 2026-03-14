@@ -83,6 +83,127 @@
 use std::time::Duration;
 
 // ---------------------------------------------------------------------------
+// Standalone classify_error function
+// ---------------------------------------------------------------------------
+
+/// Classify a task-execution failure using all available signals.
+///
+/// This is the primary entry point intended for use in `headless.rs` when a
+/// validation command or agent interaction fails.  It combines output text,
+/// process exit code, and HTTP status into a single [`ErrorCategory`].
+///
+/// # Classification rules (in priority order)
+///
+/// 1. **HTTP status** – 429 → `Transient`.
+/// 2. **ContextOverflow keywords** – "context length", "max_tokens", etc.
+/// 3. **Transient keywords** – "rate limit", "429", "timeout", etc.
+/// 4. **Permanent keywords** – "error[E" (Rust compile errors), "FAILED".
+/// 5. **Default** → `NeedsReplan` (the task description is likely the problem).
+///
+/// The default of `NeedsReplan` (rather than `Permanent`) is intentional:
+/// when none of the above patterns match, the most likely explanation in the
+/// headless flow is that the task specification needs revision.
+///
+/// # Arguments
+///
+/// * `output` – combined stdout/stderr from the failed command.
+/// * `exit_code` – process exit code if available.
+/// * `http_status` – HTTP response status if available (e.g., from an API call).
+///
+/// # Examples
+///
+/// ```ignore
+/// # use wreck_it::error_classifier::{classify_error, ErrorCategory};
+/// assert_eq!(
+///     classify_error("rate limit exceeded", Some(1), None),
+///     ErrorCategory::Transient,
+/// );
+/// assert_eq!(
+///     classify_error("error[E0308]: type mismatch", Some(1), None),
+///     ErrorCategory::Permanent,
+/// );
+/// assert_eq!(
+///     classify_error("context length exceeded", Some(1), None),
+///     ErrorCategory::ContextOverflow,
+/// );
+/// assert_eq!(
+///     classify_error("unexpected situation", Some(1), None),
+///     ErrorCategory::NeedsReplan,
+/// );
+/// ```
+pub(crate) fn classify_error(
+    output: &str,
+    exit_code: Option<i32>,
+    http_status: Option<u16>,
+) -> ErrorCategory {
+    let lower = output.to_lowercase();
+
+    // HTTP status takes priority as it is the most unambiguous signal.
+    if let Some(status) = http_status {
+        if status == 429 {
+            return ErrorCategory::Transient;
+        }
+    }
+
+    // Suppress unused-variable warning: exit_code is a documented parameter
+    // for future use (e.g. exit code 137 → OOM → Transient), but current
+    // classification is keyword-driven.
+    let _ = exit_code;
+
+    // --- ContextOverflow signals ---
+    //
+    // Checked before Transient/Permanent so that a context overflow that
+    // surfaces as a generic "session error" is not misclassified.
+    if lower.contains("context length")
+        || lower.contains("max_tokens")
+        || lower.contains("context window")
+        || lower.contains("maximum context")
+        || lower.contains("token limit")
+        || lower.contains("truncated output")
+        || lower.contains("output was truncated")
+    {
+        return ErrorCategory::ContextOverflow;
+    }
+
+    // --- Transient signals ---
+    //
+    // Rate limits, network blips, and timeout keywords from the issue spec:
+    // "rate limit", "429", "timeout" → Transient.
+    if lower.contains("rate limit")
+        || lower.contains("429")
+        || lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("connection refused")
+        || lower.contains("network error")
+        || lower.contains("temporarily unavailable")
+        || lower.contains("(503)")
+        || lower.contains("(504)")
+        || lower.contains("(408)")
+        || lower.contains("rate-limit")
+        || lower.contains("too many requests")
+    {
+        return ErrorCategory::Transient;
+    }
+
+    // --- Permanent signals ---
+    //
+    // Deterministic failures per issue spec:
+    // - "error[E" matches Rust compiler errors such as `error[E0308]: mismatched types`.
+    // - "FAILED" (uppercase) matches cargo test runner output (e.g. `test foo ... FAILED`).
+    //   We check the original-case output here so that lower-case "failed" (e.g.
+    //   "connection failed") is not incorrectly classified as Permanent.
+    if lower.contains("error[e") || output.contains("FAILED") {
+        return ErrorCategory::Permanent;
+    }
+
+    // --- Default: NeedsReplan ---
+    //
+    // When no specific pattern matches, assume the task description is the
+    // root cause and trigger an immediate re-plan.
+    ErrorCategory::NeedsReplan
+}
+
+// ---------------------------------------------------------------------------
 // Error category
 // ---------------------------------------------------------------------------
 
@@ -145,6 +266,7 @@ pub(crate) enum ErrorCategory {
 ///     ErrorCategory::ContextOverflow,
 /// );
 /// ```
+#[allow(dead_code)]
 pub(crate) struct ErrorClassifier;
 
 impl ErrorClassifier {
@@ -152,6 +274,7 @@ impl ErrorClassifier {
     ///
     /// The matching order matters: more-specific patterns are checked before
     /// more-general ones.
+    #[allow(dead_code)]
     pub(crate) fn classify(error_text: &str) -> ErrorCategory {
         let lower = error_text.to_lowercase();
 
@@ -237,6 +360,7 @@ impl ErrorClassifier {
 /// An optional `jitter_fraction` in `[0.0, 1.0]` adds up to that fraction of
 /// the calculated delay as uniform random jitter to prevent thundering-herd
 /// behaviour when many tasks fail simultaneously.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct BackoffParams {
     /// Delay before the first retry.
@@ -261,6 +385,7 @@ impl Default for BackoffParams {
 ///
 /// This is returned by [`recover`] and consumed by the caller in
 /// `ralph_loop.rs` to avoid scattering recovery logic across the loop body.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum RecoveryAction {
     /// Wait `delay` then retry the task without incrementing `failed_attempts`.
@@ -304,6 +429,7 @@ pub(crate) enum RecoveryAction {
 /// This function is intentionally pure (no I/O, no `async`) so that it can
 /// be unit-tested without mocking the runtime.  Actual side-effects (sleeping,
 /// HTTP calls, file writes) are the caller's responsibility.
+#[allow(dead_code)]
 pub(crate) fn recover(category: &ErrorCategory, attempt: u32) -> RecoveryAction {
     match category {
         // Transient: exponential backoff, do not penalise the attempt counter.
@@ -498,5 +624,96 @@ mod tests {
             recover(&ErrorCategory::ContextOverflow, 0),
             RecoveryAction::SplitTask
         ));
+    }
+
+    // --- classify_error ---
+
+    #[test]
+    fn classify_error_429_http_status_is_transient() {
+        assert_eq!(
+            classify_error("some output", Some(1), Some(429)),
+            ErrorCategory::Transient,
+        );
+    }
+
+    #[test]
+    fn classify_error_rate_limit_keyword_is_transient() {
+        assert_eq!(
+            classify_error("rate limit exceeded", Some(1), None),
+            ErrorCategory::Transient,
+        );
+    }
+
+    #[test]
+    fn classify_error_429_in_output_is_transient() {
+        assert_eq!(
+            classify_error("error (429): too many requests", Some(1), None),
+            ErrorCategory::Transient,
+        );
+    }
+
+    #[test]
+    fn classify_error_timeout_keyword_is_transient() {
+        assert_eq!(
+            classify_error("connection timeout after 30s", Some(1), None),
+            ErrorCategory::Transient,
+        );
+    }
+
+    #[test]
+    fn classify_error_rust_compile_error_is_permanent() {
+        assert_eq!(
+            classify_error("error[E0308]: mismatched types", Some(1), None),
+            ErrorCategory::Permanent,
+        );
+    }
+
+    #[test]
+    fn classify_error_failed_keyword_is_permanent() {
+        assert_eq!(
+            classify_error("FAILED: 3 tests did not pass", Some(1), None),
+            ErrorCategory::Permanent,
+        );
+    }
+
+    #[test]
+    fn classify_error_context_length_is_context_overflow() {
+        assert_eq!(
+            classify_error("context length exceeded", Some(1), None),
+            ErrorCategory::ContextOverflow,
+        );
+    }
+
+    #[test]
+    fn classify_error_max_tokens_is_context_overflow() {
+        assert_eq!(
+            classify_error("max_tokens reached, output truncated", Some(1), None),
+            ErrorCategory::ContextOverflow,
+        );
+    }
+
+    #[test]
+    fn classify_error_unknown_defaults_to_needs_replan() {
+        assert_eq!(
+            classify_error("something completely unexpected", Some(1), None),
+            ErrorCategory::NeedsReplan,
+        );
+    }
+
+    #[test]
+    fn classify_error_context_overflow_before_transient() {
+        // A message containing both "timeout" and "context length" should be
+        // ContextOverflow because that check runs first.
+        assert_eq!(
+            classify_error("context length exceeded after timeout", Some(1), None),
+            ErrorCategory::ContextOverflow,
+        );
+    }
+
+    #[test]
+    fn classify_error_no_http_status_does_not_panic() {
+        // Ensure None http_status is handled gracefully.
+        let result = classify_error("", None, None);
+        assert_eq!(result, ErrorCategory::NeedsReplan);
     }
 }

@@ -1,4 +1,5 @@
 use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus, PrMergeStatus};
+use crate::error_classifier::{classify_error, ErrorCategory};
 use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::headless_state::{
     load_headless_state, save_headless_state, AgentPhase, HeadlessState, TrackedPr,
@@ -17,6 +18,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Default name for the repo-committed config file.
 const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
+
+/// Default backoff delay in seconds applied before retrying after a transient
+/// validation failure.  Can be overridden per-ralph via
+/// [`RalphConfig::transient_backoff_secs`].
+const DEFAULT_TRANSIENT_BACKOFF_SECS: u64 = 30;
 
 /// Maximum number of synchronous steps executed in a single invocation before
 /// forcing a yield.  This prevents infinite loops when the state machine
@@ -625,6 +631,54 @@ pub(crate) async fn advance_tracked_prs(
                 }
                 // ── Validation gate (advance) ───────────────────────
                 if let Some(failure) = run_validation_command(ralph, work_dir)? {
+                    let combined_output = format!("{}\n{}", failure.stdout, failure.stderr);
+                    let category = classify_error(&combined_output, failure.exit_code, None);
+                    match category {
+                        ErrorCategory::Transient => {
+                            let backoff_secs = ralph
+                                .and_then(|r| r.transient_backoff_secs)
+                                .unwrap_or(DEFAULT_TRANSIENT_BACKOFF_SECS);
+                            println!(
+                                "[wreck-it] advance: transient validation failure for PR #{}, \
+                                 backing off {}s before retry",
+                                pr_number, backoff_secs,
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                            state.memory.push(format!(
+                                "advance: transient validation failure for PR #{} (task {}), \
+                                 backed off {}s",
+                                pr_number, tracked.task_id, backoff_secs,
+                            ));
+                            continue;
+                        }
+                        ErrorCategory::NeedsReplan => {
+                            println!(
+                                "[wreck-it] advance: validation indicates re-plan needed for \
+                                 PR #{} (task {}), resetting task to pending",
+                                pr_number, tracked.task_id,
+                            );
+                            mark_task_pending_by_id(&tracked.task_id, &task_file)?;
+                            resolved_pr_numbers.push(pr_number);
+                            if state.pr_number == Some(pr_number) {
+                                state.phase = AgentPhase::NeedsTrigger;
+                                state.pr_number = None;
+                                state.issue_number = None;
+                                state.pr_url = None;
+                                state.last_prompt = None;
+                                state.current_task_id = None;
+                                state.review_requested = None;
+                            }
+                            made_progress = true;
+                            state.memory.push(format!(
+                                "advance: validation indicated re-plan for PR #{} (task {}), \
+                                 task reset to pending",
+                                pr_number, tracked.task_id,
+                            ));
+                            continue;
+                        }
+                        ErrorCategory::Permanent | ErrorCategory::ContextOverflow => { /* comment and continue below */
+                        }
+                    }
                     println!(
                         "[wreck-it] advance: validation failed for PR #{}, commenting on PR",
                         pr_number
@@ -1592,6 +1646,53 @@ async fn run_needs_verification(
     // (if any).  A failing command blocks the merge and comments on the
     // PR so the coding agent can address the issue.
     if let Some(failure) = run_validation_command(ralph, work_dir)? {
+        let combined_output = format!("{}\n{}", failure.stdout, failure.stderr);
+        let category = classify_error(&combined_output, failure.exit_code, None);
+        match category {
+            ErrorCategory::Transient => {
+                let backoff_secs = ralph
+                    .and_then(|r| r.transient_backoff_secs)
+                    .unwrap_or(DEFAULT_TRANSIENT_BACKOFF_SECS);
+                println!(
+                    "[wreck-it] transient validation failure for PR #{}, \
+                     backing off {}s before retry",
+                    pr_number, backoff_secs,
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)).await;
+                state.memory.push(format!(
+                    "iteration {}: transient validation failure for PR #{}, backed off {}s",
+                    state.iteration, pr_number, backoff_secs,
+                ));
+                return Ok(StepOutcome::Yield);
+            }
+            ErrorCategory::NeedsReplan => {
+                println!(
+                    "[wreck-it] validation indicates re-plan needed for PR #{} (task {:?}), \
+                     resetting task to pending immediately",
+                    pr_number, state.current_task_id,
+                );
+                let task_file = state_dir.join(&headless_cfg.task_file);
+                if let Some(task_id) = &state.current_task_id {
+                    mark_task_pending_by_id(task_id, &task_file)?;
+                }
+                state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
+                state.memory.push(format!(
+                    "iteration {}: validation indicated re-plan for PR #{} (task {:?}), \
+                     task reset to pending",
+                    state.iteration, pr_number, state.current_task_id,
+                ));
+                state.phase = AgentPhase::NeedsTrigger;
+                state.current_task_id = None;
+                state.issue_number = None;
+                state.pr_number = None;
+                state.pr_url = None;
+                state.last_prompt = None;
+                state.review_requested = None;
+                return Ok(StepOutcome::Continue);
+            }
+            ErrorCategory::Permanent | ErrorCategory::ContextOverflow => { /* comment and yield below */
+            }
+        }
         println!(
             "[wreck-it] validation failed for PR #{}, commenting on PR",
             pr_number
@@ -2410,6 +2511,7 @@ mod tests {
             backend: None,
             prompt_dir: None,
             validation_command: None,
+            transient_backoff_secs: None,
         };
         let result = run_validation_command(Some(&rc), dir.path()).unwrap();
         assert!(result.is_none());
@@ -2430,6 +2532,7 @@ mod tests {
             backend: None,
             prompt_dir: None,
             validation_command: Some("true".to_string()),
+            transient_backoff_secs: None,
         };
         let result = run_validation_command(Some(&rc), dir.path()).unwrap();
         assert!(result.is_none());
@@ -2450,6 +2553,7 @@ mod tests {
             backend: None,
             prompt_dir: None,
             validation_command: Some("echo fail-output && exit 1".to_string()),
+            transient_backoff_secs: None,
         };
         let result = run_validation_command(Some(&rc), dir.path()).unwrap();
         let failure = result.expect("should report failure");
@@ -2473,6 +2577,7 @@ mod tests {
             backend: None,
             prompt_dir: None,
             validation_command: Some("echo err-msg >&2 && exit 2".to_string()),
+            transient_backoff_secs: None,
         };
         let result = run_validation_command(Some(&rc), dir.path()).unwrap();
         let failure = result.expect("should report failure");
