@@ -734,7 +734,11 @@ mod tests {
     #[test]
     fn classify_error_rust_error_bracket_e_is_permanent() {
         assert_eq!(
-            classify_error("error[E0277]: the trait bound is not satisfied", Some(1), None),
+            classify_error(
+                "error[E0277]: the trait bound is not satisfied",
+                Some(1),
+                None
+            ),
             ErrorCategory::Permanent,
         );
     }
@@ -743,7 +747,11 @@ mod tests {
     #[test]
     fn classify_error_context_length_exceeded_phrase_is_context_overflow() {
         assert_eq!(
-            classify_error("the model returned an error: context length exceeded", Some(1), None),
+            classify_error(
+                "the model returned an error: context length exceeded",
+                Some(1),
+                None
+            ),
             ErrorCategory::ContextOverflow,
         );
     }
