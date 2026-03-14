@@ -45,6 +45,9 @@ which = "7"
 
 # Open URLs in the system browser (GitHub OAuth device flow)
 open = "5"
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", features = ["trace", "http-proto", "reqwest-client"] }
 
 [dev-dependencies]
 tempfile = "3.10"
