@@ -495,19 +495,20 @@
   {
     "id": "eval-error-classification",
     "description": "Evaluate the error classification and smart recovery system end-to-end. Review `cli/src/error_classifier.rs` to ensure the keyword patterns cover the most common real-world failure modes seen in wreck-it CI runs. Check that the Transient backoff path in `headless.rs` correctly delays and retries without incrementing the replan counter. Verify NeedsReplan immediately triggers the re-planner. Run `cargo test --lib` to confirm no regressions. Write a brief evaluation summary as a comment block at the top of `cli/src/error_classifier.rs` describing classification accuracy trade-offs, false positive/negative risks for each category, and recommended follow-up work (e.g. ML-based classifier, user-configurable keyword patterns).",
-    "status": "pending",
+    "status": "completed",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
       "test-error-classification"
     ],
     "priority": 4,
-    "complexity": 2
+    "complexity": 2,
+    "last_attempt_at": 1773523925
   },
   {
     "id": "mcp-server-integration",
     "description": "Implement an MCP (Model Context Protocol) server mode for wreck-it so that AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can directly query and manage the task pipeline via the standard MCP protocol. Expose MCP tools for: listing tasks and their statuses, adding new tasks, updating task status, reading artefacts, and triggering a loop iteration. This bridges wreck-it's structured task graph with the rapidly emerging MCP ecosystem, enabling humans to supervise autonomous loops through their preferred AI assistant interface rather than the CLI or TUI.",
-    "status": "pending",
+    "status": "inprogress",
     "priority": 10,
     "complexity": 7
   },
