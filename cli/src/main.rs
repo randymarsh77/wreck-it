@@ -37,6 +37,16 @@ mod tui;
 mod types;
 mod unstuck;
 
+/// Shared helpers for unit tests.
+#[cfg(test)]
+mod test_helpers {
+    use std::sync::Mutex;
+
+    /// Serialize any test that reads or writes environment variables so that
+    /// concurrent test threads cannot interfere with each other.
+    pub static ENV_LOCK: Mutex<()> = Mutex::new(());
+}
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use cli::{Cli, Commands, TasksAction};
