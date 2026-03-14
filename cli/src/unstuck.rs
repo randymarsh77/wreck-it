@@ -62,40 +62,116 @@ pub async fn run_unstuck(config: &Config) -> Result<()> {
 
     let mut requested = 0u32;
     for pr in &prs {
-        match client.has_failing_checks_for_pr(pr.number).await {
-            Ok(true) => {
-                println!(
-                    "[wreck-it] unstuck: PR #{} ({}) has failing checks — requesting fix",
-                    pr.number, pr.title,
-                );
-                if let Err(e) = client
-                    .comment_on_pr(
-                        pr.number,
-                        "@copilot The CI checks on this PR are failing. \
-                         Please investigate the failures and push a fix. \
-                         Use available tools (e.g. `cargo fmt`, `cargo clippy`, \
-                         test runners) as needed.",
-                    )
-                    .await
-                {
-                    println!(
-                        "[wreck-it] unstuck: failed to comment on PR #{}: {}",
-                        pr.number, e,
-                    );
-                } else {
-                    requested += 1;
-                }
-            }
-            Ok(false) => {
-                println!(
-                    "[wreck-it] unstuck: PR #{} ({}) — checks OK, skipping",
-                    pr.number, pr.title,
-                );
-            }
+        let merge_status = match client.check_pr_merge_status(pr.number).await {
+            Ok(s) => s,
             Err(e) => {
                 println!(
-                    "[wreck-it] unstuck: failed to check PR #{}: {}",
+                    "[wreck-it] unstuck: failed to check merge status for PR #{}: {}",
                     pr.number, e,
+                );
+                continue;
+            }
+        };
+
+        match merge_status {
+            PrMergeStatus::Draft => {
+                println!(
+                    "[wreck-it] unstuck: PR #{} ({}) is a draft — marking ready for review",
+                    pr.number, pr.title,
+                );
+                if let Err(e) = client.mark_pr_ready_for_review(pr.number).await {
+                    println!(
+                        "[wreck-it] unstuck: failed to mark PR #{} ready: {}",
+                        pr.number, e,
+                    );
+                }
+            }
+            PrMergeStatus::AgentWorkInProgress => {
+                println!(
+                    "[wreck-it] unstuck: PR #{} ({}) — agent is still working, skipping",
+                    pr.number, pr.title,
+                );
+            }
+            PrMergeStatus::NotMergeable => {
+                let has_failures = match client.has_failing_checks_for_pr(pr.number).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        println!(
+                            "[wreck-it] unstuck: failed to check failing checks for PR #{}: {}",
+                            pr.number, e,
+                        );
+                        false
+                    }
+                };
+                if has_failures {
+                    println!(
+                        "[wreck-it] unstuck: PR #{} ({}) has failing checks — requesting fix",
+                        pr.number, pr.title,
+                    );
+                    if let Err(e) = client
+                        .comment_on_pr(
+                            pr.number,
+                            "@copilot The CI checks on this PR are failing. \
+                             Please investigate the failures and push a fix. \
+                             Use available tools (e.g. `cargo fmt`, `cargo clippy`, \
+                             test runners) as needed.",
+                        )
+                        .await
+                    {
+                        println!(
+                            "[wreck-it] unstuck: failed to comment on PR #{}: {}",
+                            pr.number, e,
+                        );
+                    } else {
+                        requested += 1;
+                    }
+                } else {
+                    println!(
+                        "[wreck-it] unstuck: PR #{} ({}) not yet mergeable — approving workflows and enabling auto-merge",
+                        pr.number, pr.title,
+                    );
+                    if let Err(e) = client.approve_pending_workflow_runs(pr.number).await {
+                        println!(
+                            "[wreck-it] unstuck: failed to approve workflows for PR #{}: {}",
+                            pr.number, e,
+                        );
+                    }
+                    if let Err(e) = client.enable_auto_merge(pr.number).await {
+                        println!(
+                            "[wreck-it] unstuck: failed to enable auto-merge for PR #{}: {}",
+                            pr.number, e,
+                        );
+                    }
+                }
+            }
+            PrMergeStatus::Mergeable => {
+                println!(
+                    "[wreck-it] unstuck: PR #{} ({}) is mergeable — approving workflows and enabling auto-merge",
+                    pr.number, pr.title,
+                );
+                if let Err(e) = client.approve_pending_workflow_runs(pr.number).await {
+                    println!(
+                        "[wreck-it] unstuck: failed to approve workflows for PR #{}: {}",
+                        pr.number, e,
+                    );
+                }
+                if let Err(e) = client.enable_auto_merge(pr.number).await {
+                    println!(
+                        "[wreck-it] unstuck: failed to enable auto-merge for PR #{}: {}",
+                        pr.number, e,
+                    );
+                }
+            }
+            PrMergeStatus::AlreadyMerged => {
+                println!(
+                    "[wreck-it] unstuck: PR #{} ({}) already merged",
+                    pr.number, pr.title,
+                );
+            }
+            PrMergeStatus::ClosedNotMerged => {
+                println!(
+                    "[wreck-it] unstuck: PR #{} ({}) was closed without merging",
+                    pr.number, pr.title,
                 );
             }
         }
