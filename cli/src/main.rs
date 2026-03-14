@@ -440,8 +440,8 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
-                        prompt_dir: None,
                         validation_command: None,
+                        prompt_dir: None,
                         transient_backoff_secs: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
@@ -541,8 +541,8 @@ async fn main() -> Result<()> {
                         command: None,
                         brute_mode: None,
                         backend: None,
-                        prompt_dir: None,
                         validation_command: None,
+                        prompt_dir: None,
                         transient_backoff_secs: None,
                     });
                     println!("Added ralph '{}' to config", ralph_name);
