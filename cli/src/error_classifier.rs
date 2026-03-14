@@ -716,4 +716,128 @@ mod tests {
         let result = classify_error("", None, None);
         assert_eq!(result, ErrorCategory::NeedsReplan);
     }
+
+    // --- Required coverage per issue spec ---
+
+    /// (1) HTTP 429 response body (body text only, no numeric "(429)" in the
+    /// string) combined with `http_status=Some(429)` maps to `Transient`.
+    #[test]
+    fn classify_error_http_429_status_with_plain_body_is_transient() {
+        assert_eq!(
+            classify_error("Too Many Requests", None, Some(429)),
+            ErrorCategory::Transient,
+        );
+    }
+
+    /// (2) Rust compile error output containing the canonical `error[E…]`
+    /// prefix maps to `Permanent`.
+    #[test]
+    fn classify_error_rust_error_bracket_e_is_permanent() {
+        assert_eq!(
+            classify_error(
+                "error[E0277]: the trait bound is not satisfied",
+                Some(1),
+                None
+            ),
+            ErrorCategory::Permanent,
+        );
+    }
+
+    /// (3) Output mentioning "context length exceeded" maps to `ContextOverflow`.
+    #[test]
+    fn classify_error_context_length_exceeded_phrase_is_context_overflow() {
+        assert_eq!(
+            classify_error(
+                "the model returned an error: context length exceeded",
+                Some(1),
+                None
+            ),
+            ErrorCategory::ContextOverflow,
+        );
+    }
+
+    /// (4) An exit code of 0 with ambiguous (unrecognised) output defaults to
+    /// `NeedsReplan` because no specific pattern matches and exit 0 does not
+    /// signal a deterministic compile/test failure.
+    #[test]
+    fn classify_error_exit_code_zero_ambiguous_output_is_needs_replan() {
+        assert_eq!(
+            classify_error("task completed but output was unexpected", Some(0), None),
+            ErrorCategory::NeedsReplan,
+        );
+    }
+
+    /// (5a) When output contains both a context-overflow keyword and a
+    /// permanent keyword, `ContextOverflow` wins because it is checked first.
+    #[test]
+    fn classify_error_context_overflow_wins_over_permanent() {
+        // "error[E" would normally be Permanent, but "context length exceeded"
+        // is checked earlier and takes priority.
+        assert_eq!(
+            classify_error(
+                "context length exceeded; error[E0308]: mismatched types",
+                Some(1),
+                None,
+            ),
+            ErrorCategory::ContextOverflow,
+        );
+    }
+
+    /// (5b) When output contains both a context-overflow keyword and a
+    /// transient keyword, `ContextOverflow` wins because it is checked first.
+    #[test]
+    fn classify_error_context_overflow_wins_over_transient() {
+        assert_eq!(
+            classify_error("context length exceeded after timeout", Some(1), None),
+            ErrorCategory::ContextOverflow,
+        );
+    }
+
+    /// (5c) HTTP 429 status wins over any keyword in the output text because
+    /// the HTTP-status check runs before all keyword checks.
+    #[test]
+    fn classify_error_http_429_status_wins_over_context_overflow_keyword() {
+        assert_eq!(
+            classify_error("context length exceeded", None, Some(429)),
+            ErrorCategory::Transient,
+        );
+    }
+
+    // --- RecoveryAction for each category ---
+
+    /// `Transient` → `RetryAfterDelay`.
+    #[test]
+    fn recover_transient_produces_retry_after_delay() {
+        assert!(matches!(
+            recover(&ErrorCategory::Transient, 0),
+            RecoveryAction::RetryAfterDelay { .. }
+        ));
+    }
+
+    /// `Permanent` → `InvokeCriticThenRetry`.
+    #[test]
+    fn recover_permanent_produces_invoke_critic_then_retry() {
+        assert!(matches!(
+            recover(&ErrorCategory::Permanent, 0),
+            RecoveryAction::InvokeCriticThenRetry { .. }
+        ));
+    }
+
+    /// `NeedsReplan` → `ImmediateReplan`.
+    #[test]
+    fn recover_needs_replan_produces_immediate_replan() {
+        assert!(matches!(
+            recover(&ErrorCategory::NeedsReplan, 0),
+            RecoveryAction::ImmediateReplan
+        ));
+    }
+
+    /// `ContextOverflow` → `SplitTask`.
+    #[test]
+    fn recover_context_overflow_produces_split_task() {
+        assert!(matches!(
+            recover(&ErrorCategory::ContextOverflow, 0),
+            RecoveryAction::SplitTask
+        ));
+    }
 }
