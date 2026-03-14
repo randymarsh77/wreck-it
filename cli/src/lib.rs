@@ -33,6 +33,7 @@ mod install;
 #[cfg(test)]
 mod integration_eval;
 mod kanban;
+pub mod mcp_server;
 mod notifier;
 mod openclaw;
 mod plan_migration;
