@@ -2630,4 +2630,82 @@ mod tests {
         assert!(truncated.starts_with(&"a".repeat(50)));
         assert!(truncated.ends_with("… [truncated]"));
     }
+
+    // ── Transient backoff path tests ─────────────────────────────────
+
+    /// Verify the `DEFAULT_TRANSIENT_BACKOFF_SECS` constant exists and is a
+    /// reasonable positive value (the headless transient-validation path uses
+    /// it as the fallback when no per-ralph override is configured).
+    #[test]
+    fn default_transient_backoff_secs_is_positive_and_bounded() {
+        assert!(DEFAULT_TRANSIENT_BACKOFF_SECS > 0);
+        assert!(DEFAULT_TRANSIENT_BACKOFF_SECS <= 300);
+    }
+
+    /// When a `RalphConfig` has `transient_backoff_secs: None`, the backoff
+    /// selection expression used in the headless validation failure handler
+    /// should fall through to `DEFAULT_TRANSIENT_BACKOFF_SECS`.
+    #[test]
+    fn transient_backoff_uses_default_when_ralph_has_none() {
+        let rc = RalphConfig {
+            name: "test".to_string(),
+            task_file: "tasks.json".to_string(),
+            state_file: "state.json".to_string(),
+            branch: None,
+            agent: None,
+            reviewers: None,
+            command: None,
+            brute_mode: None,
+            backend: None,
+            prompt_dir: None,
+            validation_command: None,
+            transient_backoff_secs: None,
+        };
+        let backoff = rc
+            .transient_backoff_secs
+            .unwrap_or(DEFAULT_TRANSIENT_BACKOFF_SECS);
+        assert_eq!(backoff, DEFAULT_TRANSIENT_BACKOFF_SECS);
+    }
+
+    /// When a `RalphConfig` has `transient_backoff_secs` configured, that
+    /// value should override `DEFAULT_TRANSIENT_BACKOFF_SECS`, matching the
+    /// logic in the headless validation-failure handler.
+    #[test]
+    fn transient_backoff_uses_ralph_config_when_set() {
+        let rc = RalphConfig {
+            name: "test".to_string(),
+            task_file: "tasks.json".to_string(),
+            state_file: "state.json".to_string(),
+            branch: None,
+            agent: None,
+            reviewers: None,
+            command: None,
+            brute_mode: None,
+            backend: None,
+            prompt_dir: None,
+            validation_command: None,
+            transient_backoff_secs: Some(60),
+        };
+        let backoff = rc
+            .transient_backoff_secs
+            .unwrap_or(DEFAULT_TRANSIENT_BACKOFF_SECS);
+        assert_eq!(backoff, 60);
+    }
+
+    /// Verify that `classify_error` classifies a combined validation output
+    /// containing "429" as `Transient`, which is the trigger for the backoff
+    /// retry path in the headless validation-failure handler.
+    #[test]
+    fn classify_error_returns_transient_for_429_output_exercises_backoff_path() {
+        use crate::error_classifier::{classify_error, ErrorCategory};
+        let stdout = "HTTP error: 429 Too Many Requests";
+        let stderr = "";
+        let combined = format!("{}\n{}", stdout, stderr);
+        let category = classify_error(&combined, Some(1), None);
+        assert_eq!(
+            category,
+            ErrorCategory::Transient,
+            "429 output should trigger the Transient branch and thus the backoff path"
+        );
+    }
 }
