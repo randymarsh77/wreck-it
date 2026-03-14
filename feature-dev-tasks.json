@@ -483,18 +483,19 @@
   {
     "id": "test-error-classification",
     "description": "Write unit tests for the error classification system implemented in `impl-error-classification`. In `cli/src/error_classifier.rs` add a `#[cfg(test)]` module covering: (1) HTTP 429 response body maps to `Transient`; (2) Rust compile error output containing `error[E` maps to `Permanent`; (3) output mentioning \"context length exceeded\" maps to `ContextOverflow`; (4) an exit code of 0 with ambiguous output defaults to `NeedsReplan`; (5) multiple keyword signals in one output resolve to the highest-priority category. Also test the `RecoveryAction` produced for each category and verify that the backoff retry path in `headless.rs` is exercised when `Transient` is returned. Run `cargo test --lib` to confirm all tests pass.",
-    "status": "pending",
+    "status": "completed",
     "phase": 3,
     "depends_on": [
       "impl-error-classification"
     ],
     "priority": 4,
-    "complexity": 3
+    "complexity": 3,
+    "last_attempt_at": 1773520317
   },
   {
     "id": "eval-error-classification",
     "description": "Evaluate the error classification and smart recovery system end-to-end. Review `cli/src/error_classifier.rs` to ensure the keyword patterns cover the most common real-world failure modes seen in wreck-it CI runs. Check that the Transient backoff path in `headless.rs` correctly delays and retries without incrementing the replan counter. Verify NeedsReplan immediately triggers the re-planner. Run `cargo test --lib` to confirm no regressions. Write a brief evaluation summary as a comment block at the top of `cli/src/error_classifier.rs` describing classification accuracy trade-offs, false positive/negative risks for each category, and recommended follow-up work (e.g. ML-based classifier, user-configurable keyword patterns).",
-    "status": "pending",
+    "status": "inprogress",
     "role": "evaluator",
     "phase": 4,
     "depends_on": [
