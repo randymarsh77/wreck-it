@@ -1064,6 +1064,7 @@ dependencies = [
  "getrandom",
  "hex",
  "hmac",
+ "js-sys",
  "rsa",
  "serde",
  "serde_json",
