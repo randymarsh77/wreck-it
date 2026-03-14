@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 45,
-  "current_task_id": "mcp-server-integration",
-  "issue_number": 623,
-  "pr_number": 624,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/624",
-  "last_prompt": "Implement an MCP (Model Context Protocol) server mode for wreck-it so that AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can directly query and manage the task pipeline via the standard MCP protocol. Expose MCP tools for: listing tasks and their statuses, adding new tasks, updating task status, reading artefacts, and triggering a loop iteration. This bridges wreck-it's structured task graph with the rapidly emerging MCP ecosystem, enabling humans to supervise autonomous loops through their preferred AI assistant interface rather than the CLI or TUI.",
+  "phase": "agent_working",
+  "iteration": 46,
+  "current_task_id": "otel-metrics-export",
+  "issue_number": 625,
+  "last_prompt": "Add OpenTelemetry (OTEL) trace and metrics export to wreck-it's execution engine. Instrument task lifecycle events (start, complete, fail, retry) as OTEL spans with attributes for model name, token counts, task role, phase, and complexity. Export to configurable OTLP endpoints (Jaeger, Honeycomb, Grafana). This uniquely leverages wreck-it's existing cost tracking and provenance audit trail to provide deep observability into autonomous agent workflows — a capability no other agent framework offers out of the box.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -396,13 +394,7 @@
     "iteration 45: PR #624 not yet mergeable",
     "iteration 45: PR #624 not yet mergeable",
     "iteration 45: PR #624 not yet mergeable",
-    "iteration 45: PR #624 not yet mergeable"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 624,
-      "task_id": "mcp-server-integration",
-      "issue_number": 623
-    }
+    "iteration 45: PR #624 not yet mergeable",
+    "iteration 46: triggered cloud agent for task otel-metrics-export (issue #625)"
   ]
 }
