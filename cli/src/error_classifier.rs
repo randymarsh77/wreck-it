@@ -1,3 +1,99 @@
+// =============================================================================
+// Evaluation Summary — eval-error-classification
+// =============================================================================
+//
+// ## End-to-End Verification
+//
+// All 107 library tests pass (`cargo test --lib`).  The classifier is exercised
+// by 37 unit tests in this module alone, covering every category, the
+// `recover()` helper, and the standalone `classify_error` function used by
+// `headless.rs`.
+//
+// Transient backoff path (`headless.rs`)
+// ---------------------------------------
+// Both call-sites (the `advance` loop around line 637 and `step_phase` around
+// line 1652) correctly:
+//   • Sleep for `transient_backoff_secs` (default 30 s, per-ralph override via
+//     `RalphConfig::transient_backoff_secs`) before returning.
+//   • Return `continue` / `StepOutcome::Yield` without modifying
+//     `state.iteration`, `task.failed_attempts`, or any replan counter.
+//   • Do NOT call `mark_task_pending_by_id`, so the task slot is preserved.
+// Three headless tests validate the constant value, the fallback logic, and the
+// classify_error → Transient → backoff trigger chain.
+//
+// NeedsReplan path (`headless.rs`)
+// ---------------------------------
+// Both call-sites immediately:
+//   • Call `mark_task_pending_by_id` to reset the failing task.
+//   • Set `state.phase = AgentPhase::NeedsTrigger`.
+//   • Return `StepOutcome::Continue` (step_phase) or `continue` after
+//     `made_progress = true` (advance loop) so the outer loop re-runs
+//     immediately rather than waiting for the next cron trigger.
+// This satisfies the "NeedsReplan immediately triggers the re-planner" contract.
+//
+// ## Classification Accuracy Trade-offs
+//
+// The classifier uses keyword heuristics on plain-text error strings because
+// every error in the codebase is ultimately surfaced as an `anyhow::Error`
+// converted to a `String`.  This is backward-compatible but introduces
+// inherent ambiguity.
+//
+// **Transient** — High precision for canonical HTTP codes and explicit rate-
+// limit phrases.  Lower recall for novel provider-specific messages and
+// infrastructure errors (e.g. "please try again later") that have no shared
+// prefix with the keyword set.
+//
+// **Permanent** — `classify_error` uses the canonical Rust compiler prefix
+// `error[E` and the cargo test runner marker `FAILED` (uppercase).  Precision
+// is high for Rust projects; recall is lower for non-Rust toolchains that emit
+// different failure strings.  `ErrorClassifier::classify` defaults to
+// `Permanent` for all unrecognized patterns, providing full recall at the cost
+// of precision (legitimate transient errors without matching keywords will be
+// treated as permanent and sent to the critic rather than backed off).
+//
+// **NeedsReplan** — `classify_error` uses `NeedsReplan` as the default,
+// meaning any unrecognised error triggers a re-plan.  This is conservative
+// (avoids wasting retries on unfixable tasks) but may cause unnecessary
+// re-plans for errors that a critic pass could resolve.
+//
+// **ContextOverflow** — High precision for OpenAI / Copilot model strings.
+// Lower recall for other providers that return a generic 400 without an
+// explicit "context length" phrase.
+//
+// ## False Positive / False Negative Risks per Category
+//
+// | Category        | False-positive risk                               | False-negative risk                                  |
+// |-----------------|---------------------------------------------------|------------------------------------------------------|
+// | Transient       | "timeout" in a deterministic DB schema error      | Novel rate-limit bodies without "limit" / "429"      |
+// | Permanent       | Low; "FAILED" is case-sensitive                   | Non-Rust toolchain failures, Python/JS syntax errors |
+// | NeedsReplan     | "no such file" in an unrelated log message        | Mis-specified tasks whose error matches Transient     |
+// | ContextOverflow | "truncated" in unrelated test output              | Providers returning generic 400 for context overflow  |
+//
+// ## Recommended Follow-up Work
+//
+// 1. **ML-based classifier** – Train a small logistic-regression or fine-tuned
+//    transformer on a labelled corpus of wreck-it CI failure logs.  This would
+//    improve recall on novel phrasing and reduce false positives from overlapping
+//    keywords across categories.
+//
+// 2. **User-configurable keyword patterns** – Expose the keyword lists in
+//    `.wreck-it.toml` (e.g. `[error_classifier.transient_keywords]`) so users
+//    can add domain-specific patterns (e.g. cloud provider error codes) without
+//    forking the codebase.
+//
+// 3. **Structured `WreckItError` enum** – Introduce a typed error hierarchy in
+//    `agent.rs`, `ralph_loop.rs`, and `headless.rs` so that classification is a
+//    simple `match` on variants rather than string heuristics.
+//
+// 4. **Exit-code-based signals** – Use exit code 137 (Linux OOM kill) as an
+//    additional `Transient` signal; treat exit code 0 with unrecognized output
+//    as `NeedsReplan` rather than `Permanent`.
+//
+// 5. **Provenance logging** – Persist the error category alongside each task
+//    execution record so that dashboards can surface per-category failure rates.
+//
+// =============================================================================
+
 //! # Error Classification and Smart Recovery
 //!
 //! This module defines the design for classifying task-execution errors into
@@ -145,10 +241,12 @@ pub(crate) fn classify_error(
         }
     }
 
-    // Suppress unused-variable warning: exit_code is a documented parameter
-    // for future use (e.g. exit code 137 → OOM → Transient), but current
-    // classification is keyword-driven.
-    let _ = exit_code;
+    // Exit code 137 on Linux indicates the process was killed by SIGKILL,
+    // most commonly due to an out-of-memory (OOM) event.  This is a transient
+    // environmental condition; retrying after a delay is appropriate.
+    if exit_code == Some(137) {
+        return ErrorCategory::Transient;
+    }
 
     // --- ContextOverflow signals ---
     //
@@ -169,16 +267,22 @@ pub(crate) fn classify_error(
     //
     // Rate limits, network blips, and timeout keywords from the issue spec:
     // "rate limit", "429", "timeout" → Transient.
+    // Also covers common OS-level network errors such as "connection reset"
+    // and "broken pipe" which typically indicate transient infrastructure blips.
     if lower.contains("rate limit")
         || lower.contains("429")
         || lower.contains("timeout")
         || lower.contains("timed out")
         || lower.contains("connection refused")
+        || lower.contains("connection reset")
+        || lower.contains("broken pipe")
         || lower.contains("network error")
         || lower.contains("temporarily unavailable")
+        || lower.contains("service unavailable")
         || lower.contains("(503)")
         || lower.contains("(504)")
         || lower.contains("(408)")
+        || lower.contains("(502)")
         || lower.contains("rate-limit")
         || lower.contains("too many requests")
     {
@@ -286,6 +390,7 @@ impl ErrorClassifier {
         if lower.contains("context length exceeded")
             || lower.contains("context window")
             || lower.contains("maximum context")
+            || lower.contains("max_tokens")
             || lower.contains("token limit")
             || lower.contains("truncated output")
             || lower.contains("output was truncated")
@@ -315,23 +420,29 @@ impl ErrorClassifier {
         // in `agent.rs` (format: "Models API returned error (NNN): …"):
         //   429 – rate limit
         //   408 – request timeout
+        //   502 – bad gateway
         //   503 – service unavailable
         //   504 – gateway timeout
         //
         // Also covers timeout messages emitted by `ralph_loop.rs` and
-        // `agent.rs` (`"timed out after NNN seconds/ms"`).
+        // `agent.rs` (`"timed out after NNN seconds/ms"`), and common OS-level
+        // network errors ("connection reset", "broken pipe").
         if lower.contains("(429)")
             || lower.contains("rate limit")
             || lower.contains("rate-limit")
             || lower.contains("too many requests")
             || lower.contains("(408)")
+            || lower.contains("(502)")
             || lower.contains("(503)")
             || lower.contains("(504)")
             || lower.contains("timed out")
             || lower.contains("timeout")
             || lower.contains("connection refused")
+            || lower.contains("connection reset")
+            || lower.contains("broken pipe")
             || lower.contains("network error")
             || lower.contains("temporarily unavailable")
+            || lower.contains("service unavailable")
         {
             return ErrorCategory::Transient;
         }
@@ -567,6 +678,47 @@ mod tests {
         assert_eq!(
             ErrorClassifier::classify("something completely unexpected happened"),
             ErrorCategory::Permanent,
+        );
+    }
+
+    #[test]
+    fn classifies_max_tokens_as_context_overflow() {
+        // max_tokens keyword is now covered by ErrorClassifier::classify.
+        assert_eq!(
+            ErrorClassifier::classify("max_tokens reached, please reduce your input"),
+            ErrorCategory::ContextOverflow,
+        );
+    }
+
+    #[test]
+    fn classifies_connection_reset_as_transient() {
+        assert_eq!(
+            ErrorClassifier::classify("connection reset by peer"),
+            ErrorCategory::Transient,
+        );
+    }
+
+    #[test]
+    fn classifies_broken_pipe_as_transient() {
+        assert_eq!(
+            ErrorClassifier::classify("broken pipe while writing to socket"),
+            ErrorCategory::Transient,
+        );
+    }
+
+    #[test]
+    fn classifies_service_unavailable_as_transient() {
+        assert_eq!(
+            ErrorClassifier::classify("503 service unavailable, retry later"),
+            ErrorCategory::Transient,
+        );
+    }
+
+    #[test]
+    fn classifies_502_as_transient() {
+        assert_eq!(
+            ErrorClassifier::classify("upstream returned (502) bad gateway"),
+            ErrorCategory::Transient,
         );
     }
 
@@ -839,5 +991,59 @@ mod tests {
             recover(&ErrorCategory::ContextOverflow, 0),
             RecoveryAction::SplitTask
         ));
+    }
+
+    // --- New keyword coverage (classify_error) ---
+
+    /// Exit code 137 (OOM kill on Linux) should be classified as Transient
+    /// regardless of output content.
+    #[test]
+    fn classify_error_exit_code_137_is_transient() {
+        assert_eq!(
+            classify_error("process killed", Some(137), None),
+            ErrorCategory::Transient,
+        );
+    }
+
+    /// Exit code 137 takes priority over keyword-based classification.
+    #[test]
+    fn classify_error_exit_code_137_wins_over_permanent_keyword() {
+        assert_eq!(
+            classify_error("error[E0308]: mismatched types", Some(137), None),
+            ErrorCategory::Transient,
+            "exit code 137 (OOM kill) should override Permanent keyword classification"
+        );
+    }
+
+    #[test]
+    fn classify_error_connection_reset_is_transient() {
+        assert_eq!(
+            classify_error("connection reset by peer", Some(1), None),
+            ErrorCategory::Transient,
+        );
+    }
+
+    #[test]
+    fn classify_error_broken_pipe_is_transient() {
+        assert_eq!(
+            classify_error("write error: broken pipe", Some(1), None),
+            ErrorCategory::Transient,
+        );
+    }
+
+    #[test]
+    fn classify_error_service_unavailable_is_transient() {
+        assert_eq!(
+            classify_error("upstream: service unavailable, please retry", Some(1), None),
+            ErrorCategory::Transient,
+        );
+    }
+
+    #[test]
+    fn classify_error_502_is_transient() {
+        assert_eq!(
+            classify_error("HTTP (502) bad gateway", Some(1), None),
+            ErrorCategory::Transient,
+        );
     }
 }

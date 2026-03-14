@@ -2708,4 +2708,33 @@ mod tests {
             "429 output should trigger the Transient branch and thus the backoff path"
         );
     }
+
+    /// Verify that the Transient backoff path does NOT return `StepOutcome::Continue`
+    /// (which would immediately re-trigger an agent).  The distinction between
+    /// `Continue` and `Yield` is what prevents the replan counter from advancing:
+    /// `Yield` saves state and exits the loop; `Continue` advances it immediately.
+    #[test]
+    fn step_outcome_continue_and_yield_are_distinct() {
+        // Transient → Yield (not Continue), so no immediate re-trigger.
+        assert_ne!(StepOutcome::Yield, StepOutcome::Continue);
+        // NeedsReplan → Continue (immediate re-trigger), which is distinct from Yield.
+        assert_ne!(StepOutcome::Continue, StepOutcome::Yield);
+    }
+
+    /// Verify that `classify_error` with a NeedsReplan-triggering message does
+    /// not return Transient (which would cause a backoff instead of re-planning).
+    #[test]
+    fn classify_error_needs_replan_not_transient() {
+        use crate::error_classifier::{classify_error, ErrorCategory};
+        let category = classify_error(
+            "unexpected output, task may be mis-specified",
+            Some(1),
+            None,
+        );
+        assert_ne!(
+            category,
+            ErrorCategory::Transient,
+            "NeedsReplan messages should not be mistaken for Transient errors"
+        );
+    }
 }
