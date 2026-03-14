@@ -471,18 +471,19 @@
   {
     "id": "impl-error-classification",
     "description": "Implement the error classification and smart recovery system designed in `ideas-error-classification`. Create `cli/src/error_classifier.rs` with: (1) an `ErrorCategory` enum (`Transient`, `Permanent`, `NeedsReplan`, `ContextOverflow`); (2) a `classify_error(output: &str, exit_code: Option<i32>, http_status: Option<u16>) -> ErrorCategory` function using pattern matching on keywords (\"rate limit\", \"429\", \"timeout\" → Transient; \"error[E\", \"FAILED\" → Permanent; \"context length\", \"max_tokens\" → ContextOverflow; otherwise NeedsReplan); (3) a `RecoveryAction` enum with backoff delay for Transient, critic injection for Permanent, immediate replan for NeedsReplan, and task-split hint for ContextOverflow. Wire `classify_error` into the failure handling path in `cli/src/headless.rs` so that Transient errors trigger a configurable backoff (default 30s) before retry, and NeedsReplan errors bypass the `replan_threshold` counter to immediately invoke the re-planner.",
-    "status": "pending",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "ideas-error-classification"
     ],
     "priority": 4,
-    "complexity": 5
+    "complexity": 5,
+    "last_attempt_at": 1773516691
   },
   {
     "id": "test-error-classification",
     "description": "Write unit tests for the error classification system implemented in `impl-error-classification`. In `cli/src/error_classifier.rs` add a `#[cfg(test)]` module covering: (1) HTTP 429 response body maps to `Transient`; (2) Rust compile error output containing `error[E` maps to `Permanent`; (3) output mentioning \"context length exceeded\" maps to `ContextOverflow`; (4) an exit code of 0 with ambiguous output defaults to `NeedsReplan`; (5) multiple keyword signals in one output resolve to the highest-priority category. Also test the `RecoveryAction` produced for each category and verify that the backoff retry path in `headless.rs` is exercised when `Transient` is returned. Run `cargo test --lib` to confirm all tests pass.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "impl-error-classification"
