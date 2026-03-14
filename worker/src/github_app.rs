@@ -37,39 +37,43 @@ pub fn generate_jwt(app_id: &str, private_key_pem: &str, now_secs: u64) -> Resul
     let signing_input = format!("{encoded_header}.{encoded_payload}");
 
     use signature::Signer;
-    let sig = signing_key
-        .sign(signing_input.as_bytes())
-        .to_vec();
+    let sig = signing_key.sign(signing_input.as_bytes()).to_vec();
     let encoded_sig = base64url_encode(&sig);
 
     Ok(format!("{signing_input}.{encoded_sig}"))
 }
 
-/// Exchange a GitHub App JWT for an installation access token.
+/// Exchange a GitHub App JWT for an installation access token scoped to a
+/// single repository.
 ///
 /// Calls `POST /app/installations/{installation_id}/access_tokens` with the
-/// JWT as a Bearer token.  Returns the installation token string.
+/// JWT as a Bearer token and the `repositories` field set to scope the token
+/// to the given repository.  Returns the installation token string.
 pub async fn vend_installation_token(
     installation_id: u64,
     jwt: &str,
+    repo_name: &str,
 ) -> Result<String, String> {
-    let url = format!(
-        "https://api.github.com/app/installations/{installation_id}/access_tokens"
-    );
+    let url = format!("https://api.github.com/app/installations/{installation_id}/access_tokens");
 
     let mut headers = worker::Headers::new();
     headers.set("Accept", "application/vnd.github+json").ok();
-    headers
-        .set("Authorization", &format!("Bearer {jwt}"))
-        .ok();
+    headers.set("Authorization", &format!("Bearer {jwt}")).ok();
     headers.set("User-Agent", "wreck-it-worker").ok();
     headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+    headers.set("Content-Type", "application/json").ok();
+
+    // Scope the token to the specific repository from the webhook payload.
+    let body = serde_json::json!({ "repositories": [repo_name] });
 
     let request = worker::Request::new_with_init(
         &url,
         worker::RequestInit::new()
             .with_method(worker::Method::Post)
-            .with_headers(headers),
+            .with_headers(headers)
+            .with_body(Some(worker::wasm_bindgen::JsValue::from_str(
+                &body.to_string(),
+            ))),
     )
     .map_err(|e| format!("Failed to create token request: {e}"))?;
 
@@ -101,8 +105,7 @@ pub async fn vend_installation_token(
 // Base64url encoding (RFC 4648 §5, no padding)
 // ---------------------------------------------------------------------------
 
-const BASE64URL_CHARS: &[u8] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const BASE64URL_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 fn base64url_encode(data: &[u8]) -> String {
     let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
@@ -144,7 +147,9 @@ mod tests {
         assert!(!encoded.contains('+'));
         assert!(!encoded.contains('/'));
         assert!(!encoded.contains('='));
-        assert!(encoded.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(encoded
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 
     #[test]
@@ -152,8 +157,9 @@ mod tests {
         // Generate a test RSA key pair for JWT signing.
         use rsa::rand_core::OsRng;
         let private_key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
-        let pem = rsa::pkcs8::EncodePrivateKey::to_pkcs8_pem(&private_key, rsa::pkcs8::LineEnding::LF)
-            .unwrap();
+        let pem =
+            rsa::pkcs8::EncodePrivateKey::to_pkcs8_pem(&private_key, rsa::pkcs8::LineEnding::LF)
+                .unwrap();
 
         let jwt = generate_jwt("12345", pem.as_ref(), 1_700_000_000).unwrap();
         let parts: Vec<&str> = jwt.split('.').collect();

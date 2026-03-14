@@ -60,8 +60,7 @@ pub async fn process_iteration(
     let task_branch = config.effective_task_branch();
 
     for ctx in &contexts {
-        let result =
-            process_ralph(client, &config.state_branch, task_branch, ctx).await?;
+        let result = process_ralph(client, &config.state_branch, task_branch, ctx).await?;
         if result.changed {
             any_changed = true;
         }
@@ -177,17 +176,10 @@ async fn process_ralph(
                 .await
             {
                 Ok((issue_number, node_id)) => {
-                    worker::console_log!(
-                        "Created issue #{} for task '{}'",
-                        issue_number,
-                        task_id,
-                    );
+                    worker::console_log!("Created issue #{} for task '{}'", issue_number, task_id,);
 
                     // Assign a coding agent to the issue.
-                    if client
-                        .assign_agent(issue_number, node_id.as_deref())
-                        .await
-                    {
+                    if client.assign_agent(issue_number, node_id.as_deref()).await {
                         worker::console_log!(
                             "Agent assigned to issue #{} for task '{}'",
                             issue_number,
@@ -404,7 +396,9 @@ async fn handle_merged_pr_for_ralph(
             }
         }
     }
-    state.tracked_prs.retain(|tp| !resolved.contains(&tp.pr_number));
+    state
+        .tracked_prs
+        .retain(|tp| !resolved.contains(&tp.pr_number));
 
     if !task_completed {
         return Ok(IterationResult {
@@ -431,10 +425,7 @@ async fn handle_merged_pr_for_ralph(
             &ctx.state_file,
             state_branch,
             &state_json,
-            &format!(
-                "wreck-it: update state after PR #{} merged",
-                pr_number,
-            ),
+            &format!("wreck-it: update state after PR #{} merged", pr_number,),
             state_sha_opt,
         )
         .await?;
@@ -473,6 +464,9 @@ mod tests {
             precondition_prompt: None,
             parent_id: None,
             labels: vec![],
+            system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
         }
     }
 
