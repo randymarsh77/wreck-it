@@ -2726,7 +2726,11 @@ mod tests {
     #[test]
     fn classify_error_needs_replan_not_transient() {
         use crate::error_classifier::{classify_error, ErrorCategory};
-        let category = classify_error("unexpected output, task may be mis-specified", Some(1), None);
+        let category = classify_error(
+            "unexpected output, task may be mis-specified",
+            Some(1),
+            None,
+        );
         assert_ne!(
             category,
             ErrorCategory::Transient,
