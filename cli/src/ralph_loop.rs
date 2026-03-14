@@ -4,6 +4,7 @@ use crate::cost_tracker::{model_pricing, CostTracker};
 use crate::github_client;
 use crate::kanban::{self, KanbanClient, KanbanIssue};
 use crate::notifier;
+use crate::otel::{self, TaskSpan, TaskSpanAttributes};
 use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
@@ -124,6 +125,9 @@ pub struct RalphLoop {
     /// Shared cost tracker updated by every HTTP chat completion call.
     /// Cloned into per-task agents spawned for parallel execution.
     cost_tracker: Arc<Mutex<CostTracker>>,
+    /// Whether the OpenTelemetry provider was successfully initialised.
+    /// Used to decide whether to call `shutdown_otel` on drop.
+    otel_enabled: bool,
 }
 
 impl RalphLoop {
@@ -161,6 +165,21 @@ impl RalphLoop {
 
         let kanban_provider = kanban::provider_from_config(&config.kanban);
 
+        // Initialise OpenTelemetry when an OTLP endpoint is configured.
+        let otel_enabled = if let Some(ref otel_cfg) = config.otel {
+            match otel::init_otel(otel_cfg) {
+                Ok(true) => true,
+                Ok(false) => false,
+                Err(e) => {
+                    // OTEL initialisation failure is non-fatal: log and continue.
+                    eprintln!("Warning: OTEL initialisation failed: {e}");
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
         Self {
             config,
             state: LoopState::new(max_iterations),
@@ -169,6 +188,7 @@ impl RalphLoop {
             kanban_issues: HashMap::new(),
             kanban_provider,
             cost_tracker,
+            otel_enabled,
         }
     }
 
@@ -180,6 +200,31 @@ impl RalphLoop {
             self.config.github_repo.as_deref(),
             self.config.github_token.as_deref(),
         )
+    }
+
+    /// Build [`TaskSpanAttributes`] for a task before execution.
+    ///
+    /// Token counts and cost are left at zero here; they are filled in after
+    /// the task completes by reading the shared cost tracker.
+    fn build_span_attrs(&self, task: &Task) -> TaskSpanAttributes {
+        let role = serde_json::to_value(task.role)
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| "implementer".to_string());
+        TaskSpanAttributes {
+            task_id: task.id.clone(),
+            task_description: task.description.clone(),
+            role,
+            phase: task.phase,
+            complexity: task.complexity,
+            priority: task.priority,
+            model: model_name(&self.config.model_provider),
+            failed_attempts: task.failed_attempts,
+            // Token counts and cost are populated after execution.
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            estimated_cost_usd: 0.0,
+        }
     }
 
     /// Resolve the effective working directory for a task.
@@ -383,6 +428,11 @@ impl RalphLoop {
         let task_id = self.state.tasks[task_idx].id.clone();
         let task_desc = self.state.tasks[task_idx].description.clone();
         self.state.add_log(format!("Starting task: {}", task_desc));
+
+        // Start an OTEL span for this task execution.
+        let span_attrs = self.build_span_attrs(&self.state.tasks[task_idx]);
+        let mut task_span = TaskSpan::start(&span_attrs);
+        task_span.record_start();
 
         notifier::notify(
             &self.config.notify_webhooks,
@@ -661,12 +711,29 @@ impl RalphLoop {
                         failed,
                         max_retries + 1,
                     ));
+                    // Record the retry event on the OTEL span before resetting status.
+                    task_span.record_retry(failed, max_retries);
                     self.state.tasks[task_idx].status = TaskStatus::Pending;
                     save_tasks(&self.config.task_file, &self.state.tasks)
                         .context("Failed to save tasks after retry reset")?;
                 }
             }
         }
+
+        // Finish the OTEL span with outcome and token/cost attributes sourced
+        // from the shared cost tracker (task-level counters reflect only the
+        // work done in this iteration).
+        let task_succeeded = self.state.tasks[task_idx].status == TaskStatus::Completed;
+        let finish_attrs = {
+            let mut fa = span_attrs;
+            if let Ok(guard) = self.cost_tracker.lock() {
+                fa.prompt_tokens = guard.task_prompt_tokens;
+                fa.completion_tokens = guard.task_completion_tokens;
+                fa.estimated_cost_usd = guard.task_estimated_cost_usd;
+            }
+            fa
+        };
+        task_span.finish(task_succeeded, &finish_attrs);
 
         Ok(true)
     }
@@ -1096,6 +1163,17 @@ impl RalphLoop {
     pub fn stop(&mut self) {
         self.state.running = false;
         self.state.add_log("Loop stopped by user".to_string());
+    }
+}
+
+impl Drop for RalphLoop {
+    /// Flush and shut down the OpenTelemetry tracer provider when the loop is
+    /// dropped, ensuring that all buffered spans are exported before the
+    /// process exits.
+    fn drop(&mut self) {
+        if self.otel_enabled {
+            otel::shutdown_otel();
+        }
     }
 }
 

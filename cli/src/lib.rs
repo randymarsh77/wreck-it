@@ -36,6 +36,7 @@ mod kanban;
 pub mod mcp_server;
 mod notifier;
 mod openclaw;
+pub mod otel;
 mod plan_migration;
 mod plan_wizard;
 mod planner;

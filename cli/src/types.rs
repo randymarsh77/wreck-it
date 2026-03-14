@@ -12,6 +12,7 @@ pub use wreck_it_core::types::{
 };
 
 pub use crate::kanban::KanbanConfig;
+pub use crate::otel::OtlpConfig;
 
 pub const DEFAULT_COPILOT_ENDPOINT: &str = "https://api.githubcopilot.com";
 pub const DEFAULT_LLAMA_ENDPOINT: &str = "http://localhost:11434/v1";
@@ -212,6 +213,17 @@ pub struct Config {
     /// See [`KanbanConfig`] for the available settings.
     #[serde(default, skip_serializing_if = "is_default_kanban")]
     pub kanban: KanbanConfig,
+
+    /// OpenTelemetry (OTLP) export configuration.
+    ///
+    /// When set, every task execution is wrapped in an OTEL span and exported
+    /// to the configured OTLP HTTP endpoint.  Supports Jaeger, Honeycomb,
+    /// Grafana Cloud, and any other OTLP-compatible collector.
+    ///
+    /// When `None` (the default) OTEL export is disabled and no external
+    /// connections are made.  See [`OtlpConfig`] for the available settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub otel: Option<OtlpConfig>,
 }
 
 fn default_max_iterations() -> usize {
@@ -276,6 +288,7 @@ impl Default for Config {
             work_dirs: HashMap::new(),
             prompt_dir: None,
             kanban: KanbanConfig::default(),
+            otel: None,
         }
     }
 }
