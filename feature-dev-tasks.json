@@ -483,7 +483,7 @@
   {
     "id": "test-error-classification",
     "description": "Write unit tests for the error classification system implemented in `impl-error-classification`. In `cli/src/error_classifier.rs` add a `#[cfg(test)]` module covering: (1) HTTP 429 response body maps to `Transient`; (2) Rust compile error output containing `error[E` maps to `Permanent`; (3) output mentioning \"context length exceeded\" maps to `ContextOverflow`; (4) an exit code of 0 with ambiguous output defaults to `NeedsReplan`; (5) multiple keyword signals in one output resolve to the highest-priority category. Also test the `RecoveryAction` produced for each category and verify that the backoff retry path in `headless.rs` is exercised when `Transient` is returned. Run `cargo test --lib` to confirm all tests pass.",
-    "status": "inprogress",
+    "status": "pending",
     "phase": 3,
     "depends_on": [
       "impl-error-classification"
