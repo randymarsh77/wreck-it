@@ -3,6 +3,8 @@
   "iteration": 46,
   "current_task_id": "otel-metrics-export",
   "issue_number": 625,
+  "pr_number": 626,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/626",
   "last_prompt": "Add OpenTelemetry (OTEL) trace and metrics export to wreck-it's execution engine. Instrument task lifecycle events (start, complete, fail, retry) as OTEL spans with attributes for model name, token counts, task role, phase, and complexity. Export to configurable OTLP endpoints (Jaeger, Honeycomb, Grafana). This uniquely leverages wreck-it's existing cost tracking and provenance audit trail to provide deep observability into autonomous agent workflows — a capability no other agent framework offers out of the box.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -395,6 +397,14 @@
     "iteration 45: PR #624 not yet mergeable",
     "iteration 45: PR #624 not yet mergeable",
     "iteration 45: PR #624 not yet mergeable",
-    "iteration 46: triggered cloud agent for task otel-metrics-export (issue #625)"
+    "iteration 46: triggered cloud agent for task otel-metrics-export (issue #625)",
+    "iteration 46: agent opened PR #626 for task Some(\"otel-metrics-export\") (still working)"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 626,
+      "task_id": "otel-metrics-export",
+      "issue_number": 625
+    }
   ]
 }
