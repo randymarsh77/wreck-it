@@ -1,12 +1,4 @@
 {
   "phase": "needs_trigger",
-  "iteration": 0,
-  "pending_merge_issues": [
-    {
-      "issue_number": 259,
-      "task_id": "merge-pr-259",
-      "comment_only": true,
-      "head_sha": "e1ee0ce4ad0f22a11a32d2b3dcfb289300dffaa1"
-    }
-  ]
+  "iteration": 0
 }
