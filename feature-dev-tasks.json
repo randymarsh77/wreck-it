@@ -516,7 +516,7 @@
   {
     "id": "otel-metrics-export",
     "description": "Add OpenTelemetry (OTEL) trace and metrics export to wreck-it's execution engine. Instrument task lifecycle events (start, complete, fail, retry) as OTEL spans with attributes for model name, token counts, task role, phase, and complexity. Export to configurable OTLP endpoints (Jaeger, Honeycomb, Grafana). This uniquely leverages wreck-it's existing cost tracking and provenance audit trail to provide deep observability into autonomous agent workflows — a capability no other agent framework offers out of the box.",
-    "status": "inprogress",
+    "status": "pending",
     "priority": 8,
     "complexity": 6
   },
