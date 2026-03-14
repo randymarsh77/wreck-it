@@ -32,7 +32,7 @@ GitHub Event (issues / push / pull_request)
  └─────────────────┘
 ```
 
-The worker authenticates using the GitHub App's private key and app ID to generate a JWT, which is exchanged for a scoped installation access token using the `installation.id` from the webhook payload. This token has the full permissions granted to the app, enabling the worker to manage the complete task lifecycle.
+The worker authenticates using the GitHub App's private key and app ID to generate a JWT, which is exchanged for an installation access token scoped to the specific repository from the webhook payload. This token has the permissions granted to the app, enabling the worker to manage the complete task lifecycle.
 
 ## Events That Trigger Iterations
 
@@ -173,7 +173,7 @@ wreck-it supports two complementary ways to advance the state machine:
 | **Trigger** | GitHub events (real-time) | Scheduled cron (e.g. every 10 min) |
 | **Runtime** | Cloudflare Worker (WASM) | GitHub Actions runner (native binary) |
 | **State access** | GitHub Contents API | Git worktree on local filesystem |
-| **Authentication** | GitHub App JWT → installation token | `GITHUB_TOKEN` (PAT) |
+| **Authentication** | GitHub App JWT → repo-scoped installation token | `GITHUB_TOKEN` (PAT) |
 | **Can trigger agents** | Yes (creates issues, assigns Copilot) | Yes (creates issues, assigns Copilot) |
 | **Can merge PRs** | Yes (via GitHub REST + GraphQL API) | Yes (via GitHub REST + GraphQL API) |
 
@@ -183,21 +183,11 @@ Both modes are safe to run simultaneously. They operate on the same state branch
 
 ## Authentication
 
-### GitHub App credentials (recommended)
-
-The worker generates a short-lived JWT from the app's private key and numeric ID, then exchanges it for an installation access token using the `installation.id` from the webhook payload. This token is scoped to the specific repository and has the permissions granted to the GitHub App.
-
-This is the recommended approach because:
+The worker generates a short-lived JWT from the app's private key and numeric ID, then exchanges it for an installation access token scoped to the specific repository from the webhook payload.
 
 - **No static tokens to rotate** — JWTs are generated on the fly and expire in 10 minutes.
 - **Full permissions** — the installation token inherits all permissions from the app configuration.
-- **Scoped access** — tokens are limited to the specific installation (repository).
-
-### Static token (legacy)
-
-For backward compatibility, the worker also accepts a pre-generated `GITHUB_APP_TOKEN`. This can be a GitHub App installation token or a Personal Access Token (PAT). Note that static installation tokens expire after 1 hour and must be refreshed externally.
-
-When using a static token, the worker's capabilities depend on the token's scopes. A token with only `contents:write` can advance state but cannot trigger agents or merge PRs.
+- **Repository-scoped** — each token is limited to the single repository that triggered the webhook.
 
 ## Setup
 
@@ -234,7 +224,7 @@ Generate a **private key** from the app settings page and note the **App ID**.
 # Install the WASM target
 rustup target add wasm32-unknown-unknown
 
-# Set secrets (recommended: App credentials)
+# Set secrets
 cd worker
 wrangler secret put GITHUB_WEBHOOK_SECRET   # Webhook secret from GitHub App settings
 wrangler secret put GITHUB_APP_ID           # Numeric App ID from the GitHub App settings
@@ -249,11 +239,8 @@ wrangler deploy
 | Secret | Required | Purpose |
 |--------|----------|---------|
 | `GITHUB_WEBHOOK_SECRET` | Yes | HMAC-SHA256 secret for verifying webhook payload signatures |
-| `GITHUB_APP_ID` | Recommended | Numeric GitHub App ID (enables JWT-based authentication) |
-| `GITHUB_APP_PRIVATE_KEY` | Recommended | PEM-encoded RSA private key from the GitHub App (enables JWT-based authentication) |
-| `GITHUB_APP_TOKEN` | Fallback | Static GitHub token (legacy mode — limited capabilities unless token has broad scopes) |
-
-> **Note:** When `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are both set, the worker ignores `GITHUB_APP_TOKEN` and uses JWT-based authentication for full capabilities.
+| `GITHUB_APP_ID` | Yes | Numeric GitHub App ID |
+| `GITHUB_APP_PRIVATE_KEY` | Yes | PEM-encoded RSA private key from the GitHub App |
 
 ## Source Code Reference
 

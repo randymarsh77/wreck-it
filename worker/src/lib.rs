@@ -7,26 +7,20 @@
 //!
 //! # Authentication
 //!
-//! The worker supports two authentication modes:
-//!
-//! **App credentials (recommended)** — set `GITHUB_APP_ID` and
-//! `GITHUB_APP_PRIVATE_KEY`.  The worker generates a JWT and exchanges it
-//! for an installation access token using the `installation.id` from each
-//! webhook payload.  This token has the full permissions granted to the
-//! GitHub App, enabling the worker to create issues, assign agents, merge
-//! PRs, and manage the complete task lifecycle.
-//!
-//! **Static token (legacy)** — set `GITHUB_APP_TOKEN` to a pre-generated
-//! installation token or PAT.  The worker can read/write repository
-//! contents on the state branch but **cannot** trigger agents or merge PRs
-//! unless the token has sufficient scopes.
+//! The worker authenticates as a GitHub App using a private key.  Set
+//! `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` as Cloudflare secrets.
+//! On each webhook delivery the worker generates a short-lived JWT and
+//! exchanges it for an installation access token **scoped to the specific
+//! repository** from the webhook payload.  This token has the full
+//! permissions granted to the GitHub App, enabling the worker to create
+//! issues, assign agents, merge PRs, and manage the complete task
+//! lifecycle.
 //!
 //! # Required secrets (set via `wrangler secret put`):
 //!
 //! - `GITHUB_WEBHOOK_SECRET` — webhook secret for HMAC-SHA256 verification.
-//! - `GITHUB_APP_ID` — numeric App ID (recommended).
-//! - `GITHUB_APP_PRIVATE_KEY` — PEM-encoded RSA private key (recommended).
-//! - `GITHUB_APP_TOKEN` — fallback static token (legacy).
+//! - `GITHUB_APP_ID` — numeric App ID.
+//! - `GITHUB_APP_PRIVATE_KEY` — PEM-encoded RSA private key.
 
 mod github;
 mod github_app;
@@ -145,18 +139,14 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
     // Resolve the GitHub API token.
     //
-    // Prefer App credentials (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY) which
-    // allow the worker to vend a scoped installation token with full
-    // permissions.  Fall back to the static GITHUB_APP_TOKEN for backward
-    // compatibility.
-    let github_token = resolve_github_token(&env, &payload).await?;
+    // Use App credentials (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY) to vend
+    // an installation token scoped to this specific repository.
+    let github_token = resolve_github_token(&env, &payload, repo_name).await?;
 
     // Resolve the authenticated user's login for trust checks.
     //
     // In the App flow, issues are created as the App bot (user.type == "Bot")
-    // and the authenticated_login is not needed.  In the PAT flow, issues are
-    // created as the PAT owner and we need their login to recognise them as
-    // trusted.
+    // and the authenticated_login is not needed for the trust check.
     let authenticated_login = fetch_authenticated_login(&github_token).await;
     let auth_login_ref = authenticated_login.as_deref();
 
@@ -291,54 +281,40 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
 /// Resolve the GitHub API token from environment secrets.
 ///
-/// Prefers GitHub App credentials (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY)
-/// which produce a scoped installation token.  Falls back to the static
-/// GITHUB_APP_TOKEN secret.
+/// Generates a JWT from the GitHub App credentials (GITHUB_APP_ID +
+/// GITHUB_APP_PRIVATE_KEY), then exchanges it for an installation access
+/// token scoped to the given repository.
 async fn resolve_github_token(
     env: &Env,
     payload: &types::WebhookPayload,
+    repo_name: &str,
 ) -> Result<String> {
-    // Try App credentials first.
-    let app_id = env.secret("GITHUB_APP_ID").map(|s| s.to_string()).ok();
+    let app_id = env
+        .secret("GITHUB_APP_ID")
+        .map(|s| s.to_string())
+        .map_err(|_| Error::RustError("Missing GITHUB_APP_ID secret".into()))?;
     let private_key = env
         .secret("GITHUB_APP_PRIVATE_KEY")
         .map(|s| s.to_string())
-        .ok();
+        .map_err(|_| Error::RustError("Missing GITHUB_APP_PRIVATE_KEY secret".into()))?;
 
-    if let (Some(app_id), Some(private_key)) = (app_id, private_key) {
-        let installation_id = payload
-            .installation
-            .as_ref()
-            .map(|i| i.id)
-            .ok_or_else(|| {
-                Error::RustError(
-                    "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are set but webhook \
-                     payload has no installation.id"
-                        .into(),
-                )
-            })?;
+    let installation_id = payload.installation.as_ref().map(|i| i.id).ok_or_else(|| {
+        Error::RustError(
+            "Webhook payload has no installation.id — is the \
+                 GitHub App installed on this repository?"
+                .into(),
+        )
+    })?;
 
-        let now_secs = js_sys_now_secs();
-        let jwt = github_app::generate_jwt(&app_id, &private_key, now_secs)
-            .map_err(|e| Error::RustError(format!("JWT generation failed: {e}")))?;
+    let now_secs = js_sys_now_secs();
+    let jwt = github_app::generate_jwt(&app_id, &private_key, now_secs)
+        .map_err(|e| Error::RustError(format!("JWT generation failed: {e}")))?;
 
-        let token = github_app::vend_installation_token(installation_id, &jwt)
-            .await
-            .map_err(|e| Error::RustError(format!("Token vending failed: {e}")))?;
+    let token = github_app::vend_installation_token(installation_id, &jwt, repo_name)
+        .await
+        .map_err(|e| Error::RustError(format!("Token vending failed: {e}")))?;
 
-        return Ok(token);
-    }
-
-    // Fall back to static token.
-    env.secret("GITHUB_APP_TOKEN")
-        .map(|s| s.to_string())
-        .map_err(|_| {
-            Error::RustError(
-                "Missing GitHub credentials: set either GITHUB_APP_ID + \
-                 GITHUB_APP_PRIVATE_KEY (recommended) or GITHUB_APP_TOKEN"
-                    .into(),
-            )
-        })
+    Ok(token)
 }
 
 /// Fetch the login of the user (or bot) authenticated by `token`.

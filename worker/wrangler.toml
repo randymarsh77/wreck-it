@@ -8,6 +8,6 @@ command = "cargo install worker-build && worker-build --release"
 
 [vars]
 # Set these via `wrangler secret put` or in the Cloudflare dashboard:
-#   GITHUB_WEBHOOK_SECRET  – Webhook secret for signature verification
-#   GITHUB_APP_TOKEN       – GitHub token (installation token or PAT) with
-#                            read/write access to repository contents
+#   GITHUB_WEBHOOK_SECRET    – Webhook secret for HMAC-SHA256 verification
+#   GITHUB_APP_ID            – Numeric GitHub App ID
+#   GITHUB_APP_PRIVATE_KEY   – PEM-encoded RSA private key from the GitHub App

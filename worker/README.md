@@ -67,13 +67,8 @@ cd worker
 
 # Required
 wrangler secret put GITHUB_WEBHOOK_SECRET   # Webhook secret from GitHub App settings
-
-# Recommended: App credentials (enables full capabilities)
 wrangler secret put GITHUB_APP_ID           # Numeric App ID
 wrangler secret put GITHUB_APP_PRIVATE_KEY  # PEM-encoded RSA private key
-
-# Alternative: Static token (legacy, limited capabilities)
-# wrangler secret put GITHUB_APP_TOKEN      # Installation token or PAT
 ```
 
 ### 3. Deploy
