@@ -32,6 +32,7 @@ mod headless_state;
 mod install;
 #[cfg(test)]
 mod integration_eval;
+mod kanban;
 mod notifier;
 mod openclaw;
 mod plan_migration;

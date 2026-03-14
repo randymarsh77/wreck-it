@@ -15,6 +15,7 @@ mod headless_state;
 mod install;
 #[cfg(test)]
 mod integration_eval;
+mod kanban;
 mod merge;
 mod notifier;
 mod openclaw;
