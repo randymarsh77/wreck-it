@@ -336,6 +336,36 @@ pub enum Commands {
         #[command(subcommand)]
         action: TasksAction,
     },
+
+    /// Start an MCP (Model Context Protocol) server that exposes wreck-it's
+    /// task pipeline over the standard JSON-RPC 2.0 stdio transport.
+    ///
+    /// AI assistants that support MCP (Claude Desktop, VS Code Copilot Chat,
+    /// Cursor, etc.) can connect to this server and call the following tools:
+    ///
+    ///   • list_tasks        – list all tasks and their statuses
+    ///   • add_task          – append a new task to the task file
+    ///   • update_task_status – update the status of an existing task
+    ///   • read_artefact     – read an artefact by "task-id/artefact-name" key
+    ///   • trigger_iteration – obtain the CLI command that runs one loop step
+    ///
+    /// Example Claude Desktop config snippet (claude_desktop_config.json):
+    ///   "wreck-it": {
+    ///     "command": "wreck-it",
+    ///     "args": ["mcp", "--task-file", "/path/to/tasks.json",
+    ///              "--work-dir", "/path/to/project"]
+    ///   }
+    Mcp {
+        /// Path to the task file (default: tasks.json)
+        #[arg(short, long, default_value = "tasks.json")]
+        task_file: PathBuf,
+
+        /// Working directory used to locate the artefact manifest
+        /// (.wreck-it-artefacts.json) and as the default work-dir for
+        /// trigger_iteration (default: current directory)
+        #[arg(short, long)]
+        work_dir: Option<PathBuf>,
+    },
 }
 
 /// Sub-commands for `wreck-it tasks`.

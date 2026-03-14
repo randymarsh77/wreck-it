@@ -17,6 +17,7 @@ mod install;
 #[cfg(test)]
 mod integration_eval;
 mod kanban;
+mod mcp_server;
 mod merge;
 mod notifier;
 mod openclaw;
@@ -1077,6 +1078,14 @@ async fn main() -> Result<()> {
                 }
             }
         },
+
+        // ── mcp ──────────────────────────────────────────────────────────────
+        Commands::Mcp {
+            task_file,
+            work_dir,
+        } => {
+            mcp_server::run_mcp_server(task_file, work_dir)?;
+        }
     }
 
     Ok(())
