@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 45,
   "current_task_id": "mcp-server-integration",
   "issue_number": 623,
+  "pr_number": 624,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/624",
   "last_prompt": "Implement an MCP (Model Context Protocol) server mode for wreck-it so that AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can directly query and manage the task pipeline via the standard MCP protocol. Expose MCP tools for: listing tasks and their statuses, adding new tasks, updating task status, reading artefacts, and triggering a loop iteration. This bridges wreck-it's structured task graph with the rapidly emerging MCP ecosystem, enabling humans to supervise autonomous loops through their preferred AI assistant interface rather than the CLI or TUI.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -388,6 +390,17 @@
     "iteration 44: PR #622 not yet mergeable",
     "iteration 44: PR #622 not yet mergeable",
     "iteration 44: PR #622 not yet mergeable",
-    "iteration 45: triggered cloud agent for task mcp-server-integration (issue #623)"
+    "iteration 45: triggered cloud agent for task mcp-server-integration (issue #623)",
+    "iteration 45: agent created PR #624 for task Some(\"mcp-server-integration\")",
+    "iteration 45: marked PR #624 as ready for review",
+    "iteration 45: PR #624 not yet mergeable",
+    "iteration 45: PR #624 not yet mergeable"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 624,
+      "task_id": "mcp-server-integration",
+      "issue_number": 623
+    }
   ]
 }
