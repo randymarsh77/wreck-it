@@ -61,12 +61,9 @@ struct JsonRpcErrorObject {
     message: String,
 }
 
-// Standard JSON-RPC error codes.
+// Standard JSON-RPC error codes used in response dispatch.
 const PARSE_ERROR: i32 = -32700;
-const INVALID_REQUEST: i32 = -32600;
 const METHOD_NOT_FOUND: i32 = -32601;
-const INVALID_PARAMS: i32 = -32602;
-const INTERNAL_ERROR: i32 = -32603;
 
 // ── MCP protocol version ─────────────────────────────────────────────────────
 
