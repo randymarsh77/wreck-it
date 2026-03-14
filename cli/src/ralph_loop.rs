@@ -166,19 +166,17 @@ impl RalphLoop {
         let kanban_provider = kanban::provider_from_config(&config.kanban);
 
         // Initialise OpenTelemetry when an OTLP endpoint is configured.
-        let otel_enabled = if let Some(ref otel_cfg) = config.otel {
-            match otel::init_otel(otel_cfg) {
-                Ok(true) => true,
-                Ok(false) => false,
-                Err(e) => {
+        let otel_enabled = config
+            .otel
+            .as_ref()
+            .map(|otel_cfg| {
+                otel::init_otel(otel_cfg).unwrap_or_else(|e| {
                     // OTEL initialisation failure is non-fatal: log and continue.
                     eprintln!("Warning: OTEL initialisation failed: {e}");
                     false
-                }
-            }
-        } else {
-            false
-        };
+                })
+            })
+            .unwrap_or(false);
 
         Self {
             config,
@@ -725,13 +723,13 @@ impl RalphLoop {
         // work done in this iteration).
         let task_succeeded = self.state.tasks[task_idx].status == TaskStatus::Completed;
         let finish_attrs = {
-            let mut fa = span_attrs;
+            let mut finish_attrs = span_attrs;
             if let Ok(guard) = self.cost_tracker.lock() {
-                fa.prompt_tokens = guard.task_prompt_tokens;
-                fa.completion_tokens = guard.task_completion_tokens;
-                fa.estimated_cost_usd = guard.task_estimated_cost_usd;
+                finish_attrs.prompt_tokens = guard.task_prompt_tokens;
+                finish_attrs.completion_tokens = guard.task_completion_tokens;
+                finish_attrs.estimated_cost_usd = guard.task_estimated_cost_usd;
             }
-            fa
+            finish_attrs
         };
         task_span.finish(task_succeeded, &finish_attrs);
 

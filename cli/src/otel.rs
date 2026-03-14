@@ -208,6 +208,11 @@ impl TaskSpan {
     /// attribute.  Token counts and estimated cost are applied as attributes
     /// so they appear in both trace UIs and OTLP consumers that support
     /// attribute-based alerting.
+    ///
+    /// The `attrs` parameter carries the updated token/cost counters read from
+    /// `CostTracker` after the task finishes.  These values are not available
+    /// at span-start time, which is why they are supplied here rather than
+    /// being stored up-front.
     pub fn finish(mut self, success: bool, attrs: &TaskSpanAttributes) {
         // Token and cost attributes (known only after the task completes).
         self.span.set_attributes([
@@ -215,8 +220,9 @@ impl TaskSpan {
             KeyValue::new("task.completion_tokens", attrs.completion_tokens as i64),
             KeyValue::new(
                 "task.estimated_cost_usd",
-                // Store as string to avoid f64 precision drift in consumers that
-                // only support integer/string attribute types.
+                // Store as a string because the OTLP spec and many backend
+                // UIs do not natively support floating-point attribute values.
+                // Using a fixed-precision string avoids display rounding issues.
                 format!("{:.6}", attrs.estimated_cost_usd),
             ),
             KeyValue::new("task.outcome", if success { "success" } else { "failure" }),
