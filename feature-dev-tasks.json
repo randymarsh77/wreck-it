@@ -516,14 +516,15 @@
   {
     "id": "otel-metrics-export",
     "description": "Add OpenTelemetry (OTEL) trace and metrics export to wreck-it's execution engine. Instrument task lifecycle events (start, complete, fail, retry) as OTEL spans with attributes for model name, token counts, task role, phase, and complexity. Export to configurable OTLP endpoints (Jaeger, Honeycomb, Grafana). This uniquely leverages wreck-it's existing cost tracking and provenance audit trail to provide deep observability into autonomous agent workflows — a capability no other agent framework offers out of the box.",
-    "status": "pending",
+    "status": "completed",
     "priority": 8,
-    "complexity": 6
+    "complexity": 6,
+    "last_attempt_at": 1773532188
   },
   {
     "id": "security-gate-checks",
     "description": "Add a built-in security gate task kind that runs CodeQL, cargo-audit, or npm audit as a mandatory completion gate before any implementation task PR can be merged. Integrate into the task phase system so security scans run in a post-implementation phase automatically. Surface findings back to the implementing agent via the artefact system so it can self-remediate. This combines wreck-it's phase-based scheduling, artefact chaining, and retry loop into a first-class security posture — addressing the growing trend of shift-left security in AI-native development.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 2,
     "depends_on": [
       "mcp-server-integration"
