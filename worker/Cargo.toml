@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wreck-it-core = { path = "../core" }
-worker = "0.4"
+worker = "0.7"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hmac = "0.12"
