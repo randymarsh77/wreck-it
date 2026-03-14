@@ -1,0 +1,11 @@
+[
+  {
+    "id": "cohesiveness-review",
+    "description": "Review the codebase for feature cohesiveness and architectural consistency. Examine how existing features interact with each other and identify areas where they could better complement one another. Look for opportunities to extract reusable components, share code between features, and reduce duplication. Evaluate current architecture and design patterns for consistency and long-term maintainability. Propose and implement incremental improvements — one small, well-scoped change at a time — that move the codebase toward greater cohesion, better code reuse, and stronger architectural alignment. Prioritize changes that improve how features integrate and communicate with each other.",
+    "status": "pending",
+    "role": "evaluator",
+    "kind": "recurring",
+    "cooldown_seconds": 86400,
+    "precondition_prompt": "Scan the codebase for signs of fragmentation: duplicated logic across features, inconsistent patterns or conventions, features that don't integrate well with each other, or missed opportunities for shared components. Return true if there are concrete cohesiveness improvements to make, false if the codebase is already well-integrated and consistent."
+  }
+]
