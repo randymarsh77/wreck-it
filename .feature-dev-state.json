@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 43,
   "current_task_id": "test-error-classification",
   "issue_number": 619,
+  "pr_number": 620,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/620",
   "last_prompt": "Write unit tests for the error classification system implemented in `impl-error-classification`. In `cli/src/error_classifier.rs` add a `#[cfg(test)]` module covering: (1) HTTP 429 response body maps to `Transient`; (2) Rust compile error output containing `error[E` maps to `Permanent`; (3) output mentioning \"context length exceeded\" maps to `ContextOverflow`; (4) an exit code of 0 with ambiguous output defaults to `NeedsReplan`; (5) multiple keyword signals in one output resolve to the highest-priority category. Also test the `RecoveryAction` produced for each category and verify that the backoff retry path in `headless.rs` is exercised when `Transient` is returned. Run `cargo test --lib` to confirm all tests pass.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -374,6 +376,17 @@
     "iteration 42: PR #259 not yet mergeable",
     "iteration 42: PR #259 not yet mergeable",
     "iteration 42: PR #259 not yet mergeable",
-    "iteration 43: triggered cloud agent for task test-error-classification (issue #619)"
+    "iteration 43: triggered cloud agent for task test-error-classification (issue #619)",
+    "iteration 43: agent created PR #620 for task Some(\"test-error-classification\")",
+    "iteration 43: marked PR #620 as ready for review",
+    "iteration 43: PR #620 not yet mergeable",
+    "iteration 43: PR #620 not yet mergeable"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 620,
+      "task_id": "test-error-classification",
+      "issue_number": 619
+    }
   ]
 }
