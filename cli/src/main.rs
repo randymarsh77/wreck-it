@@ -21,6 +21,7 @@ mod mcp_server;
 mod merge;
 mod notifier;
 mod openclaw;
+mod otel;
 mod plan_migration;
 mod plan_wizard;
 mod planner;
