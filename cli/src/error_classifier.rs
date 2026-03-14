@@ -104,6 +104,12 @@ use std::time::Duration;
 /// when none of the above patterns match, the most likely explanation in the
 /// headless flow is that the task specification needs revision.
 ///
+/// # Arguments
+///
+/// * `output` – combined stdout/stderr from the failed command.
+/// * `exit_code` – process exit code if available.
+/// * `http_status` – HTTP response status if available (e.g., from an API call).
+///
 /// # Examples
 ///
 /// ```no_run
