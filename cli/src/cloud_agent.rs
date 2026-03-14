@@ -1241,7 +1241,7 @@ impl CloudAgentClient {
                 }
             }
         }
-        if mergeable {
+        if mergeable && mergeable_state != "blocked" {
             Ok(PrMergeStatus::Mergeable)
         } else {
             Ok(PrMergeStatus::NotMergeable)
