@@ -13,7 +13,7 @@ use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::security_gate;
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{
-    AgentRole, Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus,
+    AgentRole, BudgetStrategy, Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus,
     DEFAULT_AUTOPILOT_MODEL, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
@@ -42,7 +42,36 @@ impl TaskScheduler {
     /// Return an ordered list of task indices that are ready to execute
     /// (status `Pending` with all dependencies satisfied), sorted from
     /// highest scheduling score to lowest.
+    ///
+    /// Uses [`BudgetStrategy::CriticalPath`] ordering (the default).
     pub fn schedule(tasks: &[Task]) -> Vec<usize> {
+        Self::schedule_with_strategy(tasks, BudgetStrategy::CriticalPath, None, None, 1.0)
+    }
+
+    /// Return an ordered list of ready task indices sorted according to the
+    /// given [`BudgetStrategy`].
+    ///
+    /// # Parameters
+    ///
+    /// * `tasks` – Full task list (all statuses).
+    /// * `strategy` – Which strategy to apply.
+    /// * `remaining_budget` – Remaining budget in USD, or `None` when no
+    ///   budget is configured.
+    /// * `max_cost_usd` – The total budget ceiling in USD, or `None` when
+    ///   no budget is configured.  Used by the `Conservative` strategy to
+    ///   compute the remaining-budget fraction.
+    /// * `conservative_threshold` – Fraction `[0, 1]` of the *total* budget
+    ///   at which the `Conservative` strategy switches from `CriticalPath` to
+    ///   `Greedy` ordering.  Only used when `strategy` is `Conservative`.
+    ///   Greedy ordering activates when
+    ///   `remaining / total <= conservative_threshold`.
+    pub fn schedule_with_strategy(
+        tasks: &[Task],
+        strategy: BudgetStrategy,
+        remaining_budget: Option<f64>,
+        max_cost_usd: Option<f64>,
+        conservative_threshold: f64,
+    ) -> Vec<usize> {
         let completed_ids: HashSet<&str> = tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Completed)
@@ -58,7 +87,19 @@ impl TaskScheduler {
                         .iter()
                         .all(|dep| completed_ids.contains(dep.as_str()))
             })
-            .map(|(i, t)| (i, Self::score(t, tasks)))
+            .map(|(i, t)| {
+                (
+                    i,
+                    Self::score_with_strategy(
+                        t,
+                        tasks,
+                        strategy,
+                        remaining_budget,
+                        max_cost_usd,
+                        conservative_threshold,
+                    ),
+                )
+            })
             .collect();
 
         // Descending score order; stable sort preserves original order on ties.
@@ -66,9 +107,44 @@ impl TaskScheduler {
         ready.into_iter().map(|(i, _)| i).collect()
     }
 
+    /// Compute a scheduling score for a single task under the given strategy.
+    /// Higher scores run sooner.
+    fn score_with_strategy(
+        task: &Task,
+        all_tasks: &[Task],
+        strategy: BudgetStrategy,
+        remaining_budget: Option<f64>,
+        max_cost_usd: Option<f64>,
+        conservative_threshold: f64,
+    ) -> f64 {
+        // Resolve which effective strategy to use (Conservative may degrade to
+        // CriticalPath when enough budget remains).
+        let effective_strategy = match strategy {
+            BudgetStrategy::Conservative => {
+                // Switch to Greedy when the fraction of budget remaining drops
+                // at or below the configured threshold.
+                // No budget configured → always stay in CriticalPath mode.
+                let below_threshold = match (remaining_budget, max_cost_usd) {
+                    (Some(rem), Some(total)) if total > 0.0 => {
+                        (rem / total) <= conservative_threshold
+                    }
+                    _ => false,
+                };
+                if below_threshold {
+                    BudgetStrategy::Greedy
+                } else {
+                    BudgetStrategy::CriticalPath
+                }
+            }
+            other => other,
+        };
+
+        Self::score(task, all_tasks, effective_strategy)
+    }
+
     /// Compute a scheduling score for a single task.  Higher is better.
     ///
-    /// Factors (all additive):
+    /// The base factors (all additive) are:
     /// - **Priority** (×10): higher `priority` field → run sooner.
     /// - **Complexity** (×2, inverted): lower complexity → quicker win.
     /// - **Dependency fan-out** (×5): tasks that unblock more downstream work
@@ -77,7 +153,12 @@ impl TaskScheduler {
     ///   tasks.
     /// - **Time since last attempt** (up to +60): tasks idle longer get a
     ///   recency bonus to avoid starvation.
-    fn score(task: &Task, all_tasks: &[Task]) -> f64 {
+    ///
+    /// Strategy-specific adjustments:
+    /// - `Greedy`: complexity inverted weight raised to ×20 (overwhelms
+    ///   priority) so that the cheapest tasks always run first.
+    /// - `CriticalPath`: default weights as above (priority dominates).
+    fn score(task: &Task, all_tasks: &[Task], strategy: BudgetStrategy) -> f64 {
         let now_secs = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -86,9 +167,14 @@ impl TaskScheduler {
         // Factor 1: priority
         let priority_score = task.priority as f64 * 10.0;
 
-        // Factor 2: complexity (clamped 1–10; lower = better)
+        // Factor 2: complexity (clamped 1–10; lower = better).
+        // Greedy mode amplifies this factor so cheap tasks always win.
         let clamped_complexity = task.complexity.clamp(1, 10);
-        let complexity_score = (11 - clamped_complexity) as f64 * 2.0;
+        let complexity_weight = match strategy {
+            BudgetStrategy::Greedy => 20.0,
+            _ => 2.0,
+        };
+        let complexity_score = (11 - clamped_complexity) as f64 * complexity_weight;
 
         // Factor 3: number of tasks directly waiting on this one
         let unblocks = all_tasks
@@ -481,7 +567,21 @@ impl RalphLoop {
         }
 
         // Determine whether we can run tasks in parallel.
-        let ready = TaskScheduler::schedule(&self.state.tasks);
+        let (ready, remaining_budget) = {
+            let remaining = self
+                .cost_tracker
+                .lock()
+                .ok()
+                .and_then(|g| g.remaining_budget(self.config.max_cost_usd));
+            let scheduled = TaskScheduler::schedule_with_strategy(
+                &self.state.tasks,
+                self.config.budget_strategy,
+                remaining,
+                self.config.max_cost_usd,
+                self.config.conservative_threshold,
+            );
+            (scheduled, remaining)
+        };
         if ready.len() > 1 {
             let result = self.run_parallel_tasks(ready).await;
             self.emit_cost_summary();
@@ -501,6 +601,23 @@ impl RalphLoop {
                 return Ok(false);
             }
         };
+
+        // Before starting the task, check whether its projected cost would
+        // exhaust the remaining budget.  When there is historical cost data
+        // and a budget limit, skip this task to avoid overrun.
+        if let Ok(guard) = self.cost_tracker.lock() {
+            let complexity = self.state.tasks[task_idx].complexity;
+            if guard.would_exceed_budget(complexity, self.config.max_cost_usd) {
+                let projected = guard.projected_cost(complexity);
+                let rem = remaining_budget.unwrap_or(0.0);
+                self.state.add_log(format!(
+                    "Budget projection: task '{}' (complexity {complexity}) projected cost \
+                     ${projected:.4} would exceed remaining budget ${rem:.4} – pausing loop",
+                    self.state.tasks[task_idx].id,
+                ));
+                return Ok(false);
+            }
+        }
 
         let result = self.run_single_task(task_idx).await;
         self.emit_cost_summary();
@@ -974,6 +1091,14 @@ impl RalphLoop {
             finish_attrs
         };
         task_span.finish(task_succeeded, &finish_attrs);
+
+        // Record completed-task cost + complexity so the scheduler can project
+        // future task costs for budget-aware prioritisation.
+        if let Ok(mut guard) = self.cost_tracker.lock() {
+            let complexity = self.state.tasks[task_idx].complexity;
+            let task_cost = guard.task_estimated_cost_usd;
+            guard.record_completed_task(complexity, task_cost);
+        }
 
         Ok(true)
     }
@@ -2580,5 +2705,113 @@ mod tests {
         let desc = r#"{"coverage_threshold": 90}"#;
         let threshold = crate::coverage_enforcer::threshold_from_description(desc);
         assert!((threshold - 90.0).abs() < 0.01);
+    }
+
+    // ── Budget-strategy scheduler tests ───────────────────────────────────────
+
+    /// Greedy strategy strongly prefers low-complexity tasks even when a
+    /// competing task has higher priority.
+    #[test]
+    fn scheduler_greedy_prefers_low_complexity_over_high_priority() {
+        // "high-prio" has priority 10 (score +100 for critical-path) but
+        // complexity 10 (score +2 with weight 2).
+        // "low-complex" has priority 0 but complexity 1 (score +200 with
+        // greedy weight 20, versus +22 with weight 2 for the complex task).
+        let tasks = vec![
+            make_task("high-prio", TaskStatus::Pending, 10, 10, 0, vec![]),
+            make_task("low-complex", TaskStatus::Pending, 0, 1, 0, vec![]),
+        ];
+        let ready =
+            TaskScheduler::schedule_with_strategy(&tasks, BudgetStrategy::Greedy, None, None, 0.20);
+        assert_eq!(ready.len(), 2);
+        // Greedy should put the low-complexity task first.
+        assert_eq!(ready[0], 1, "greedy: low-complexity task should come first");
+    }
+
+    /// Critical-path strategy (the default) still puts priority first.
+    #[test]
+    fn scheduler_critical_path_prefers_high_priority() {
+        let tasks = vec![
+            make_task("low", TaskStatus::Pending, 1, 1, 0, vec![]),
+            make_task("high", TaskStatus::Pending, 10, 1, 0, vec![]),
+        ];
+        let ready = TaskScheduler::schedule_with_strategy(
+            &tasks,
+            BudgetStrategy::CriticalPath,
+            None,
+            None,
+            0.20,
+        );
+        assert_eq!(
+            ready[0], 1,
+            "critical-path: high-priority task should come first"
+        );
+    }
+
+    /// Conservative strategy behaves like CriticalPath when the remaining
+    /// budget fraction is well above the threshold (20%).
+    /// Here $50 remaining out of $100 total = 50% > 20% threshold.
+    #[test]
+    fn scheduler_conservative_acts_like_critical_path_above_threshold() {
+        let tasks = vec![
+            make_task("high-prio", TaskStatus::Pending, 10, 10, 0, vec![]),
+            make_task("low-complex", TaskStatus::Pending, 0, 1, 0, vec![]),
+        ];
+        // 50% remaining ($50 of $100) > 20% threshold → CriticalPath mode
+        let ready = TaskScheduler::schedule_with_strategy(
+            &tasks,
+            BudgetStrategy::Conservative,
+            Some(50.00),
+            Some(100.00),
+            0.20,
+        );
+        // High-priority task should come first (CriticalPath mode).
+        assert_eq!(
+            ready[0], 0,
+            "conservative above threshold should match critical-path"
+        );
+    }
+
+    /// Conservative strategy switches to greedy when the remaining budget
+    /// fraction is at or below the threshold (20%).
+    /// Here $10 remaining out of $100 total = 10% ≤ 20% threshold.
+    #[test]
+    fn scheduler_conservative_switches_to_greedy_below_threshold() {
+        let tasks = vec![
+            make_task("high-prio", TaskStatus::Pending, 10, 10, 0, vec![]),
+            make_task("low-complex", TaskStatus::Pending, 0, 1, 0, vec![]),
+        ];
+        // 10% remaining ($10 of $100) ≤ 20% threshold → Greedy mode
+        let ready = TaskScheduler::schedule_with_strategy(
+            &tasks,
+            BudgetStrategy::Conservative,
+            Some(10.00),
+            Some(100.00),
+            0.20,
+        );
+        // Low-complexity task should come first (greedy mode).
+        assert_eq!(
+            ready[0], 1,
+            "conservative below threshold should match greedy"
+        );
+    }
+
+    /// `schedule` (the public wrapper) is equivalent to `schedule_with_strategy`
+    /// using CriticalPath with no budget context.
+    #[test]
+    fn scheduler_public_wrapper_matches_critical_path() {
+        let tasks = vec![
+            make_task("low", TaskStatus::Pending, 1, 1, 0, vec![]),
+            make_task("high", TaskStatus::Pending, 5, 1, 0, vec![]),
+        ];
+        let via_schedule = TaskScheduler::schedule(&tasks);
+        let via_strategy = TaskScheduler::schedule_with_strategy(
+            &tasks,
+            BudgetStrategy::CriticalPath,
+            None,
+            None,
+            0.20,
+        );
+        assert_eq!(via_schedule, via_strategy);
     }
 }

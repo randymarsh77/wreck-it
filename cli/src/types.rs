@@ -14,6 +14,33 @@ pub use wreck_it_core::types::{
 pub use crate::kanban::KanbanConfig;
 pub use crate::otel::OtlpConfig;
 
+/// Strategy used to order and filter tasks when a cost budget is active.
+///
+/// Applied by [`crate::ralph_loop::TaskScheduler`] whenever
+/// [`Config::max_cost_usd`] is set.  When no budget is configured the
+/// strategy has no effect and the scheduler falls back to its default
+/// priority-weighted ordering.
+///
+/// # Strategies
+///
+/// | Variant | Goal | Behaviour |
+/// |---------|------|-----------|
+/// | `Greedy` | Maximise the *number* of completed tasks | Re-weights scoring so that lower-complexity tasks are strongly preferred, regardless of priority, in order to complete as many tasks as possible before the budget runs out. |
+/// | `CriticalPath` | Complete the highest-priority tasks first | Behaves identically to the default scheduler (priority × 10 dominates). This is the default when `--budget-strategy` is not supplied. |
+/// | `Conservative` | Prefer safe, cheap tasks near the budget threshold | Switches to greedy-style low-complexity preference when the remaining budget falls below `conservative_threshold` (default 20 %). Above the threshold the scheduler is identical to `CriticalPath`. |
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum BudgetStrategy {
+    /// Maximise completed tasks by strongly preferring low-complexity work.
+    Greedy,
+    /// Prioritise highest-priority tasks first (default).
+    #[default]
+    CriticalPath,
+    /// Prefer low-complexity tasks when the remaining budget is below the
+    /// configured threshold; otherwise behave like `CriticalPath`.
+    Conservative,
+}
+
 pub const DEFAULT_COPILOT_ENDPOINT: &str = "https://api.githubcopilot.com";
 pub const DEFAULT_LLAMA_ENDPOINT: &str = "http://localhost:11434/v1";
 pub const DEFAULT_GITHUB_MODELS_ENDPOINT: &str =
@@ -224,6 +251,30 @@ pub struct Config {
     /// connections are made.  See [`OtlpConfig`] for the available settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub otel: Option<OtlpConfig>,
+
+    /// Task prioritisation strategy to apply when a [`max_cost_usd`] budget is
+    /// active.
+    ///
+    /// * `critical-path` (default) – highest-priority tasks run first,
+    ///   mirroring the default scheduler behaviour.
+    /// * `greedy` – strongly prefer low-complexity tasks to maximise the total
+    ///   number of tasks completed within budget.
+    /// * `conservative` – behave like `critical-path` until the remaining
+    ///   budget falls below [`conservative_threshold`], then switch to greedy.
+    ///
+    /// Has no effect when `max_cost_usd` is `None`.
+    #[serde(default)]
+    pub budget_strategy: BudgetStrategy,
+
+    /// Fraction of the total budget at which the `conservative` strategy
+    /// switches from `critical-path` ordering to `greedy` ordering.
+    ///
+    /// Expressed as a value in `[0.0, 1.0]` – e.g. `0.20` means "switch when
+    /// less than 20 % of the budget remains".  Only used when
+    /// [`budget_strategy`] is [`BudgetStrategy::Conservative`].  Defaults to
+    /// `0.20`.
+    #[serde(default = "default_conservative_threshold")]
+    pub conservative_threshold: f64,
 }
 
 fn default_max_iterations() -> usize {
@@ -258,6 +309,10 @@ fn default_replan_threshold() -> u32 {
     DEFAULT_REPLAN_THRESHOLD
 }
 
+fn default_conservative_threshold() -> f64 {
+    0.20
+}
+
 fn is_default_kanban(k: &KanbanConfig) -> bool {
     *k == KanbanConfig::default()
 }
@@ -289,6 +344,8 @@ impl Default for Config {
             prompt_dir: None,
             kanban: KanbanConfig::default(),
             otel: None,
+            budget_strategy: BudgetStrategy::default(),
+            conservative_threshold: default_conservative_threshold(),
         }
     }
 }
