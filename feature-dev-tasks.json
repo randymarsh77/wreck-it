@@ -580,7 +580,7 @@
   {
     "id": "semantic-changelog-generator",
     "description": "Add an automated semantic changelog generator that runs as a recurring evaluator-role task. At the end of each iteration, it reads the provenance audit trail and completed task artefacts, groups changes by category (features, fixes, refactors, security), and generates a human-readable CHANGELOG.md entry. Use conventional-commit conventions to classify changes. Output the changelog entry as an artefact that can be consumed by release automation. This uniquely combines wreck-it's provenance audit trail, artefact system, and recurring task cooldown to create fully automated release notes with zero human effort.",
-    "status": "inprogress",
+    "status": "pending",
     "phase": 3,
     "depends_on": [
       "test-coverage-enforcer",
