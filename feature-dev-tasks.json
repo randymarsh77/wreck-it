@@ -524,18 +524,19 @@
   {
     "id": "security-gate-checks",
     "description": "Add a built-in security gate task kind that runs CodeQL, cargo-audit, or npm audit as a mandatory completion gate before any implementation task PR can be merged. Integrate into the task phase system so security scans run in a post-implementation phase automatically. Surface findings back to the implementing agent via the artefact system so it can self-remediate. This combines wreck-it's phase-based scheduling, artefact chaining, and retry loop into a first-class security posture — addressing the growing trend of shift-left security in AI-native development.",
-    "status": "pending",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "mcp-server-integration"
     ],
     "priority": 9,
-    "complexity": 6
+    "complexity": 6,
+    "last_attempt_at": 1773546158
   },
   {
     "id": "test-coverage-enforcer",
     "description": "Implement a test coverage enforcer as a built-in evaluator-role task that automatically runs after each implementation task completes. The enforcer reads the coverage report artefact produced by the implementation phase, verifies that coverage did not regress, and either approves the task or triggers a retry with a coverage-improvement prompt. Use wreck-it's `inputs` artefact system to pass coverage data between phases. This creates a unique test-driven autonomous development loop where the AI is held accountable to coverage thresholds without human intervention.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 2,
     "depends_on": [
       "otel-metrics-export"

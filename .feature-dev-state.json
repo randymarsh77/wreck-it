@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 47,
-  "current_task_id": "security-gate-checks",
-  "issue_number": 627,
-  "pr_number": 628,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/628",
-  "last_prompt": "Add a built-in security gate task kind that runs CodeQL, cargo-audit, or npm audit as a mandatory completion gate before any implementation task PR can be merged. Integrate into the task phase system so security scans run in a post-implementation phase automatically. Surface findings back to the implementing agent via the artefact system so it can self-remediate. This combines wreck-it's phase-based scheduling, artefact chaining, and retry loop into a first-class security posture — addressing the growing trend of shift-left security in AI-native development.",
+  "phase": "agent_working",
+  "iteration": 48,
+  "current_task_id": "test-coverage-enforcer",
+  "issue_number": 629,
+  "last_prompt": "Implement a test coverage enforcer as a built-in evaluator-role task that automatically runs after each implementation task completes. The enforcer reads the coverage report artefact produced by the implementation phase, verifies that coverage did not regress, and either approves the task or triggers a retry with a coverage-improvement prompt. Use wreck-it's `inputs` artefact system to pass coverage data between phases. This creates a unique test-driven autonomous development loop where the AI is held accountable to coverage thresholds without human intervention.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -412,13 +410,7 @@
     "iteration 47: PR #628 not yet mergeable",
     "iteration 47: PR #628 not yet mergeable",
     "iteration 47: PR #628 not yet mergeable",
-    "iteration 47: PR #628 not yet mergeable"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 628,
-      "task_id": "security-gate-checks",
-      "issue_number": 627
-    }
+    "iteration 47: PR #628 not yet mergeable",
+    "iteration 48: triggered cloud agent for task test-coverage-enforcer (issue #629)"
   ]
 }
