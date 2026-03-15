@@ -548,7 +548,7 @@
   {
     "id": "adaptive-prompt-optimizer",
     "description": "Build an adaptive prompt optimization system that tracks which task description patterns correlate with successful first-attempt completions vs. repeated failures. After each failed attempt, analyze the task description and failure log using an ideas-role agent to suggest a rewritten task description. Store the rewrite in per-task agent memory and apply it on next retry. Surface aggregated pattern insights as a periodic report artefact. This uniquely leverages wreck-it's existing retry tracking, agent memory system, and artefact chaining to create a self-improving task specification loop.",
-    "status": "inprogress",
+    "status": "pending",
     "priority": 7,
     "complexity": 7
   },
