@@ -5,6 +5,7 @@ use crate::changelog_generator;
 use crate::cost_tracker::{model_pricing, CostTracker};
 use crate::coverage_enforcer;
 use crate::github_client;
+use crate::interface_change_detector;
 use crate::kanban::{self, KanbanClient, KanbanIssue};
 use crate::notifier;
 use crate::otel::{self, TaskSpan, TaskSpanAttributes};
@@ -887,6 +888,13 @@ impl RalphLoop {
             } else {
                 self.state.add_log("Changes committed".to_string());
             }
+
+            // --- Multi-repo change orchestration ----------------------------
+            // After committing, inspect the diff for breaking interface changes
+            // and inject follow-up adaptation tasks into every dependent repo
+            // that is registered in `config.work_dirs`.
+            let current_work_dir = self.resolve_work_dir(&task);
+            self.inject_follow_up_tasks_for_breaking_changes(&task, &current_work_dir);
         }
 
         // Save task state to filesystem
@@ -1866,6 +1874,143 @@ impl RalphLoop {
         self.state.running = false;
         self.state.add_log("Loop stopped by user".to_string());
     }
+
+    // -------------------------------------------------------------------------
+    // Multi-repo change orchestration
+    // -------------------------------------------------------------------------
+
+    /// Inspect the most-recent git commit in `work_dir` for breaking interface
+    /// changes.  When breaking changes are found **and** there are other
+    /// repositories registered in [`Config::work_dirs`], inject a follow-up
+    /// adaptation task into each of those repos' task files.
+    ///
+    /// The method is intentionally fire-and-forget: all errors are logged as
+    /// warnings so that a failure here never blocks the main loop.
+    fn inject_follow_up_tasks_for_breaking_changes(
+        &mut self,
+        completed_task: &Task,
+        work_dir: &std::path::Path,
+    ) {
+        // Get the diff of the last commit.  We compare HEAD~1 to HEAD so that
+        // we see exactly what the agent changed (committed diff, not staged).
+        let diff = match get_last_commit_diff(work_dir) {
+            Ok(d) => d,
+            Err(e) => {
+                self.state.add_log(format!(
+                    "interface-change-detector: could not read last commit diff: {e}"
+                ));
+                return;
+            }
+        };
+
+        if diff.trim().is_empty() {
+            return;
+        }
+
+        let changes = interface_change_detector::detect_interface_changes(&diff);
+        let breaking: Vec<_> = changes.iter().filter(|c| c.is_breaking()).collect();
+
+        if breaking.is_empty() {
+            return;
+        }
+
+        // Build a human-readable summary of the breaking changes.
+        let summary = breaking
+            .iter()
+            .map(|c| format!("- {}", c.description))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        self.state.add_log(format!(
+            "Detected {} breaking interface change(s) in task `{}`:\n{}",
+            breaking.len(),
+            completed_task.id,
+            summary,
+        ));
+
+        // Identify dependent repos: every path in `work_dirs` that is
+        // different from the path the completed task ran in.
+        let dependent_repos = self.collect_dependent_repo_task_files(work_dir);
+
+        if dependent_repos.is_empty() {
+            self.state.add_log(
+                "No dependent repos configured in work_dirs – skipping adaptation tasks"
+                    .to_string(),
+            );
+            return;
+        }
+
+        for (repo_label, task_file_path) in &dependent_repos {
+            let adapt_task = build_adaptation_task(&completed_task.id, repo_label, &summary);
+
+            match crate::task_manager::append_task(task_file_path, adapt_task) {
+                Ok(()) => {
+                    self.state.add_log(format!(
+                        "Injected breaking-change adaptation task into `{}` (repo: {})",
+                        task_file_path.display(),
+                        repo_label,
+                    ));
+                }
+                Err(e) => {
+                    self.state.add_log(format!(
+                        "Warning: failed to inject adaptation task into `{}` (repo: {}): {e}",
+                        task_file_path.display(),
+                        repo_label,
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Return the task-file path for every dependent repo registered in
+    /// `config.work_dirs` that points to a directory other than `current_dir`.
+    ///
+    /// Each entry is `(label, task_file_path)` where `label` is the key from
+    /// `work_dirs` and `task_file_path` is the repo's task file (relative to
+    /// the mapped directory, using `config.task_file` as the filename).
+    fn collect_dependent_repo_task_files(
+        &self,
+        current_dir: &std::path::Path,
+    ) -> Vec<(String, std::path::PathBuf)> {
+        let task_filename = self
+            .config
+            .task_file
+            .file_name()
+            .unwrap_or(std::ffi::OsStr::new("tasks.json"));
+
+        let canonical_current = current_dir
+            .canonicalize()
+            .unwrap_or_else(|_| current_dir.to_path_buf());
+
+        let mut result = Vec::new();
+        for (label, path_str) in &self.config.work_dirs {
+            let repo_path = {
+                let p = std::path::Path::new(path_str);
+                if p.is_absolute() {
+                    p.to_path_buf()
+                } else {
+                    self.config.work_dir.join(p)
+                }
+            };
+
+            // Skip the repo that just completed the task.
+            let canonical_repo = repo_path
+                .canonicalize()
+                .unwrap_or_else(|_| repo_path.clone());
+            if canonical_repo == canonical_current {
+                continue;
+            }
+
+            // Only include repos that exist on disk.
+            if !repo_path.is_dir() {
+                continue;
+            }
+
+            let task_file = repo_path.join(task_filename);
+            result.push((label.clone(), task_file));
+        }
+        result
+    }
 }
 
 impl Drop for RalphLoop {
@@ -1876,6 +2021,80 @@ impl Drop for RalphLoop {
         if self.otel_enabled {
             otel::shutdown_otel();
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Multi-repo orchestration helpers (free functions)
+// ---------------------------------------------------------------------------
+
+/// Return the unified diff of the most-recent commit in `repo_dir`.
+///
+/// Equivalent to `git diff HEAD~1 HEAD`.  Returns an empty string when the
+/// repository has only one commit (no parent).
+fn get_last_commit_diff(repo_dir: &std::path::Path) -> Result<String> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "HEAD~1", "HEAD"])
+        .current_dir(repo_dir)
+        .output()
+        .context("Failed to run git diff HEAD~1 HEAD")?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        // HEAD~1 does not exist (initial commit) – fall back to the empty tree.
+        let output2 = std::process::Command::new("git")
+            .args(["show", "HEAD", "--format=", "-p"])
+            .current_dir(repo_dir)
+            .output()
+            .context("Failed to run git show HEAD")?;
+        Ok(String::from_utf8_lossy(&output2.stdout).to_string())
+    }
+}
+
+/// Build a follow-up adaptation task to be injected into a dependent repo.
+fn build_adaptation_task(
+    source_task_id: &str,
+    repo_label: &str,
+    breaking_change_summary: &str,
+) -> crate::types::Task {
+    let id = format!("adapt-breaking-changes-from-{source_task_id}");
+    let description = format!(
+        "Adapt `{repo_label}` to breaking interface changes introduced by task \
+         `{source_task_id}`.\n\n\
+         The following public API changes were detected in the upstream repository \
+         and may require updates in this codebase:\n\n\
+         {breaking_change_summary}\n\n\
+         Review all usages of the changed symbols, update call sites, \
+         re-run the project's test suite, and fix any compilation or test failures."
+    );
+
+    crate::types::Task {
+        id,
+        description,
+        status: crate::types::TaskStatus::Pending,
+        role: crate::types::AgentRole::Implementer,
+        kind: crate::types::TaskKind::default(),
+        cooldown_seconds: None,
+        phase: 1,
+        depends_on: vec![],
+        priority: 10,
+        complexity: 3,
+        timeout_seconds: None,
+        max_retries: Some(2),
+        failed_attempts: 0,
+        last_attempt_at: None,
+        inputs: vec![],
+        outputs: vec![],
+        runtime: crate::types::TaskRuntime::default(),
+        precondition_prompt: None,
+        parent_id: None,
+        labels: vec!["breaking-change-adaptation".to_string()],
+        system_prompt_override: None,
+        acceptance_criteria: Some(
+            "All usages of changed symbols compile and all tests pass.".to_string(),
+        ),
+        evaluation: None,
     }
 }
 
@@ -2858,5 +3077,79 @@ mod tests {
             0.20,
         );
         assert_eq!(via_schedule, via_strategy);
+    }
+
+    // ---- multi-repo change orchestration tests ----
+
+    /// `collect_dependent_repo_task_files` returns every work_dirs entry whose
+    /// path differs from the current working directory.
+    #[test]
+    fn collect_dependent_repos_excludes_current_dir() {
+        let primary = tempfile::tempdir().unwrap();
+        let dependent = tempfile::tempdir().unwrap();
+
+        let mut config = crate::types::Config::default();
+        config.work_dir = primary.path().to_path_buf();
+        config.work_dirs.insert(
+            "primary".to_string(),
+            primary.path().to_str().unwrap().to_string(),
+        );
+        config.work_dirs.insert(
+            "dependent".to_string(),
+            dependent.path().to_str().unwrap().to_string(),
+        );
+
+        let rl = RalphLoop::new(config);
+        let repos = rl.collect_dependent_repo_task_files(primary.path());
+
+        // Only the dependent repo should be returned.
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].0, "dependent");
+    }
+
+    /// `collect_dependent_repo_task_files` excludes paths that don't exist on
+    /// disk (non-existent directories are silently skipped).
+    #[test]
+    fn collect_dependent_repos_skips_nonexistent_dirs() {
+        let primary = tempfile::tempdir().unwrap();
+
+        let mut config = crate::types::Config::default();
+        config.work_dir = primary.path().to_path_buf();
+        config.work_dirs.insert(
+            "ghost".to_string(),
+            "/nonexistent/path/that/does/not/exist".to_string(),
+        );
+
+        let rl = RalphLoop::new(config);
+        let repos = rl.collect_dependent_repo_task_files(primary.path());
+        assert!(repos.is_empty(), "non-existent dirs must be skipped");
+    }
+
+    /// `collect_dependent_repo_task_files` returns an empty list when
+    /// `work_dirs` is empty.
+    #[test]
+    fn collect_dependent_repos_empty_when_no_work_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_config_with_work_dirs(dir.path().to_str().unwrap(), &[]);
+        let rl = RalphLoop::new(config);
+        assert!(rl.collect_dependent_repo_task_files(dir.path()).is_empty());
+    }
+
+    /// `build_adaptation_task` creates a well-formed task with the expected
+    /// id, status, role, and label.
+    #[test]
+    fn build_adaptation_task_fields() {
+        let task = build_adaptation_task("impl-auth", "frontend", "- `login` removed");
+        assert_eq!(task.id, "adapt-breaking-changes-from-impl-auth");
+        assert_eq!(task.status, TaskStatus::Pending);
+        assert_eq!(task.role, crate::types::AgentRole::Implementer);
+        assert!(task
+            .labels
+            .contains(&"breaking-change-adaptation".to_string()));
+        assert!(task.description.contains("impl-auth"));
+        assert!(task.description.contains("frontend"));
+        assert!(task.description.contains("`login` removed"));
+        assert!(task.acceptance_criteria.is_some());
+        assert_eq!(task.max_retries, Some(2));
     }
 }
