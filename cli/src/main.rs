@@ -31,6 +31,7 @@ mod ralph_loop;
 mod replanner;
 mod repo_config;
 mod report;
+mod security_gate;
 mod semantic_eval;
 mod state_worktree;
 mod task_cli;
