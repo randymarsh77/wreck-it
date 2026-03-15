@@ -44,6 +44,7 @@ impl TaskScheduler {
     /// highest scheduling score to lowest.
     ///
     /// Uses [`BudgetStrategy::CriticalPath`] ordering (the default).
+    #[allow(dead_code)]
     pub fn schedule(tasks: &[Task]) -> Vec<usize> {
         Self::schedule_with_strategy(tasks, BudgetStrategy::CriticalPath, None, None, 1.0)
     }

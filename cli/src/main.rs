@@ -65,8 +65,8 @@ use repo_config::{
 use std::env;
 use tui::TuiApp;
 use types::{
-    BudgetStrategy, ModelProvider, Task, TaskStatus, DEFAULT_COPILOT_ENDPOINT,
-    DEFAULT_GITHUB_MODELS_ENDPOINT, DEFAULT_LLAMA_ENDPOINT,
+    ModelProvider, Task, TaskStatus, DEFAULT_COPILOT_ENDPOINT, DEFAULT_GITHUB_MODELS_ENDPOINT,
+    DEFAULT_LLAMA_ENDPOINT,
 };
 
 #[tokio::main]
