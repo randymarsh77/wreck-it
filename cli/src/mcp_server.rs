@@ -502,6 +502,7 @@ fn task_to_json(task: &Task) -> Value {
         AgentRole::Evaluator => "evaluator",
         AgentRole::SecurityGate => "security_gate",
         AgentRole::CoverageEnforcer => "coverage_enforcer",
+        AgentRole::ChangelogGenerator => "changelog_generator",
     };
     json!({
         "id": task.id,

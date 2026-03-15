@@ -134,6 +134,22 @@ pub enum AgentRole {
     ///   output (`coverage-summary.json`)
     /// * **LCOV** — a `lcov.info` file is parsed to compute line coverage
     CoverageEnforcer,
+    /// Generate a semantic changelog entry from the provenance audit trail and
+    /// completed task artefacts.
+    ///
+    /// When assigned this role a task reads all provenance records from
+    /// `.wreck-it-provenance/` and all artefact entries from the manifest,
+    /// groups changes by conventional-commit category (features, fixes,
+    /// refactors, security), and emits a human-readable CHANGELOG.md entry.
+    ///
+    /// The entry is written to the path declared in the first output artefact
+    /// (default: `CHANGELOG.md`) and also persisted to the artefact manifest
+    /// so that release automation can consume it as an input.
+    ///
+    /// This role is designed to run as a `recurring` task with a cooldown so
+    /// that release notes are generated automatically at the end of every
+    /// development iteration without any human intervention.
+    ChangelogGenerator,
 }
 
 /// Status of an individual task.

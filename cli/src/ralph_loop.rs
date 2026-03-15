@@ -1,6 +1,7 @@
 use crate::agent::AgentClient;
 use crate::agent_memory::AgentMemory;
 use crate::artefact_store;
+use crate::changelog_generator;
 use crate::cost_tracker::{model_pricing, CostTracker};
 use crate::coverage_enforcer;
 use crate::github_client;
@@ -777,6 +778,8 @@ impl RalphLoop {
             self.run_security_gate_task(&task, &effective_work_dir)
         } else if task.role == AgentRole::CoverageEnforcer {
             self.run_coverage_enforcer_task(&task, &effective_work_dir)
+        } else if task.role == AgentRole::ChangelogGenerator {
+            self.run_changelog_generator_task(&task, &effective_work_dir)
         } else if let Some(timeout_secs) = task.timeout_seconds {
             // Wrap execution in a per-task timeout when `timeout_seconds` is set.
             match tokio::time::timeout(
@@ -1329,6 +1332,42 @@ impl RalphLoop {
         ))
     }
 
+    /// Execute a changelog generator task.
+    ///
+    /// Reads all provenance records from `<work_dir>/.wreck-it-provenance/`,
+    /// generates a human-readable CHANGELOG.md entry grouped by
+    /// conventional-commit category, and writes it to the declared output
+    /// artefact path (default: `CHANGELOG.md`).
+    ///
+    /// The artefact is persisted to the manifest so that release automation
+    /// can consume it as an input.  Always returns `Ok(())` — the generator
+    /// is non-blocking.
+    fn run_changelog_generator_task(
+        &mut self,
+        task: &Task,
+        work_dir: &std::path::Path,
+    ) -> Result<()> {
+        self.state
+            .add_log("Running changelog generator...".to_string());
+
+        let manifest_path = self.config.work_dir.join(".wreck-it-artefacts.json");
+        let now_secs = provenance::now_timestamp();
+
+        changelog_generator::run_changelog_generator(task, work_dir, &manifest_path, now_secs)?;
+
+        let output_path = task
+            .outputs
+            .first()
+            .map(|o| work_dir.join(&o.path))
+            .unwrap_or_else(|| work_dir.join("CHANGELOG.md"));
+
+        self.state.add_log(format!(
+            "Changelog entry written to {}",
+            output_path.display()
+        ));
+        Ok(())
+    }
+
     /// Evaluate a task using the configured evaluation mode.
     ///
     /// The evaluation mode is resolved in the following priority order:
@@ -1345,6 +1384,11 @@ impl RalphLoop {
 
         // Coverage enforcer tasks likewise determine pass/fail during execution.
         if task.role == AgentRole::CoverageEnforcer {
+            return Ok(true);
+        }
+
+        // Changelog generator tasks determine pass/fail during execution.
+        if task.role == AgentRole::ChangelogGenerator {
             return Ok(true);
         }
 
