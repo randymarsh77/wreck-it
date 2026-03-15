@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 49,
-  "current_task_id": "adaptive-prompt-optimizer",
-  "issue_number": 631,
-  "pr_number": 632,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/632",
-  "last_prompt": "Build an adaptive prompt optimization system that tracks which task description patterns correlate with successful first-attempt completions vs. repeated failures. After each failed attempt, analyze the task description and failure log using an ideas-role agent to suggest a rewritten task description. Store the rewrite in per-task agent memory and apply it on next retry. Surface aggregated pattern insights as a periodic report artefact. This uniquely leverages wreck-it's existing retry tracking, agent memory system, and artefact chaining to create a self-improving task specification loop.",
+  "phase": "agent_working",
+  "iteration": 50,
+  "current_task_id": "kanban-bidirectional-sync",
+  "issue_number": 633,
+  "last_prompt": "Implement bidirectional sync between wreck-it tasks and external kanban systems (Linear, JIRA, Trello). When new tickets are created in the external system with a configurable label/tag, automatically generate wreck-it task objects and append them to the appropriate task file. When wreck-it tasks complete, update the corresponding external ticket status and attach the git diff URL as a comment. Build on the existing KanbanClient enum dispatch and KanbanProvider trait in cli/src/kanban/. This closes the loop between human planning tools and autonomous execution, enabling teams to manage AI workloads from their existing project management tools.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -426,13 +424,7 @@
     "iteration 49: PR #632 not yet mergeable",
     "iteration 49: PR #632 not yet mergeable",
     "iteration 49: PR #632 not yet mergeable",
-    "iteration 49: PR #632 not yet mergeable"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 632,
-      "task_id": "adaptive-prompt-optimizer",
-      "issue_number": 631
-    }
+    "iteration 49: PR #632 not yet mergeable",
+    "iteration 50: triggered cloud agent for task kanban-bidirectional-sync (issue #633)"
   ]
 }
