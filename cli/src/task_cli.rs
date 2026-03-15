@@ -32,6 +32,7 @@ pub fn format_task_row(task: &Task, id_w: usize, status_w: usize, role_w: usize)
         AgentRole::Ideas => "ideas",
         AgentRole::Implementer => "implementer",
         AgentRole::Evaluator => "evaluator",
+        AgentRole::SecurityGate => "security_gate",
     };
     let deps = if task.depends_on.is_empty() {
         "-".to_string()

@@ -59,6 +59,7 @@ fn role_label(role: AgentRole) -> &'static str {
         AgentRole::Ideas => "ideas",
         AgentRole::Implementer => "implementer",
         AgentRole::Evaluator => "evaluator",
+        AgentRole::SecurityGate => "security_gate",
     }
 }
 
