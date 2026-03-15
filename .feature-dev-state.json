@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 48,
   "current_task_id": "test-coverage-enforcer",
   "issue_number": 629,
+  "pr_number": 630,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/630",
   "last_prompt": "Implement a test coverage enforcer as a built-in evaluator-role task that automatically runs after each implementation task completes. The enforcer reads the coverage report artefact produced by the implementation phase, verifies that coverage did not regress, and either approves the task or triggers a retry with a coverage-improvement prompt. Use wreck-it's `inputs` artefact system to pass coverage data between phases. This creates a unique test-driven autonomous development loop where the AI is held accountable to coverage thresholds without human intervention.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -411,6 +413,17 @@
     "iteration 47: PR #628 not yet mergeable",
     "iteration 47: PR #628 not yet mergeable",
     "iteration 47: PR #628 not yet mergeable",
-    "iteration 48: triggered cloud agent for task test-coverage-enforcer (issue #629)"
+    "iteration 48: triggered cloud agent for task test-coverage-enforcer (issue #629)",
+    "iteration 48: agent created PR #630 for task Some(\"test-coverage-enforcer\")",
+    "iteration 48: marked PR #630 as ready for review",
+    "iteration 48: PR #630 not yet mergeable",
+    "iteration 48: PR #630 not yet mergeable"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 630,
+      "task_id": "test-coverage-enforcer",
+      "issue_number": 629
+    }
   ]
 }
