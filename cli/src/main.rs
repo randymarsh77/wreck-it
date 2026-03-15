@@ -104,6 +104,7 @@ async fn main() -> Result<()> {
             github_repo,
             github_token,
             max_cost_usd,
+            budget_strategy,
             work_dir_map,
             prompt_dir,
         } => {
@@ -238,6 +239,9 @@ async fn main() -> Result<()> {
                 }
                 if let Some(cost) = max_cost_usd {
                     config.max_cost_usd = Some(cost);
+                }
+                if let Some(strategy) = budget_strategy {
+                    config.budget_strategy = strategy;
                 }
 
                 // Parse `KEY=PATH` pairs from --work-dir-map into the config map.

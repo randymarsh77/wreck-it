@@ -1,5 +1,5 @@
 use crate::graph::GraphFormat;
-use crate::types::{AgentRole, EvaluationMode, ModelProvider, TaskStatus};
+use crate::types::{AgentRole, BudgetStrategy, EvaluationMode, ModelProvider, TaskStatus};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -118,6 +118,22 @@ pub enum Commands {
         /// Leave unset to impose no budget limit.
         #[arg(long = "max-cost", value_name = "USD")]
         max_cost_usd: Option<f64>,
+
+        /// Budget-aware task prioritisation strategy.
+        ///
+        /// Controls how pending tasks are ordered when `--max-cost` is set:
+        ///
+        ///   greedy        – Maximise completed tasks by strongly preferring
+        ///                   low-complexity work (quick wins).
+        ///
+        ///   critical-path – Highest-priority tasks run first (default).
+        ///                   Matches the default scheduler behaviour.
+        ///
+        ///   conservative  – Behaves like critical-path until the remaining
+        ///                   budget drops below 20 % of the total, then
+        ///                   switches to greedy.
+        #[arg(long = "budget-strategy", value_name = "STRATEGY", value_enum)]
+        budget_strategy: Option<BudgetStrategy>,
 
         /// Per-task or per-role working directory overrides for multi-repository
         /// orchestration.  Specify as `ROLE_OR_ID=PATH` pairs (may be repeated).

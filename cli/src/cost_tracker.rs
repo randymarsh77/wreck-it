@@ -147,6 +147,13 @@ pub struct CostTracker {
     /// Total estimated USD cost for this run.
     pub total_estimated_cost_usd: f64,
 
+    // ── historical completed-task data for projection ────────────────────────
+    /// Accumulated complexity points from all tasks that have completed
+    /// (successfully or not).  Used to derive [`avg_cost_per_complexity_point`].
+    completed_complexity_sum: u64,
+    /// Accumulated cost from all tasks that have completed.
+    completed_cost_sum: f64,
+
     // ── pricing parameters ───────────────────────────────────────────────────
     /// Cost per 1 million input tokens (USD).
     input_price_per_m: f64,
@@ -218,6 +225,61 @@ impl CostTracker {
     /// exceeded `max_cost_usd`.  Returns `false` when the limit is `None`.
     pub fn budget_exceeded(&self, max_cost_usd: Option<f64>) -> bool {
         max_cost_usd.is_some_and(|limit| self.total_estimated_cost_usd >= limit)
+    }
+
+    /// Record that a task with the given `complexity` just finished and
+    /// consumed `cost_usd` during this run.
+    ///
+    /// This populates the historical data used by
+    /// [`projected_cost`][`CostTracker::projected_cost`].  Call this once
+    /// per completed (or failed) task, passing the task's `complexity` value
+    /// and the per-task cost obtained from [`task_estimated_cost_usd`].
+    pub fn record_completed_task(&mut self, complexity: u32, cost_usd: f64) {
+        self.completed_complexity_sum += u64::from(complexity.max(1));
+        self.completed_cost_sum += cost_usd;
+    }
+
+    /// Return the remaining cost budget, or `None` when no limit is set.
+    ///
+    /// The returned value can be negative when the tracker has already
+    /// exceeded the budget (i.e. spending past the limit is possible within
+    /// the current task).
+    pub fn remaining_budget(&self, max_cost_usd: Option<f64>) -> Option<f64> {
+        max_cost_usd.map(|limit| limit - self.total_estimated_cost_usd)
+    }
+
+    /// Estimate the cost (in USD) of executing a task with the given
+    /// `complexity` value, using the historical cost-per-complexity rate
+    /// observed so far in this run.
+    ///
+    /// Falls back to the current per-task cost when no completed tasks have
+    /// been recorded yet.  If there is no historical data *and* no current
+    /// task cost, returns `0.0`.
+    pub fn projected_cost(&self, complexity: u32) -> f64 {
+        let complexity = f64::from(complexity.max(1));
+        if self.completed_complexity_sum > 0 {
+            let rate = self.completed_cost_sum / self.completed_complexity_sum as f64;
+            rate * complexity
+        } else if self.task_estimated_cost_usd > 0.0 {
+            // Rough estimate: scale the current task's cost by relative complexity.
+            self.task_estimated_cost_usd * complexity
+        } else {
+            0.0
+        }
+    }
+
+    /// Return `true` when the projected cost of a task with `complexity` would
+    /// exceed the remaining budget.
+    ///
+    /// Always returns `false` when `max_cost_usd` is `None` (no budget set)
+    /// or when [`projected_cost`] returns `0.0` (no data to project from).
+    pub fn would_exceed_budget(&self, complexity: u32, max_cost_usd: Option<f64>) -> bool {
+        let projected = self.projected_cost(complexity);
+        if projected == 0.0 {
+            return false;
+        }
+        self.remaining_budget(max_cost_usd)
+            .is_some_and(|rem| projected > rem)
     }
 }
 
@@ -429,5 +491,102 @@ mod tests {
         assert!(summary.contains("1234 in"));
         assert!(summary.contains("567 out"));
         assert!(summary.contains("total:"));
+    }
+
+    // ── Budget-aware projection tests ─────────────────────────────────────────
+
+    #[test]
+    fn remaining_budget_none_when_no_limit() {
+        let tracker = CostTracker::default();
+        assert_eq!(tracker.remaining_budget(None), None);
+    }
+
+    #[test]
+    fn remaining_budget_decreases_as_cost_accumulates() {
+        let mut tracker = CostTracker::new(2.50, 10.00);
+        let usage = TokenUsage {
+            prompt_tokens: 1_000_000,
+            completion_tokens: 0,
+        };
+        tracker.record(&usage); // $2.50 spent
+        let rem = tracker.remaining_budget(Some(10.00));
+        assert!(rem.is_some());
+        assert!((rem.unwrap() - 7.50).abs() < 1e-9);
+    }
+
+    #[test]
+    fn projected_cost_uses_historical_rate() {
+        let mut tracker = CostTracker::new(2.50, 10.00);
+        // Simulate completing a task: complexity 2, cost $4.00 → $2.00/point
+        tracker.record_completed_task(2, 4.00);
+        // A task with complexity 3 should project to $6.00
+        let proj = tracker.projected_cost(3);
+        assert!((proj - 6.00).abs() < 1e-9, "projected={proj}");
+    }
+
+    #[test]
+    fn projected_cost_returns_zero_with_no_history() {
+        let tracker = CostTracker::new(2.50, 10.00);
+        assert_eq!(tracker.projected_cost(5), 0.0);
+    }
+
+    #[test]
+    fn projected_cost_scales_current_task_cost_by_complexity_when_no_history() {
+        let mut tracker = CostTracker::new(2.50, 10.00);
+        let usage = TokenUsage {
+            prompt_tokens: 1_000_000,
+            completion_tokens: 0,
+        };
+        tracker.record(&usage); // task cost = $2.50, no completed history
+                                // With no completed_complexity_sum, falls back to task_estimated_cost_usd * complexity
+        let proj = tracker.projected_cost(2);
+        assert!((proj - 5.00).abs() < 1e-9, "projected={proj}");
+    }
+
+    #[test]
+    fn would_exceed_budget_false_when_no_limit() {
+        let mut tracker = CostTracker::new(2.50, 10.00);
+        tracker.record_completed_task(1, 5.00);
+        assert!(!tracker.would_exceed_budget(1, None));
+    }
+
+    #[test]
+    fn would_exceed_budget_true_when_projection_exceeds_remaining() {
+        let mut tracker = CostTracker::new(2.50, 10.00);
+        // Spend $9.00 out of a $10 budget → $1.00 remaining
+        let usage = TokenUsage {
+            prompt_tokens: 3_600_000, // 3.6M * 2.50 = $9.00
+            completion_tokens: 0,
+        };
+        tracker.record(&usage);
+        // Historical: complexity 1 cost $3.00 → $3.00/point
+        tracker.record_completed_task(1, 3.00);
+        // Project a complexity-1 task: $3.00 > $1.00 remaining → should exceed
+        assert!(tracker.would_exceed_budget(1, Some(10.00)));
+    }
+
+    #[test]
+    fn would_exceed_budget_false_when_sufficient_budget_remains() {
+        let mut tracker = CostTracker::new(2.50, 10.00);
+        // Spend $1.00 out of $100 budget → $99.00 remaining
+        let usage = TokenUsage {
+            prompt_tokens: 400_000, // 0.4M * 2.50 = $1.00
+            completion_tokens: 0,
+        };
+        tracker.record(&usage);
+        // Historical: complexity 1 cost $0.50
+        tracker.record_completed_task(1, 0.50);
+        assert!(!tracker.would_exceed_budget(1, Some(100.00)));
+    }
+
+    #[test]
+    fn record_completed_task_accumulates() {
+        let mut tracker = CostTracker::new(2.50, 10.00);
+        tracker.record_completed_task(2, 4.00); // $2.00/point
+        tracker.record_completed_task(3, 3.00); // $1.00/point
+                                                // Average rate = $7.00 / 5 complexity points = $1.40/point
+                                                // A complexity-5 task should project to $7.00
+        let proj = tracker.projected_cost(5);
+        assert!((proj - 7.00).abs() < 1e-9, "projected={proj}");
     }
 }
