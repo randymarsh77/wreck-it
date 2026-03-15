@@ -1,8 +1,10 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 49,
   "current_task_id": "adaptive-prompt-optimizer",
   "issue_number": 631,
+  "pr_number": 632,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/632",
   "last_prompt": "Build an adaptive prompt optimization system that tracks which task description patterns correlate with successful first-attempt completions vs. repeated failures. After each failed attempt, analyze the task description and failure log using an ideas-role agent to suggest a rewritten task description. Store the rewrite in per-task agent memory and apply it on next retry. Surface aggregated pattern insights as a periodic report artefact. This uniquely leverages wreck-it's existing retry tracking, agent memory system, and artefact chaining to create a self-improving task specification loop.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -418,6 +420,17 @@
     "iteration 48: PR #630 not yet mergeable",
     "iteration 48: PR #630 not yet mergeable",
     "iteration 48: PR #630 not yet mergeable",
-    "iteration 49: triggered cloud agent for task adaptive-prompt-optimizer (issue #631)"
+    "iteration 49: triggered cloud agent for task adaptive-prompt-optimizer (issue #631)",
+    "iteration 49: agent created PR #632 for task Some(\"adaptive-prompt-optimizer\")",
+    "iteration 49: marked PR #632 as ready for review",
+    "iteration 49: PR #632 not yet mergeable",
+    "iteration 49: PR #632 not yet mergeable"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 632,
+      "task_id": "adaptive-prompt-optimizer",
+      "issue_number": 631
+    }
   ]
 }
