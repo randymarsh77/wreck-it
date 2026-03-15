@@ -113,6 +113,27 @@ pub enum AgentRole {
     /// them and self-remediate.  The task fails if any critical or high
     /// severity vulnerabilities are found.
     SecurityGate,
+    /// Enforce a test coverage threshold as an automated gate.
+    ///
+    /// When assigned this role a task reads a coverage report artefact produced
+    /// by a previous implementation/test phase (via the `inputs` artefact
+    /// system), verifies that the coverage percentage meets or exceeds the
+    /// configured threshold, and either passes or fails accordingly.
+    ///
+    /// When the gate **fails** every task listed in `depends_on` is reset to
+    /// `Pending` so the implementation agent can add more tests and reach the
+    /// required coverage before the gate runs again.
+    ///
+    /// The coverage threshold can be specified in the task `description` as a
+    /// JSON field `coverage_threshold` (e.g. `"coverage_threshold": 80`).  The
+    /// default threshold is **80 %**.
+    ///
+    /// Supported coverage report formats (auto-detected from `inputs`):
+    /// * **Rust / tarpaulin** — `cargo tarpaulin --out Json` JSON output
+    /// * **Node.js / nyc / istanbul** — `nyc report --reporter=json-summary`
+    ///   output (`coverage-summary.json`)
+    /// * **LCOV** — a `lcov.info` file is parsed to compute line coverage
+    CoverageEnforcer,
 }
 
 /// Status of an individual task.
