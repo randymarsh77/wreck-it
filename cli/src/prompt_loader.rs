@@ -244,6 +244,7 @@ fn role_file_name(role: AgentRole) -> &'static str {
         AgentRole::Implementer => "implementer",
         AgentRole::Evaluator => "evaluator",
         AgentRole::SecurityGate => "security_gate",
+        AgentRole::CoverageEnforcer => "coverage_enforcer",
     }
 }
 
@@ -365,6 +366,19 @@ mod tests {
     #[test]
     fn role_file_name_evaluator() {
         assert_eq!(role_file_name(AgentRole::Evaluator), "evaluator");
+    }
+
+    #[test]
+    fn role_file_name_security_gate() {
+        assert_eq!(role_file_name(AgentRole::SecurityGate), "security_gate");
+    }
+
+    #[test]
+    fn role_file_name_coverage_enforcer() {
+        assert_eq!(
+            role_file_name(AgentRole::CoverageEnforcer),
+            "coverage_enforcer"
+        );
     }
 
     // ---- resolve_system_prompt: no prompt_dir ----

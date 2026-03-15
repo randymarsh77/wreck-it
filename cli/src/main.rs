@@ -5,6 +5,7 @@ mod cli;
 mod cloud_agent;
 mod config_manager;
 mod cost_tracker;
+mod coverage_enforcer;
 mod error_classifier;
 mod gastown_client;
 mod github_auth;
