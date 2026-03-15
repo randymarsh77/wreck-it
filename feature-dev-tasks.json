@@ -536,18 +536,19 @@
   {
     "id": "test-coverage-enforcer",
     "description": "Implement a test coverage enforcer as a built-in evaluator-role task that automatically runs after each implementation task completes. The enforcer reads the coverage report artefact produced by the implementation phase, verifies that coverage did not regress, and either approves the task or triggers a retry with a coverage-improvement prompt. Use wreck-it's `inputs` artefact system to pass coverage data between phases. This creates a unique test-driven autonomous development loop where the AI is held accountable to coverage thresholds without human intervention.",
-    "status": "pending",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "otel-metrics-export"
     ],
     "priority": 8,
-    "complexity": 5
+    "complexity": 5,
+    "last_attempt_at": 1773555806
   },
   {
     "id": "adaptive-prompt-optimizer",
     "description": "Build an adaptive prompt optimization system that tracks which task description patterns correlate with successful first-attempt completions vs. repeated failures. After each failed attempt, analyze the task description and failure log using an ideas-role agent to suggest a rewritten task description. Store the rewrite in per-task agent memory and apply it on next retry. Surface aggregated pattern insights as a periodic report artefact. This uniquely leverages wreck-it's existing retry tracking, agent memory system, and artefact chaining to create a self-improving task specification loop.",
-    "status": "pending",
+    "status": "inprogress",
     "priority": 7,
     "complexity": 7
   },

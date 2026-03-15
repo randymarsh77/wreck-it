@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 48,
-  "current_task_id": "test-coverage-enforcer",
-  "issue_number": 629,
-  "pr_number": 630,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/630",
-  "last_prompt": "Implement a test coverage enforcer as a built-in evaluator-role task that automatically runs after each implementation task completes. The enforcer reads the coverage report artefact produced by the implementation phase, verifies that coverage did not regress, and either approves the task or triggers a retry with a coverage-improvement prompt. Use wreck-it's `inputs` artefact system to pass coverage data between phases. This creates a unique test-driven autonomous development loop where the AI is held accountable to coverage thresholds without human intervention.",
+  "phase": "agent_working",
+  "iteration": 49,
+  "current_task_id": "adaptive-prompt-optimizer",
+  "issue_number": 631,
+  "last_prompt": "Build an adaptive prompt optimization system that tracks which task description patterns correlate with successful first-attempt completions vs. repeated failures. After each failed attempt, analyze the task description and failure log using an ideas-role agent to suggest a rewritten task description. Store the rewrite in per-task agent memory and apply it on next retry. Surface aggregated pattern insights as a periodic report artefact. This uniquely leverages wreck-it's existing retry tracking, agent memory system, and artefact chaining to create a self-improving task specification loop.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -419,13 +417,7 @@
     "iteration 48: PR #630 not yet mergeable",
     "iteration 48: PR #630 not yet mergeable",
     "iteration 48: PR #630 not yet mergeable",
-    "iteration 48: PR #630 not yet mergeable"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 630,
-      "task_id": "test-coverage-enforcer",
-      "issue_number": 629
-    }
+    "iteration 48: PR #630 not yet mergeable",
+    "iteration 49: triggered cloud agent for task adaptive-prompt-optimizer (issue #631)"
   ]
 }
