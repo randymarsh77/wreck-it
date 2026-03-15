@@ -18,6 +18,7 @@ mod headless_state;
 mod install;
 #[cfg(test)]
 mod integration_eval;
+mod interface_change_detector;
 mod kanban;
 mod mcp_server;
 mod merge;
