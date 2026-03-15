@@ -1,11 +1,6 @@
 {
-  "phase": "needs_verification",
+  "phase": "needs_trigger",
   "iteration": 54,
-  "current_task_id": "parallel-subtask-fan-out",
-  "issue_number": 641,
-  "pr_number": 642,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/642",
-  "last_prompt": "Implement a fan-out/fan-in execution pattern allowing a single ideas-role task to dynamically decompose work into parallel implementer sub-tasks at runtime, then collect and synthesize their results via a fan-in aggregator task. Extend the existing `parent_id` and phase system: when an ideas task outputs a sub-task manifest artefact, the runner spawns those tasks in the next phase with the parent's context injected. The fan-in task waits for all siblings to complete and synthesizes a consolidated result. This addresses the growing trend of multi-agent coordination and enables wreck-it to tackle problems too large for a single context window.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -459,12 +454,5 @@
     "iteration 54: marked PR #642 as ready for review",
     "iteration 54: PR #642 not yet mergeable",
     "iteration 54: PR #642 not yet mergeable"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 642,
-      "task_id": "parallel-subtask-fan-out",
-      "issue_number": 641
-    }
   ]
 }
