@@ -318,6 +318,87 @@ impl KanbanProvider for TrelloProvider {
         }
         Ok(())
     }
+
+    async fn list_inbound_issues(&self, label: &str) -> Result<Vec<KanbanIssue>> {
+        // Step 1: get all labels on the board and find the matching one.
+        let labels_url = format!("{}/boards/{}/labels", self.api_base, self.board_id);
+        let labels_resp = http()
+            .get(&labels_url)
+            .query(&self.auth_params())
+            .send()
+            .await
+            .context("Trello get-board-labels request failed")?;
+
+        if !labels_resp.status().is_success() {
+            let s = labels_resp.status();
+            let body = labels_resp.text().await.unwrap_or_default();
+            bail!("Trello get-board-labels failed ({s}): {body}");
+        }
+
+        #[derive(Deserialize)]
+        struct TrelloBoardLabel {
+            id: String,
+            name: String,
+        }
+
+        let all_labels: Vec<TrelloBoardLabel> = labels_resp
+            .json()
+            .await
+            .context("Failed to parse Trello board labels")?;
+
+        let label_id = all_labels
+            .iter()
+            .find(|l| l.name.eq_ignore_ascii_case(label))
+            .map(|l| l.id.clone())
+            .context(format!(
+                "Trello label '{label}' not found on board {} \
+                 (label names are matched case-insensitively)",
+                self.board_id
+            ))?;
+
+        // Step 2: get all cards on the board and filter by label ID.
+        let cards_url = format!("{}/boards/{}/cards", self.api_base, self.board_id);
+        let cards_resp = http()
+            .get(&cards_url)
+            .query(&self.auth_params())
+            .query(&[("fields", "id,name,desc,url,idLabels")])
+            .send()
+            .await
+            .context("Trello get-board-cards request failed")?;
+
+        if !cards_resp.status().is_success() {
+            let s = cards_resp.status();
+            let body = cards_resp.text().await.unwrap_or_default();
+            bail!("Trello get-board-cards failed ({s}): {body}");
+        }
+
+        #[derive(Deserialize)]
+        struct TrelloCardFull {
+            id: String,
+            name: String,
+            desc: String,
+            url: String,
+            #[serde(rename = "idLabels")]
+            id_labels: Vec<String>,
+        }
+
+        let all_cards: Vec<TrelloCardFull> = cards_resp
+            .json()
+            .await
+            .context("Failed to parse Trello board cards")?;
+
+        let issues = all_cards
+            .into_iter()
+            .filter(|c| c.id_labels.contains(&label_id))
+            .map(|c| KanbanIssue {
+                external_id: c.id,
+                url: c.url,
+                title: c.name,
+                description: c.desc,
+            })
+            .collect();
+        Ok(issues)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -478,5 +559,66 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("401"));
+    }
+
+    #[tokio::test]
+    async fn list_inbound_issues_filters_cards_by_label() {
+        // First request: GET /boards/board1/labels
+        let labels_body = r#"[{"id":"lbl1","name":"wreck-it"},{"id":"lbl2","name":"other"}]"#;
+        // Second request: GET /boards/board1/cards
+        let cards_body = r#"[{"id":"c1","name":"Task A","desc":"do A","url":"https://trello.com/c/c1","idLabels":["lbl1"]},{"id":"c2","name":"Task B","desc":"do B","url":"https://trello.com/c/c2","idLabels":["lbl2"]},{"id":"c3","name":"Task C","desc":"do C","url":"https://trello.com/c/c3","idLabels":["lbl1","lbl2"]}]"#;
+
+        let (url, req_fut) = mock_server_multi(
+            "HTTP/1.1 200 OK",
+            labels_body,
+            "HTTP/1.1 200 OK",
+            cards_body,
+        )
+        .await;
+
+        let provider = TrelloProvider::new("key:token", "board1", &url);
+        let (result, (raw1, raw2)) =
+            tokio::join!(provider.list_inbound_issues("wreck-it"), req_fut);
+
+        let issues = result.unwrap();
+        // Only cards with lbl1 ("wreck-it") should be returned: c1 and c3.
+        assert_eq!(issues.len(), 2);
+        let ids: Vec<&str> = issues.iter().map(|i| i.external_id.as_str()).collect();
+        assert!(ids.contains(&"c1"));
+        assert!(ids.contains(&"c3"));
+        assert!(!ids.contains(&"c2"));
+
+        // Verify first request fetched board labels.
+        let req1 = std::str::from_utf8(&raw1).unwrap();
+        assert!(req1.starts_with("GET"));
+        assert!(req1.contains("/boards/board1/labels"));
+
+        // Verify second request fetched board cards.
+        let req2 = std::str::from_utf8(&raw2).unwrap();
+        assert!(req2.starts_with("GET"));
+        assert!(req2.contains("/boards/board1/cards"));
+    }
+
+    #[tokio::test]
+    async fn list_inbound_issues_label_not_found_returns_err() {
+        let labels_body = r#"[{"id":"lbl1","name":"other"}]"#;
+        // This second request won't actually be made, but provide it anyway.
+        let cards_body = r#"[]"#;
+
+        let (url, req_fut) = mock_server_multi(
+            "HTTP/1.1 200 OK",
+            labels_body,
+            "HTTP/1.1 200 OK",
+            cards_body,
+        )
+        .await;
+
+        let provider = TrelloProvider::new("key:token", "board1", &url);
+        // Spawn the request future so the mock server doesn't block waiting for
+        // a second connection that may not arrive.
+        tokio::spawn(req_fut);
+        let result = provider.list_inbound_issues("nonexistent").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("nonexistent"));
     }
 }

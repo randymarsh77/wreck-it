@@ -78,6 +78,14 @@ impl std::fmt::Display for KanbanBackend {
     }
 }
 
+/// Label prefix stored in a task's `labels` array to record the external
+/// Kanban issue that originated the task.
+///
+/// The full label value is `"kanban-source:{external_id}"`.  The ralph loop
+/// checks for this prefix when polling for inbound tickets to avoid
+/// re-importing issues that have already been converted to tasks.
+pub const KANBAN_SOURCE_LABEL_PREFIX: &str = "kanban-source:";
+
 /// Provider-agnostic configuration for the Kanban integration.
 ///
 /// These fields live in the wreck-it `Config` and are used by
@@ -110,6 +118,19 @@ pub struct KanbanConfig {
     /// Optional email address used for JIRA basic-auth (along with `api_token`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_email: Option<String>,
+
+    /// Label / tag to watch for **inbound** ticket sync.
+    ///
+    /// When set, the ralph loop polls the external board each iteration and
+    /// automatically creates wreck-it task objects for any issues/cards that
+    /// carry this label and have not yet been imported.  The label value is
+    /// provider-specific:
+    ///
+    /// * **Linear** – label name (e.g. `"wreck-it"`).
+    /// * **JIRA**   – label name as used in JQL (e.g. `"wreck-it"`).
+    /// * **Trello** – label name on the board (e.g. `"wreck-it"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_label: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +200,18 @@ pub trait KanbanProvider: Send + Sync {
         &self,
         external_id: &str,
     ) -> impl std::future::Future<Output = Result<()>> + Send;
+
+    /// List issues/cards on the board that carry `label`.
+    ///
+    /// Used for **inbound** sync: the ralph loop calls this each iteration to
+    /// discover tickets that a human created on the external board (e.g. to
+    /// request AI work) and converts them into wreck-it tasks.  Only issues
+    /// that do **not** yet have a corresponding wreck-it task (identified by
+    /// the [`KANBAN_SOURCE_LABEL_PREFIX`] label) are acted upon.
+    fn list_inbound_issues(
+        &self,
+        label: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<KanbanIssue>>> + Send;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +252,6 @@ impl KanbanClient {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn add_comment(&self, external_id: &str, comment: &str) -> Result<()> {
         match self {
             Self::Linear(p) => p.add_comment(external_id, comment).await,
@@ -265,6 +297,14 @@ impl KanbanClient {
             Self::Linear(p) => p.close_issue(external_id).await,
             Self::Jira(p) => p.close_issue(external_id).await,
             Self::Trello(p) => p.close_issue(external_id).await,
+        }
+    }
+
+    pub async fn list_inbound_issues(&self, label: &str) -> Result<Vec<KanbanIssue>> {
+        match self {
+            Self::Linear(p) => p.list_inbound_issues(label).await,
+            Self::Jira(p) => p.list_inbound_issues(label).await,
+            Self::Trello(p) => p.list_inbound_issues(label).await,
         }
     }
 }
@@ -469,5 +509,34 @@ mod tests {
         let u = KanbanUpdates::default();
         assert!(u.description.is_none());
         assert!(u.comments.is_empty());
+    }
+
+    #[test]
+    fn kanban_config_sync_label_roundtrip() {
+        let cfg = KanbanConfig {
+            provider: Some(KanbanBackend::Linear),
+            api_token: Some("tok".into()),
+            project_id: Some("team-1".into()),
+            sync_label: Some("wreck-it".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(json.contains("wreck-it"));
+        let back: KanbanConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.sync_label, Some("wreck-it".into()));
+    }
+
+    #[test]
+    fn kanban_config_sync_label_defaults_to_none() {
+        let cfg = KanbanConfig::default();
+        assert!(cfg.sync_label.is_none());
+        // When sync_label is None it should be skipped in serialisation.
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(!json.contains("sync_label"));
+    }
+
+    #[test]
+    fn kanban_source_label_prefix_constant() {
+        assert_eq!(KANBAN_SOURCE_LABEL_PREFIX, "kanban-source:");
     }
 }
