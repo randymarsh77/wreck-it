@@ -536,7 +536,7 @@
   {
     "id": "test-coverage-enforcer",
     "description": "Implement a test coverage enforcer as a built-in evaluator-role task that automatically runs after each implementation task completes. The enforcer reads the coverage report artefact produced by the implementation phase, verifies that coverage did not regress, and either approves the task or triggers a retry with a coverage-improvement prompt. Use wreck-it's `inputs` artefact system to pass coverage data between phases. This creates a unique test-driven autonomous development loop where the AI is held accountable to coverage thresholds without human intervention.",
-    "status": "inprogress",
+    "status": "pending",
     "phase": 2,
     "depends_on": [
       "otel-metrics-export"
