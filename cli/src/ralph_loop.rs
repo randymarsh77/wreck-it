@@ -895,6 +895,42 @@ impl RalphLoop {
             // that is registered in `config.work_dirs`.
             let current_work_dir = self.resolve_work_dir(&task);
             self.inject_follow_up_tasks_for_breaking_changes(&task, &current_work_dir);
+
+            // --- Fan-out: spawn sub-tasks from SubTaskManifest artefacts -----
+            // If any output artefact is a SubTaskManifest, parse its content
+            // and inject the declared sub-tasks (plus optional fan-in) into
+            // the live task list so they are picked up in the next iteration.
+            let artefact_manifest_path = self.config.work_dir.join(".wreck-it-artefacts.json");
+            let existing_ids: std::collections::HashSet<String> =
+                self.state.tasks.iter().map(|t| t.id.clone()).collect();
+            match crate::fan_out::detect_and_spawn_fan_out(
+                &task,
+                &artefact_manifest_path,
+                &existing_ids,
+            ) {
+                Ok(new_tasks) => {
+                    if !new_tasks.is_empty() {
+                        self.state.add_log(format!(
+                            "Fan-out: task '{}' spawned {} sub-task(s)",
+                            task.id,
+                            new_tasks.len()
+                        ));
+                        for new_task in new_tasks {
+                            self.state.add_log(format!(
+                                "Fan-out: queued sub-task '{}' (phase {}, role {:?})",
+                                new_task.id, new_task.phase, new_task.role
+                            ));
+                            self.state.tasks.push(new_task);
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.state.add_log(format!(
+                        "Warning: fan-out detection failed for task '{}': {}",
+                        task.id, e
+                    ));
+                }
+            }
         }
 
         // Save task state to filesystem
@@ -1681,12 +1717,84 @@ impl RalphLoop {
                 }
 
                 if self.state.tasks[idx].status == TaskStatus::Completed {
+                    // Persist declared output artefacts before committing.
+                    if !self.state.tasks[idx].outputs.is_empty() {
+                        let manifest_path = self.config.work_dir.join(".wreck-it-artefacts.json");
+                        let task_outputs = self.state.tasks[idx].outputs.clone();
+                        let task_id_str = self.state.tasks[idx].id.clone();
+                        match artefact_store::persist_output_artefacts(
+                            &manifest_path,
+                            &task_id_str,
+                            &task_outputs,
+                            &self.config.work_dir,
+                        ) {
+                            Ok(()) => {
+                                self.state.add_log(format!(
+                                    "Task [{}] output artefacts persisted",
+                                    task_id_str
+                                ));
+                            }
+                            Err(e) => {
+                                self.state.add_log(format!(
+                                    "Warning: Task [{}] failed to persist output artefacts: {}",
+                                    task_id_str, e
+                                ));
+                            }
+                        }
+                    }
+
                     let msg = format!("Complete task: {}", self.state.tasks[idx].description);
                     if let Err(e) = self.agent.commit_changes(&msg) {
                         self.state.add_log(format!("Failed to commit: {}", e));
                     }
                 }
             }
+        }
+
+        // Fan-out: after all parallel tasks are evaluated, spawn sub-tasks
+        // from any SubTaskManifest artefacts produced by completed tasks.
+        let artefact_manifest_path = self.config.work_dir.join(".wreck-it-artefacts.json");
+        let mut fan_out_tasks: Vec<crate::types::Task> = Vec::new();
+        for &idx in &eligible_indices {
+            if self.state.tasks[idx].status == TaskStatus::Completed {
+                let task_snapshot = self.state.tasks[idx].clone();
+                let existing_ids: std::collections::HashSet<String> = self
+                    .state
+                    .tasks
+                    .iter()
+                    .map(|t| t.id.clone())
+                    .chain(fan_out_tasks.iter().map(|t| t.id.clone()))
+                    .collect();
+                match crate::fan_out::detect_and_spawn_fan_out(
+                    &task_snapshot,
+                    &artefact_manifest_path,
+                    &existing_ids,
+                ) {
+                    Ok(new_tasks) => {
+                        if !new_tasks.is_empty() {
+                            self.state.add_log(format!(
+                                "Fan-out: task '{}' spawned {} sub-task(s)",
+                                task_snapshot.id,
+                                new_tasks.len()
+                            ));
+                            fan_out_tasks.extend(new_tasks);
+                        }
+                    }
+                    Err(e) => {
+                        self.state.add_log(format!(
+                            "Warning: fan-out detection failed for task '{}': {}",
+                            task_snapshot.id, e
+                        ));
+                    }
+                }
+            }
+        }
+        for new_task in fan_out_tasks {
+            self.state.add_log(format!(
+                "Fan-out: queued sub-task '{}' (phase {}, role {:?})",
+                new_task.id, new_task.phase, new_task.role
+            ));
+            self.state.tasks.push(new_task);
         }
 
         save_tasks(&self.config.task_file, &self.state.tasks).context("Failed to save tasks")?;

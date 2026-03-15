@@ -24,6 +24,7 @@ mod config_manager;
 mod cost_tracker;
 mod coverage_enforcer;
 mod error_classifier;
+mod fan_out;
 mod gastown_client;
 mod github_auth;
 mod github_client;
