@@ -8,7 +8,8 @@ use std::path::PathBuf;
 #[cfg(test)]
 pub use wreck_it_core::types::TaskEvaluation;
 pub use wreck_it_core::types::{
-    AgentRole, ArtefactKind, Task, TaskArtefact, TaskKind, TaskRuntime, TaskStatus,
+    AgentRole, ArtefactKind, FanInSpec, SubTaskManifestSpec, SubTaskSpec, Task, TaskArtefact,
+    TaskKind, TaskRuntime, TaskStatus,
 };
 
 pub use crate::kanban::KanbanConfig;

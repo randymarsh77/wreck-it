@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// The kind of an artefact produced or consumed by a task.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ArtefactKind {
     /// A raw file on disk.
     File,
@@ -23,6 +23,14 @@ pub enum ArtefactKind {
     Json,
     /// A human-readable summary or notes.
     Summary,
+    /// A sub-task manifest that triggers fan-out execution.
+    ///
+    /// When a task (typically with role [`AgentRole::Ideas`]) produces an
+    /// artefact of this kind, the runner parses the JSON content as a
+    /// [`SubTaskManifestSpec`] and spawns the listed sub-tasks in the next
+    /// phase.  An optional fan-in aggregator task is also spawned to collect
+    /// and synthesize all sibling results once they complete.
+    SubTaskManifest,
 }
 
 /// An artefact declared as an input or output of a task.
@@ -161,6 +169,102 @@ pub enum TaskStatus {
     InProgress,
     Completed,
     Failed,
+}
+
+// ---------------------------------------------------------------------------
+// Fan-out / fan-in types
+// ---------------------------------------------------------------------------
+
+/// Specification for a single sub-task declared inside a
+/// [`SubTaskManifestSpec`].
+///
+/// The runner creates a full [`Task`] from each `SubTaskSpec` when it detects
+/// a [`ArtefactKind::SubTaskManifest`] output artefact from a completed
+/// ideas-role task.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SubTaskSpec {
+    /// Unique identifier for the spawned task.
+    pub id: String,
+    /// Human-readable description / specification for the sub-task agent.
+    pub description: String,
+    /// Agent role responsible for executing this sub-task.
+    #[serde(default)]
+    pub role: AgentRole,
+    /// Input artefact references (`"task-id/artefact-name"`) to inject into
+    /// the sub-task's prompt context.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<String>,
+    /// Output artefacts that this sub-task should produce.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<TaskArtefact>,
+    /// Optional execution timeout in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
+    /// Scheduling priority (higher = run sooner).  Defaults to 0.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub priority: u32,
+    /// Estimated complexity on a 1–10 scale.  Defaults to 1.
+    #[serde(
+        default = "default_complexity",
+        skip_serializing_if = "is_default_complexity"
+    )]
+    pub complexity: u32,
+}
+
+/// Specification for the fan-in aggregator task declared inside a
+/// [`SubTaskManifestSpec`].
+///
+/// The fan-in task is created with `depends_on` set to all sibling sub-task
+/// IDs and `inputs` automatically populated with every output artefact
+/// declared by those siblings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FanInSpec {
+    /// Unique identifier for the fan-in aggregator task.
+    pub id: String,
+    /// Human-readable description / specification for the aggregator agent.
+    pub description: String,
+    /// Agent role responsible for the aggregation.  Defaults to
+    /// [`AgentRole::Implementer`].
+    #[serde(default)]
+    pub role: AgentRole,
+    /// Output artefacts that the fan-in task should produce.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<TaskArtefact>,
+}
+
+/// The JSON payload expected inside a [`ArtefactKind::SubTaskManifest`]
+/// artefact.
+///
+/// An `ideas`-role task writes a file of this format to its declared output
+/// path.  After the task completes the runner parses this manifest and
+/// automatically spawns the listed [`sub_tasks`] (in the next phase) plus an
+/// optional [`fan_in`] aggregator task (in the phase after that).
+///
+/// ## Example
+///
+/// ```json
+/// {
+///   "sub_tasks": [
+///     { "id": "impl-module-a", "description": "Implement module A", "role": "implementer",
+///       "outputs": [{ "kind": "summary", "name": "result", "path": "module-a.md" }] },
+///     { "id": "impl-module-b", "description": "Implement module B", "role": "implementer",
+///       "outputs": [{ "kind": "summary", "name": "result", "path": "module-b.md" }] }
+///   ],
+///   "fan_in": {
+///     "id": "synthesize-modules",
+///     "description": "Synthesize module A and B results into a unified report",
+///     "role": "ideas"
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubTaskManifestSpec {
+    /// Parallel sub-tasks to spawn in `parent.phase + 1`.
+    pub sub_tasks: Vec<SubTaskSpec>,
+    /// Optional aggregator task to spawn in `parent.phase + 2` once all
+    /// sub-tasks complete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fan_in: Option<FanInSpec>,
 }
 
 // ---------------------------------------------------------------------------
