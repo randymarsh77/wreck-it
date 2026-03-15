@@ -1921,10 +1921,13 @@ impl RalphLoop {
             .collect::<Vec<_>>()
             .join("\n");
 
+        let symbol_names: Vec<_> = breaking.iter().map(|c| c.symbol.as_str()).collect();
         self.state.add_log(format!(
-            "Detected {} breaking interface change(s) in task `{}`:\n{}",
+            "Detected {} breaking interface change(s) in task `{}` \
+             (affected symbols: {})\n{}",
             breaking.len(),
             completed_task.id,
+            symbol_names.join(", "),
             summary,
         ));
 
