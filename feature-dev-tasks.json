@@ -568,18 +568,19 @@
   {
     "id": "budget-aware-prioritization",
     "description": "Implement dynamic budget-aware task prioritization that adjusts task execution order based on remaining cost budget, current complexity estimates, and historical cost-per-complexity ratios. Add a `--budget-strategy` CLI flag with options: `greedy` (maximize completed tasks), `critical-path` (prioritize highest-priority tasks first), and `conservative` (prefer low-complexity tasks when budget is below a threshold). Integrate with the existing `--max-cost` budget tracking to automatically pause the loop when projected remaining cost would exceed budget. This extends wreck-it's existing cost tracking into a planning optimization feature unique in the agent orchestration space.",
-    "status": "pending",
+    "status": "completed",
     "phase": 2,
     "depends_on": [
       "otel-metrics-export"
     ],
     "priority": 6,
-    "complexity": 5
+    "complexity": 5,
+    "last_attempt_at": 1773570123
   },
   {
     "id": "semantic-changelog-generator",
     "description": "Add an automated semantic changelog generator that runs as a recurring evaluator-role task. At the end of each iteration, it reads the provenance audit trail and completed task artefacts, groups changes by category (features, fixes, refactors, security), and generates a human-readable CHANGELOG.md entry. Use conventional-commit conventions to classify changes. Output the changelog entry as an artefact that can be consumed by release automation. This uniquely combines wreck-it's provenance audit trail, artefact system, and recurring task cooldown to create fully automated release notes with zero human effort.",
-    "status": "pending",
+    "status": "inprogress",
     "phase": 3,
     "depends_on": [
       "test-coverage-enforcer",

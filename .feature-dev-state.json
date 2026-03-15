@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 51,
-  "current_task_id": "budget-aware-prioritization",
-  "issue_number": 635,
-  "pr_number": 636,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/636",
-  "last_prompt": "Implement dynamic budget-aware task prioritization that adjusts task execution order based on remaining cost budget, current complexity estimates, and historical cost-per-complexity ratios. Add a `--budget-strategy` CLI flag with options: `greedy` (maximize completed tasks), `critical-path` (prioritize highest-priority tasks first), and `conservative` (prefer low-complexity tasks when budget is below a threshold). Integrate with the existing `--max-cost` budget tracking to automatically pause the loop when projected remaining cost would exceed budget. This extends wreck-it's existing cost tracking into a planning optimization feature unique in the agent orchestration space.",
+  "phase": "agent_working",
+  "iteration": 52,
+  "current_task_id": "semantic-changelog-generator",
+  "issue_number": 637,
+  "last_prompt": "Add an automated semantic changelog generator that runs as a recurring evaluator-role task. At the end of each iteration, it reads the provenance audit trail and completed task artefacts, groups changes by category (features, fixes, refactors, security), and generates a human-readable CHANGELOG.md entry. Use conventional-commit conventions to classify changes. Output the changelog entry as an artefact that can be consumed by release automation. This uniquely combines wreck-it's provenance audit trail, artefact system, and recurring task cooldown to create fully automated release notes with zero human effort.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -440,13 +438,7 @@
     "iteration 51: PR #636 not yet mergeable",
     "iteration 51: PR #636 not yet mergeable",
     "iteration 51: PR #636 not yet mergeable",
-    "iteration 51: PR #636 not yet mergeable"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 636,
-      "task_id": "budget-aware-prioritization",
-      "issue_number": 635
-    }
+    "iteration 51: PR #636 not yet mergeable",
+    "iteration 52: triggered cloud agent for task semantic-changelog-generator (issue #637)"
   ]
 }
