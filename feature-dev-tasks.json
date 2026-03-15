@@ -605,7 +605,7 @@
   {
     "id": "parallel-subtask-fan-out",
     "description": "Implement a fan-out/fan-in execution pattern allowing a single ideas-role task to dynamically decompose work into parallel implementer sub-tasks at runtime, then collect and synthesize their results via a fan-in aggregator task. Extend the existing `parent_id` and phase system: when an ideas task outputs a sub-task manifest artefact, the runner spawns those tasks in the next phase with the parent's context injected. The fan-in task waits for all siblings to complete and synthesizes a consolidated result. This addresses the growing trend of multi-agent coordination and enables wreck-it to tackle problems too large for a single context window.",
-    "status": "inprogress",
+    "status": "pending",
     "phase": 3,
     "depends_on": [
       "budget-aware-prioritization",
