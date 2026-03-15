@@ -540,6 +540,7 @@ fn role_label(task: &Task) -> String {
         AgentRole::Evaluator => "evaluator",
         AgentRole::SecurityGate => "security_gate",
         AgentRole::CoverageEnforcer => "coverage_enforcer",
+        AgentRole::ChangelogGenerator => "changelog_generator",
     }
     .to_string()
 }
