@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 52,
-  "current_task_id": "semantic-changelog-generator",
-  "issue_number": 637,
-  "pr_number": 638,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/638",
-  "last_prompt": "Add an automated semantic changelog generator that runs as a recurring evaluator-role task. At the end of each iteration, it reads the provenance audit trail and completed task artefacts, groups changes by category (features, fixes, refactors, security), and generates a human-readable CHANGELOG.md entry. Use conventional-commit conventions to classify changes. Output the changelog entry as an artefact that can be consumed by release automation. This uniquely combines wreck-it's provenance audit trail, artefact system, and recurring task cooldown to create fully automated release notes with zero human effort.",
+  "phase": "agent_working",
+  "iteration": 53,
+  "current_task_id": "multi-repo-change-orchestrator",
+  "issue_number": 639,
+  "last_prompt": "Build a multi-repo change orchestration feature that detects when a completed task modifies a public API or exported interface, then automatically creates follow-up tasks in dependent repositories using the existing `--work-dir-map` multi-repo support. Implement interface change detection by comparing type signatures and exported symbols before/after the git diff. When a breaking change is detected, generate adaptation tasks in consumer repos and inject them into their respective task files. This combines wreck-it's multi-repo support and artefact system into an intelligent cross-repo dependency management capability.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -445,13 +443,7 @@
     "iteration 52: agent created PR #638 for task Some(\"semantic-changelog-generator\")",
     "iteration 52: marked PR #638 as ready for review",
     "iteration 52: PR #638 not yet mergeable",
-    "iteration 52: PR #638 not yet mergeable"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 638,
-      "task_id": "semantic-changelog-generator",
-      "issue_number": 637
-    }
+    "iteration 52: PR #638 not yet mergeable",
+    "iteration 53: triggered cloud agent for task multi-repo-change-orchestrator (issue #639)"
   ]
 }
