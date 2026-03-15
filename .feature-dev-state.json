@@ -438,6 +438,7 @@
     "advance: marked PR #636 (task budget-aware-prioritization) as ready for review",
     "iteration 51: agent created PR #636 for task Some(\"budget-aware-prioritization\")",
     "iteration 51: PR #636 not yet mergeable",
+    "iteration 51: PR #636 not yet mergeable",
     "iteration 51: PR #636 not yet mergeable"
   ],
   "tracked_prs": [
