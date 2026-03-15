@@ -3,6 +3,8 @@
   "iteration": 47,
   "current_task_id": "security-gate-checks",
   "issue_number": 627,
+  "pr_number": 628,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/628",
   "last_prompt": "Add a built-in security gate task kind that runs CodeQL, cargo-audit, or npm audit as a mandatory completion gate before any implementation task PR can be merged. Integrate into the task phase system so security scans run in a post-implementation phase automatically. Surface findings back to the implementing agent via the artefact system so it can self-remediate. This combines wreck-it's phase-based scheduling, artefact chaining, and retry loop into a first-class security posture — addressing the growing trend of shift-left security in AI-native development.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -403,6 +405,14 @@
     "iteration 46: PR #626 not yet mergeable",
     "iteration 46: PR #626 not yet mergeable",
     "iteration 46: PR #626 not yet mergeable",
-    "iteration 47: triggered cloud agent for task security-gate-checks (issue #627)"
+    "iteration 47: triggered cloud agent for task security-gate-checks (issue #627)",
+    "iteration 47: agent opened PR #628 for task Some(\"security-gate-checks\") (still working)"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 628,
+      "task_id": "security-gate-checks",
+      "issue_number": 627
+    }
   ]
 }
