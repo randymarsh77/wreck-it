@@ -593,7 +593,7 @@
   {
     "id": "multi-repo-change-orchestrator",
     "description": "Build a multi-repo change orchestration feature that detects when a completed task modifies a public API or exported interface, then automatically creates follow-up tasks in dependent repositories using the existing `--work-dir-map` multi-repo support. Implement interface change detection by comparing type signatures and exported symbols before/after the git diff. When a breaking change is detected, generate adaptation tasks in consumer repos and inject them into their respective task files. This combines wreck-it's multi-repo support and artefact system into an intelligent cross-repo dependency management capability.",
-    "status": "inprogress",
+    "status": "pending",
     "phase": 3,
     "depends_on": [
       "kanban-bidirectional-sync"
