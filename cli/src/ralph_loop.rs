@@ -204,6 +204,139 @@ impl RalphLoop {
         )
     }
 
+    /// Compute a GitHub commit URL for the current HEAD in the work directory.
+    ///
+    /// Returns `None` when `github_repo` is not configured or when `git
+    /// rev-parse HEAD` fails (e.g. the work directory is not a git repository
+    /// or no commits exist yet).
+    fn get_git_diff_url(&self) -> Option<String> {
+        let github_repo = self.config.github_repo.as_deref()?;
+        let output = std::process::Command::new("git")
+            .args([
+                "-C",
+                &self.config.work_dir.to_string_lossy(),
+                "rev-parse",
+                "HEAD",
+            ])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let sha = String::from_utf8(output.stdout).ok()?;
+        let sha = sha.trim().to_string();
+        if sha.is_empty() {
+            return None;
+        }
+        Some(format!("https://github.com/{github_repo}/commit/{sha}"))
+    }
+
+    /// Poll the configured Kanban board for inbound tickets and create new
+    /// wreck-it tasks for any that have not yet been imported.
+    ///
+    /// This implements the **kanban → wreck-it** direction of bidirectional
+    /// sync.  It is a no-op when:
+    /// * No Kanban provider is configured.
+    /// * `kanban.sync_label` is not set.
+    ///
+    /// Already-imported issues are identified by the presence of a label with
+    /// the prefix [`kanban::KANBAN_SOURCE_LABEL_PREFIX`] in the task's label
+    /// list.  New tasks are appended to the task file and to the in-memory
+    /// task list so they are visible in the same iteration.
+    async fn sync_kanban_inbound(&mut self) {
+        let sync_label = match self.config.kanban.sync_label.as_deref() {
+            Some(l) if !l.is_empty() => l.to_string(),
+            _ => return,
+        };
+
+        let issues = {
+            let provider = match &self.kanban_provider {
+                Some(p) => p,
+                None => return,
+            };
+            match provider.list_inbound_issues(&sync_label).await {
+                Ok(v) => v,
+                Err(e) => {
+                    self.state
+                        .add_log(format!("Warning: Kanban inbound sync failed: {e}"));
+                    return;
+                }
+            }
+        };
+
+        for issue in issues {
+            let source_label = format!(
+                "{}{}",
+                kanban::KANBAN_SOURCE_LABEL_PREFIX,
+                issue.external_id
+            );
+
+            // Skip issues that have already been imported.
+            let already_imported = self
+                .state
+                .tasks
+                .iter()
+                .any(|t| t.labels.contains(&source_label));
+            if already_imported {
+                continue;
+            }
+
+            // Generate a unique task ID.  `generate_task_id` scans existing
+            // tasks and guarantees no collision.
+            let task_id = crate::task_manager::generate_task_id(&self.state.tasks, "kanban-");
+
+            let description = if issue.description.trim().is_empty() {
+                issue.title.clone()
+            } else {
+                issue.description.clone()
+            };
+
+            let new_task = Task {
+                id: task_id.clone(),
+                description,
+                status: TaskStatus::Pending,
+                role: crate::types::AgentRole::default(),
+                kind: crate::types::TaskKind::default(),
+                cooldown_seconds: None,
+                phase: 1,
+                depends_on: Vec::new(),
+                priority: 0,
+                complexity: 1,
+                timeout_seconds: None,
+                max_retries: None,
+                failed_attempts: 0,
+                last_attempt_at: None,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                runtime: crate::types::TaskRuntime::default(),
+                precondition_prompt: None,
+                parent_id: None,
+                labels: vec![source_label],
+                system_prompt_override: None,
+                acceptance_criteria: None,
+                evaluation: None,
+            };
+
+            match crate::task_manager::append_task(&self.config.task_file, new_task.clone()) {
+                Ok(()) => {
+                    self.state.add_log(format!(
+                        "Kanban inbound sync: imported issue {} as task {task_id} ({})",
+                        issue.external_id, issue.url
+                    ));
+                    // Also add to in-memory state so the task is immediately
+                    // visible in the same iteration.
+                    self.state.tasks.push(new_task);
+                }
+                Err(e) => {
+                    self.state.add_log(format!(
+                        "Warning: failed to import Kanban issue {} as task: {e}",
+                        issue.external_id
+                    ));
+                }
+            }
+        }
+    }
+
     /// Build [`TaskSpanAttributes`] for a task before execution.
     ///
     /// Token counts and cost are left at zero here; they are filled in after
@@ -306,6 +439,10 @@ impl RalphLoop {
         if let Ok(mut guard) = self.cost_tracker.lock() {
             guard.reset_task();
         }
+
+        // Poll the Kanban board for new inbound tickets and create wreck-it
+        // tasks for any that have not yet been imported.
+        self.sync_kanban_inbound().await;
 
         // Re-read the task file so that tasks dynamically appended by agents
         // during a previous iteration are incorporated into the queue.
@@ -663,8 +800,16 @@ impl RalphLoop {
                 }
             }
 
-            // Transition the Kanban board issue to the terminal status.
+            // Transition the Kanban board issue to the terminal status and,
+            // on successful completion, attach a git diff URL as a comment.
             if let Some(kanban_issue) = self.kanban_issues.remove(&task_id) {
+                // Compute the git diff URL before borrowing the provider.
+                let git_diff_url = if final_status == TaskStatus::Completed {
+                    self.get_git_diff_url()
+                } else {
+                    None
+                };
+
                 if let Some(ref provider) = self.kanban_provider {
                     if let Err(e) = provider
                         .transition_issue(&kanban_issue.external_id, final_status)
@@ -680,6 +825,26 @@ impl RalphLoop {
                             provider.provider_name(),
                             final_status
                         ));
+                        // Attach the git diff URL as a comment when the task
+                        // completed successfully and we have a GitHub repo.
+                        if let Some(ref url) = git_diff_url {
+                            let comment = format!("Task completed. Git diff: {url}");
+                            if let Err(e) = provider
+                                .add_comment(&kanban_issue.external_id, &comment)
+                                .await
+                            {
+                                self.state.add_log(format!(
+                                    "Warning: failed to attach git diff URL to {} \
+                                     issue for task {task_id}: {e}",
+                                    provider.provider_name()
+                                ));
+                            } else {
+                                self.state.add_log(format!(
+                                    "Git diff URL attached to {} issue for task {task_id}",
+                                    provider.provider_name()
+                                ));
+                            }
+                        }
                     }
                 }
             }
@@ -1407,8 +1572,15 @@ impl RalphLoop {
                     }
                 }
 
-                // Transition the Kanban board issue to the terminal status.
+                // Transition the Kanban board issue to the terminal status and,
+                // on successful completion, attach a git diff URL as a comment.
                 if let Some(kanban_issue) = self.kanban_issues.remove(&task_id) {
+                    let git_diff_url = if final_status == TaskStatus::Completed {
+                        self.get_git_diff_url()
+                    } else {
+                        None
+                    };
+
                     if let Some(ref provider) = self.kanban_provider {
                         if let Err(e) = provider
                             .transition_issue(&kanban_issue.external_id, final_status)
@@ -1424,6 +1596,24 @@ impl RalphLoop {
                                 provider.provider_name(),
                                 final_status
                             ));
+                            if let Some(ref url) = git_diff_url {
+                                let comment = format!("Task completed. Git diff: {url}");
+                                if let Err(e) = provider
+                                    .add_comment(&kanban_issue.external_id, &comment)
+                                    .await
+                                {
+                                    self.state.add_log(format!(
+                                        "Warning: failed to attach git diff URL to {} \
+                                         issue for task {task_id}: {e}",
+                                        provider.provider_name()
+                                    ));
+                                } else {
+                                    self.state.add_log(format!(
+                                        "Git diff URL attached to {} issue for task {task_id}",
+                                        provider.provider_name()
+                                    ));
+                                }
+                            }
                         }
                     }
                 }

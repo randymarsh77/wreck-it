@@ -396,6 +396,64 @@ impl KanbanProvider for JiraProvider {
         self.transition_issue(external_id, TaskStatus::Completed)
             .await
     }
+
+    async fn list_inbound_issues(&self, label: &str) -> Result<Vec<KanbanIssue>> {
+        // Use JQL to search for issues in the project with the given label.
+        // Escape backslashes and double-quotes to prevent JQL injection.
+        let safe_label = label.replace('\\', "\\\\").replace('"', "\\\"");
+        let jql = format!(
+            "project = \"{}\" AND labels = \"{safe_label}\" ORDER BY created DESC",
+            self.project_key
+        );
+
+        #[derive(Deserialize)]
+        struct JiraSearchResponse {
+            issues: Vec<JiraIssueResponse>,
+        }
+
+        let resp = self
+            .auth(
+                http()
+                    .get(self.url("search"))
+                    .header("Accept", "application/json")
+                    .query(&[("jql", jql.as_str()), ("fields", "summary,description")]),
+            )
+            .send()
+            .await
+            .context("JIRA search request failed")?;
+
+        if !resp.status().is_success() {
+            let s = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("JIRA search failed ({s}): {body}");
+        }
+
+        let search: JiraSearchResponse = resp
+            .json()
+            .await
+            .context("Failed to parse JIRA search response")?;
+
+        let issues = search
+            .issues
+            .into_iter()
+            .map(|i| {
+                let desc = i
+                    .fields
+                    .description
+                    .as_ref()
+                    .map(Self::adf_to_text)
+                    .unwrap_or_default();
+                let browse_url = format!("{}/browse/{}", self.base_url, i.key);
+                KanbanIssue {
+                    external_id: i.key,
+                    url: browse_url,
+                    title: i.fields.summary.unwrap_or_default(),
+                    description: desc,
+                }
+            })
+            .collect();
+        Ok(issues)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -513,5 +571,35 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("401"));
+    }
+
+    #[tokio::test]
+    async fn list_inbound_issues_searches_by_label() {
+        let resp = r#"{"issues":[{"id":"10001","key":"PROJ-1","self":"https://acme.atlassian.net/rest/api/3/issue/10001","fields":{"summary":"[t1] do thing","description":null}},{"id":"10002","key":"PROJ-2","self":"https://acme.atlassian.net/rest/api/3/issue/10002","fields":{"summary":"[t2] other thing","description":null}}]}"#;
+        let (url, req_fut) = mock_server("HTTP/1.1 200 OK", resp).await;
+
+        let provider = JiraProvider::new("tok", "PROJ", &url, "u@x.com");
+        let (result, raw) = tokio::join!(provider.list_inbound_issues("wreck-it"), req_fut);
+
+        let issues = result.unwrap();
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0].external_id, "PROJ-1");
+        assert_eq!(issues[1].external_id, "PROJ-2");
+
+        let req = std::str::from_utf8(&raw).unwrap();
+        assert!(req.starts_with("GET"));
+        assert!(req.contains("/rest/api/3/search"));
+        assert!(req.contains("wreck-it"));
+    }
+
+    #[tokio::test]
+    async fn list_inbound_issues_empty_returns_empty_vec() {
+        let resp = r#"{"issues":[]}"#;
+        let (url, req_fut) = mock_server("HTTP/1.1 200 OK", resp).await;
+
+        let provider = JiraProvider::new("tok", "PROJ", &url, "u@x.com");
+        let (result, _) = tokio::join!(provider.list_inbound_issues("no-match"), req_fut);
+
+        assert_eq!(result.unwrap().len(), 0);
     }
 }

@@ -298,6 +298,37 @@ impl KanbanProvider for LinearProvider {
         self.transition_issue(external_id, TaskStatus::Completed)
             .await
     }
+
+    async fn list_inbound_issues(&self, label: &str) -> Result<Vec<KanbanIssue>> {
+        // Query issues in the team that have a label with the given name.
+        let query = r#"
+            query ListIssuesByLabel($teamId: String!, $labelName: String!) {
+                team(id: $teamId) {
+                    issues(filter: { labels: { name: { eq: $labelName } } }) {
+                        nodes { id identifier url title description }
+                    }
+                }
+            }
+        "#;
+        let vars = serde_json::json!({
+            "teamId": self.team_id,
+            "labelName": label,
+        });
+        let data = self.gql(query, Some(vars)).await?;
+        let nodes = data["team"]["issues"]["nodes"]
+            .as_array()
+            .context("Linear list_inbound_issues: missing nodes in response")?;
+        let issues = nodes
+            .iter()
+            .map(|n| KanbanIssue {
+                external_id: n["id"].as_str().unwrap_or_default().to_string(),
+                url: n["url"].as_str().unwrap_or_default().to_string(),
+                title: n["title"].as_str().unwrap_or_default().to_string(),
+                description: n["description"].as_str().unwrap_or_default().to_string(),
+            })
+            .collect();
+        Ok(issues)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -421,5 +452,37 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Team not found"));
+    }
+
+    #[tokio::test]
+    async fn list_inbound_issues_returns_issues_with_label() {
+        let resp = r#"{"data":{"team":{"issues":{"nodes":[{"id":"i1","identifier":"LIN-1","url":"https://linear.app/t/LIN-1","title":"Do something","description":"Details here"},{"id":"i2","identifier":"LIN-2","url":"https://linear.app/t/LIN-2","title":"Another task","description":""}]}}}}"#;
+        let (url, req_fut) = mock_server("HTTP/1.1 200 OK", resp).await;
+
+        let provider = LinearProvider::new("tok", "team-1", &url);
+        let (result, raw) = tokio::join!(provider.list_inbound_issues("wreck-it"), req_fut);
+
+        let issues = result.unwrap();
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0].external_id, "i1");
+        assert_eq!(issues[1].external_id, "i2");
+
+        let body = extract_body(&raw);
+        let query = body["query"].as_str().unwrap();
+        assert!(query.contains("ListIssuesByLabel"));
+        let vars = &body["variables"];
+        assert_eq!(vars["teamId"], "team-1");
+        assert_eq!(vars["labelName"], "wreck-it");
+    }
+
+    #[tokio::test]
+    async fn list_inbound_issues_empty_nodes_returns_empty_vec() {
+        let resp = r#"{"data":{"team":{"issues":{"nodes":[]}}}}"#;
+        let (url, req_fut) = mock_server("HTTP/1.1 200 OK", resp).await;
+
+        let provider = LinearProvider::new("tok", "team-1", &url);
+        let (result, _) = tokio::join!(provider.list_inbound_issues("no-label"), req_fut);
+
+        assert_eq!(result.unwrap().len(), 0);
     }
 }
