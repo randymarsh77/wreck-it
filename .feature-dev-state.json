@@ -3,6 +3,8 @@
   "iteration": 50,
   "current_task_id": "kanban-bidirectional-sync",
   "issue_number": 633,
+  "pr_number": 634,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/634",
   "last_prompt": "Implement bidirectional sync between wreck-it tasks and external kanban systems (Linear, JIRA, Trello). When new tickets are created in the external system with a configurable label/tag, automatically generate wreck-it task objects and append them to the appropriate task file. When wreck-it tasks complete, update the corresponding external ticket status and attach the git diff URL as a comment. Build on the existing KanbanClient enum dispatch and KanbanProvider trait in cli/src/kanban/. This closes the loop between human planning tools and autonomous execution, enabling teams to manage AI workloads from their existing project management tools.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -425,6 +427,14 @@
     "iteration 49: PR #632 not yet mergeable",
     "iteration 49: PR #632 not yet mergeable",
     "iteration 49: PR #632 not yet mergeable",
-    "iteration 50: triggered cloud agent for task kanban-bidirectional-sync (issue #633)"
+    "iteration 50: triggered cloud agent for task kanban-bidirectional-sync (issue #633)",
+    "iteration 50: agent opened PR #634 for task Some(\"kanban-bidirectional-sync\") (still working)"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 634,
+      "task_id": "kanban-bidirectional-sync",
+      "issue_number": 633
+    }
   ]
 }
