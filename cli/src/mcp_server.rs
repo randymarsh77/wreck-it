@@ -500,6 +500,7 @@ fn task_to_json(task: &Task) -> Value {
         AgentRole::Ideas => "ideas",
         AgentRole::Implementer => "implementer",
         AgentRole::Evaluator => "evaluator",
+        AgentRole::SecurityGate => "security_gate",
     };
     json!({
         "id": task.id,

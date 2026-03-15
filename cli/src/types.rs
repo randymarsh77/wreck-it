@@ -595,6 +595,7 @@ mod tests {
             AgentRole::Ideas,
             AgentRole::Implementer,
             AgentRole::Evaluator,
+            AgentRole::SecurityGate,
         ] {
             let mut task = make_task("x", TaskStatus::Pending, 1, vec![]);
             task.role = role;

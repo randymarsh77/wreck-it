@@ -95,7 +95,7 @@ pub enum TaskKind {
 /// so that pre-existing task files continue to work without modification.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum AgentRole {
     /// Research and generate new tasks.
     Ideas,
@@ -104,6 +104,15 @@ pub enum AgentRole {
     Implementer,
     /// Review and validate completed work.
     Evaluator,
+    /// Run a security audit (cargo-audit or npm audit) as a mandatory gate.
+    ///
+    /// When assigned this role a task executes the appropriate security scanner
+    /// for the project type (Rust → `cargo audit`, Node → `npm audit`) rather
+    /// than invoking the LLM agent.  Findings are written to the declared
+    /// output artefacts so that downstream implementation tasks can consume
+    /// them and self-remediate.  The task fails if any critical or high
+    /// severity vulnerabilities are found.
+    SecurityGate,
 }
 
 /// Status of an individual task.

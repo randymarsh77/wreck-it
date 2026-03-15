@@ -1,0 +1,31 @@
+[
+  {
+    "id": "impl-feature",
+    "description": "Implement the feature with secure coding practices. On first run, proceed with the implementation. After a security audit runs and produces findings in the 'security-gate/findings' artefact, this task will be reset to pending for remediation — on subsequent runs the findings are injected into the prompt so you can fix any reported vulnerabilities.",
+    "status": "pending",
+    "phase": 1,
+    "inputs": ["security-gate/findings"],
+    "outputs": [
+      {
+        "kind": "summary",
+        "name": "implementation-notes",
+        "path": ".wreck-it/impl-notes.md"
+      }
+    ]
+  },
+  {
+    "id": "security-gate",
+    "description": "Run a security audit against the implementation. Detects dependency vulnerabilities via cargo-audit (Rust) or npm audit (Node). Findings are persisted as a JSON artefact so the implementation task can consume them when remediating. The task fails (and resets the implementation task to pending) when critical or high severity vulnerabilities are found.",
+    "status": "pending",
+    "role": "security_gate",
+    "phase": 2,
+    "depends_on": ["impl-feature"],
+    "outputs": [
+      {
+        "kind": "json",
+        "name": "findings",
+        "path": ".wreck-it/security-findings.json"
+      }
+    ]
+  }
+]
