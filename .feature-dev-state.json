@@ -3,6 +3,8 @@
   "iteration": 51,
   "current_task_id": "budget-aware-prioritization",
   "issue_number": 635,
+  "pr_number": 636,
+  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/636",
   "last_prompt": "Implement dynamic budget-aware task prioritization that adjusts task execution order based on remaining cost budget, current complexity estimates, and historical cost-per-complexity ratios. Add a `--budget-strategy` CLI flag with options: `greedy` (maximize completed tasks), `critical-path` (prioritize highest-priority tasks first), and `conservative` (prefer low-complexity tasks when budget is below a threshold). Integrate with the existing `--max-cost` budget tracking to automatically pause the loop when projected remaining cost would exceed budget. This extends wreck-it's existing cost tracking into a planning optimization feature unique in the agent orchestration space.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -431,6 +433,14 @@
     "iteration 50: agent created PR #634 for task Some(\"kanban-bidirectional-sync\")",
     "iteration 50: PR #634 not yet mergeable",
     "iteration 50: PR #634 not yet mergeable",
-    "iteration 51: triggered cloud agent for task budget-aware-prioritization (issue #635)"
+    "iteration 51: triggered cloud agent for task budget-aware-prioritization (issue #635)",
+    "iteration 51: agent opened PR #636 for task Some(\"budget-aware-prioritization\") (still working)"
+  ],
+  "tracked_prs": [
+    {
+      "pr_number": 636,
+      "task_id": "budget-aware-prioritization",
+      "issue_number": 635
+    }
   ]
 }
