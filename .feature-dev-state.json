@@ -451,6 +451,7 @@
     "advance: marked PR #640 (task multi-repo-change-orchestrator) as ready for review",
     "iteration 53: agent created PR #640 for task Some(\"multi-repo-change-orchestrator\")",
     "iteration 53: PR #640 not yet mergeable",
+    "iteration 53: PR #640 not yet mergeable",
     "iteration 53: PR #640 not yet mergeable"
   ],
   "tracked_prs": [
