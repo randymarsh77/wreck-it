@@ -1,5 +1,5 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_verification",
   "iteration": 50,
   "current_task_id": "kanban-bidirectional-sync",
   "issue_number": 633,
@@ -428,7 +428,11 @@
     "iteration 49: PR #632 not yet mergeable",
     "iteration 49: PR #632 not yet mergeable",
     "iteration 50: triggered cloud agent for task kanban-bidirectional-sync (issue #633)",
-    "iteration 50: agent opened PR #634 for task Some(\"kanban-bidirectional-sync\") (still working)"
+    "iteration 50: agent opened PR #634 for task Some(\"kanban-bidirectional-sync\") (still working)",
+    "advance: marked PR #634 (task kanban-bidirectional-sync) as ready for review",
+    "iteration 50: agent created PR #634 for task Some(\"kanban-bidirectional-sync\")",
+    "iteration 50: PR #634 not yet mergeable",
+    "iteration 50: PR #634 not yet mergeable"
   ],
   "tracked_prs": [
     {
