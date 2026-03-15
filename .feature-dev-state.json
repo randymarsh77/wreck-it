@@ -1,11 +1,9 @@
 {
-  "phase": "needs_verification",
-  "iteration": 50,
-  "current_task_id": "kanban-bidirectional-sync",
-  "issue_number": 633,
-  "pr_number": 634,
-  "pr_url": "https://github.com/randymarsh77/wreck-it/pull/634",
-  "last_prompt": "Implement bidirectional sync between wreck-it tasks and external kanban systems (Linear, JIRA, Trello). When new tickets are created in the external system with a configurable label/tag, automatically generate wreck-it task objects and append them to the appropriate task file. When wreck-it tasks complete, update the corresponding external ticket status and attach the git diff URL as a comment. Build on the existing KanbanClient enum dispatch and KanbanProvider trait in cli/src/kanban/. This closes the loop between human planning tools and autonomous execution, enabling teams to manage AI workloads from their existing project management tools.",
+  "phase": "agent_working",
+  "iteration": 51,
+  "current_task_id": "budget-aware-prioritization",
+  "issue_number": 635,
+  "last_prompt": "Implement dynamic budget-aware task prioritization that adjusts task execution order based on remaining cost budget, current complexity estimates, and historical cost-per-complexity ratios. Add a `--budget-strategy` CLI flag with options: `greedy` (maximize completed tasks), `critical-path` (prioritize highest-priority tasks first), and `conservative` (prefer low-complexity tasks when budget is below a threshold). Integrate with the existing `--max-cost` budget tracking to automatically pause the loop when projected remaining cost would exceed budget. This extends wreck-it's existing cost tracking into a planning optimization feature unique in the agent orchestration space.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -432,13 +430,7 @@
     "advance: marked PR #634 (task kanban-bidirectional-sync) as ready for review",
     "iteration 50: agent created PR #634 for task Some(\"kanban-bidirectional-sync\")",
     "iteration 50: PR #634 not yet mergeable",
-    "iteration 50: PR #634 not yet mergeable"
-  ],
-  "tracked_prs": [
-    {
-      "pr_number": 634,
-      "task_id": "kanban-bidirectional-sync",
-      "issue_number": 633
-    }
+    "iteration 50: PR #634 not yet mergeable",
+    "iteration 51: triggered cloud agent for task budget-aware-prioritization (issue #635)"
   ]
 }
