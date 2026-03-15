@@ -1,4 +1,5 @@
 use crate::agent::AgentClient;
+use crate::agent_memory::AgentMemory;
 use crate::artefact_store;
 use crate::cost_tracker::{model_pricing, CostTracker};
 use crate::coverage_enforcer;
@@ -6,6 +7,7 @@ use crate::github_client;
 use crate::kanban::{self, KanbanClient, KanbanIssue};
 use crate::notifier;
 use crate::otel::{self, TaskSpan, TaskSpanAttributes};
+use crate::prompt_optimizer::PromptOptimizer;
 use crate::provenance::{self, ProvenanceRecord};
 use crate::replanner::{replan_and_save, TaskReplanner};
 use crate::security_gate;
@@ -483,9 +485,36 @@ impl RalphLoop {
 
         // Execute the task with reflection rounds; capture any error text for
         // potential use by the re-planner.
-        let task = self.state.tasks[task_idx].clone();
+        let mut task = self.state.tasks[task_idx].clone();
         let reflection_rounds = self.config.reflection_rounds;
         let mut task_error = String::new();
+
+        // Create a shared AgentMemory instance used both to apply a previous
+        // optimized description and (later) to store a newly generated rewrite.
+        let memory = AgentMemory::new(&self.config.work_dir.to_string_lossy());
+
+        // If the task has previously failed and the prompt optimizer stored a
+        // rewritten description, apply it now so the agent benefits from the
+        // improved specification on the next attempt.
+        if task.failed_attempts > 0 {
+            match memory.load_optimized_description(&task.id) {
+                Ok(Some(optimized)) => {
+                    self.state.add_log(format!(
+                        "Applying optimized description for task {} (attempt {})",
+                        task.id,
+                        task.failed_attempts + 1,
+                    ));
+                    task.description = optimized;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    self.state.add_log(format!(
+                        "Warning: failed to load optimized description for {}: {}",
+                        task.id, e
+                    ));
+                }
+            }
+        }
 
         // Security gate tasks bypass the LLM agent entirely; the scanner runs
         // as a subprocess and the findings are persisted as output artefacts.
@@ -719,6 +748,46 @@ impl RalphLoop {
                     ));
                     // Record the retry event on the OTEL span before resetting status.
                     task_span.record_retry(failed, max_retries);
+
+                    // Invoke the adaptive prompt optimizer to generate a better
+                    // task description for the next attempt.  The rewrite is
+                    // stored in per-task memory so that `run_single_task` can
+                    // apply it on the next iteration before agent execution.
+                    let optimizer = PromptOptimizer::new(
+                        self.config.model_provider.clone(),
+                        self.config.api_endpoint.clone(),
+                        self.config.api_token.clone(),
+                    );
+                    let original_task = self.state.tasks[task_idx].clone();
+                    match optimizer
+                        .analyze_and_rewrite(&original_task, &task_error, failed)
+                        .await
+                    {
+                        Ok(rewritten) => {
+                            match memory.store_optimized_description(&original_task.id, &rewritten)
+                            {
+                                Ok(()) => {
+                                    self.state.add_log(format!(
+                                        "Prompt optimizer stored rewritten description for {}",
+                                        original_task.id
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.state.add_log(format!(
+                                        "Warning: failed to store optimized description for {}: {}",
+                                        original_task.id, e
+                                    ));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.state.add_log(format!(
+                                "Warning: prompt optimizer failed for {}: {}",
+                                original_task.id, e
+                            ));
+                        }
+                    }
+
                     self.state.tasks[task_idx].status = TaskStatus::Pending;
                     save_tasks(&self.config.task_file, &self.state.tasks)
                         .context("Failed to save tasks after retry reset")?;
@@ -1388,6 +1457,37 @@ impl RalphLoop {
         }
 
         self.state.add_log("Ralph Wiggum Loop finished".to_string());
+
+        // Generate the adaptive prompt optimizer pattern report as a summary
+        // artefact so that future agents and human operators can inspect which
+        // task types and descriptions have historically struggled.
+        let report = crate::prompt_optimizer::generate_pattern_report(
+            &self.state.tasks,
+            &self.config.work_dir,
+        );
+        let report_path = self
+            .config
+            .work_dir
+            .join(".wreck-it")
+            .join("prompt-optimizer-report.md");
+        if let Some(parent) = report_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::write(&report_path, &report) {
+            Ok(()) => {
+                self.state.add_log(format!(
+                    "Prompt optimizer pattern report written to {}",
+                    report_path.display()
+                ));
+            }
+            Err(e) => {
+                self.state.add_log(format!(
+                    "Warning: failed to write prompt optimizer report: {}",
+                    e
+                ));
+            }
+        }
+
         Ok(())
     }
 

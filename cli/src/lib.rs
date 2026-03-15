@@ -42,6 +42,7 @@ mod plan_migration;
 mod plan_wizard;
 mod planner;
 mod prompt_loader;
+mod prompt_optimizer;
 mod provenance;
 mod ralph_loop;
 mod replanner;

@@ -61,6 +61,75 @@ impl AgentMemory {
             .unwrap_or(0)
     }
 
+    /// Store an optimised task description produced by the prompt optimizer.
+    ///
+    /// The description is written to an `## Optimized Description` section at
+    /// the end of the memory file.  Any previously stored optimized description
+    /// is replaced.
+    pub fn store_optimized_description(&self, task_id: &str, description: &str) -> Result<()> {
+        fs::create_dir_all(&self.memory_dir).with_context(|| {
+            format!(
+                "Failed to create memory directory: {}",
+                self.memory_dir.display()
+            )
+        })?;
+
+        let path = self.memory_path(task_id);
+
+        let existing = if path.exists() {
+            fs::read_to_string(&path)
+                .with_context(|| format!("Failed to read memory file: {}", path.display()))?
+        } else {
+            format!("# Task Memory: {}\n\n## Previous Attempts\n", task_id)
+        };
+
+        // Remove any existing optimized description section before appending the
+        // new one so there is always at most one such section per file.
+        let base = if let Some(idx) = existing.find("\n## Optimized Description\n") {
+            existing[..idx].to_string()
+        } else {
+            existing
+        };
+
+        let updated = format!("{}\n## Optimized Description\n\n{}\n", base, description);
+        fs::write(&path, updated)
+            .with_context(|| format!("Failed to write memory file: {}", path.display()))?;
+
+        Ok(())
+    }
+
+    /// Load a previously stored optimised task description from memory.
+    ///
+    /// Returns `None` when no `## Optimized Description` section exists in the
+    /// memory file (i.e. the prompt optimizer has not yet run for this task).
+    pub fn load_optimized_description(&self, task_id: &str) -> Result<Option<String>> {
+        let path = self.memory_path(task_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let content = fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read memory file: {}", path.display()))?;
+
+        // Find the `## Optimized Description` header and extract the content
+        // that follows it (stopping at the next `##`-level header or EOF).
+        if let Some(start) = content.find("\n## Optimized Description\n") {
+            let after_header = &content[start + "\n## Optimized Description\n".len()..];
+            // Strip leading blank line(s) and stop at the next `##` header.
+            let body = if let Some(next) = after_header.find("\n## ") {
+                after_header[..next].trim().to_string()
+            } else {
+                after_header.trim().to_string()
+            };
+            if body.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(body))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     ///
     /// If the file does not yet exist it is created along with all necessary
     /// parent directories.
@@ -227,5 +296,91 @@ mod tests {
         assert!(!ctx_alpha.contains("beta failed"));
         assert!(ctx_beta.contains("beta failed"));
         assert!(!ctx_beta.contains("alpha done"));
+    }
+
+    // ---- optimized description tests ----
+
+    #[test]
+    fn load_optimized_description_returns_none_when_no_file() {
+        let dir = tempdir().unwrap();
+        let memory = AgentMemory::new(dir.path().to_str().unwrap());
+        let result = memory.load_optimized_description("no-such-task").unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn store_and_load_optimized_description_roundtrip() {
+        let dir = tempdir().unwrap();
+        let memory = AgentMemory::new(dir.path().to_str().unwrap());
+
+        memory
+            .store_optimized_description("task-opt", "Rewritten: do the thing properly")
+            .unwrap();
+
+        let loaded = memory
+            .load_optimized_description("task-opt")
+            .unwrap()
+            .expect("expected a stored description");
+        assert_eq!(loaded, "Rewritten: do the thing properly");
+    }
+
+    #[test]
+    fn store_optimized_description_replaces_previous() {
+        let dir = tempdir().unwrap();
+        let memory = AgentMemory::new(dir.path().to_str().unwrap());
+
+        memory
+            .store_optimized_description("task-repl", "First version")
+            .unwrap();
+        memory
+            .store_optimized_description("task-repl", "Second version")
+            .unwrap();
+
+        let loaded = memory
+            .load_optimized_description("task-repl")
+            .unwrap()
+            .expect("expected a stored description");
+        assert_eq!(loaded, "Second version");
+        // The file must not contain "First version" any more.
+        let raw = memory.load_context("task-repl").unwrap();
+        assert!(!raw.contains("First version"));
+    }
+
+    #[test]
+    fn optimized_description_coexists_with_attempt_records() {
+        let dir = tempdir().unwrap();
+        let memory = AgentMemory::new(dir.path().to_str().unwrap());
+
+        memory
+            .record_attempt("task-combo", 1, "Failure", "build failed")
+            .unwrap();
+        memory
+            .store_optimized_description("task-combo", "Clearer description")
+            .unwrap();
+
+        // Both the attempt record and the optimized description must be present.
+        let ctx = memory.load_context("task-combo").unwrap();
+        assert!(ctx.contains("build failed"));
+        assert!(ctx.contains("Clearer description"));
+
+        let opt = memory
+            .load_optimized_description("task-combo")
+            .unwrap()
+            .expect("expected description");
+        assert_eq!(opt, "Clearer description");
+    }
+
+    #[test]
+    fn load_optimized_description_returns_none_when_section_missing() {
+        let dir = tempdir().unwrap();
+        let memory = AgentMemory::new(dir.path().to_str().unwrap());
+
+        // Only record attempts, no optimized description stored.
+        memory
+            .record_attempt("task-noopt", 1, "Failure", "some error")
+            .unwrap();
+
+        let result = memory.load_optimized_description("task-noopt").unwrap();
+        assert!(result.is_none());
     }
 }
