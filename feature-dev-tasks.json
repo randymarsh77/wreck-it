@@ -524,7 +524,7 @@
   {
     "id": "security-gate-checks",
     "description": "Add a built-in security gate task kind that runs CodeQL, cargo-audit, or npm audit as a mandatory completion gate before any implementation task PR can be merged. Integrate into the task phase system so security scans run in a post-implementation phase automatically. Surface findings back to the implementing agent via the artefact system so it can self-remediate. This combines wreck-it's phase-based scheduling, artefact chaining, and retry loop into a first-class security posture — addressing the growing trend of shift-left security in AI-native development.",
-    "status": "inprogress",
+    "status": "pending",
     "phase": 2,
     "depends_on": [
       "mcp-server-integration"
