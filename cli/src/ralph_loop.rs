@@ -7,6 +7,7 @@ use crate::coverage_enforcer;
 use crate::github_client;
 use crate::interface_change_detector;
 use crate::kanban::{self, KanbanClient, KanbanIssue};
+use crate::log_source::{self, LogSourceClient};
 use crate::notifier;
 use crate::otel::{self, TaskSpan, TaskSpanAttributes};
 use crate::prompt_optimizer::PromptOptimizer;
@@ -215,6 +216,8 @@ pub struct RalphLoop {
     kanban_issues: HashMap<String, KanbanIssue>,
     /// Optional Kanban provider constructed from config.
     kanban_provider: Option<KanbanClient>,
+    /// Optional log source provider constructed from config.
+    log_source_provider: Option<LogSourceClient>,
     /// Shared cost tracker updated by every HTTP chat completion call.
     /// Cloned into per-task agents spawned for parallel execution.
     cost_tracker: Arc<Mutex<CostTracker>>,
@@ -257,6 +260,7 @@ impl RalphLoop {
         .with_cost_tracker(Arc::clone(&cost_tracker));
 
         let kanban_provider = kanban::provider_from_config(&config.kanban);
+        let log_source_provider = log_source::provider_from_config(&config.log_source);
 
         // Initialise OpenTelemetry when an OTLP endpoint is configured.
         let otel_enabled = config
@@ -278,6 +282,7 @@ impl RalphLoop {
             github_issue_numbers: HashMap::new(),
             kanban_issues: HashMap::new(),
             kanban_provider,
+            log_source_provider,
             cost_tracker,
             otel_enabled,
         }
@@ -426,6 +431,97 @@ impl RalphLoop {
         }
     }
 
+    /// Import new log entries from the configured log source as tasks.
+    ///
+    /// This implements the **log platform → wreck-it** direction of
+    /// ingest-based triage.  It is a no-op when no log source provider is
+    /// configured.
+    ///
+    /// Already-imported entries are identified by the presence of a label with
+    /// the prefix [`log_source::LOG_SOURCE_LABEL_PREFIX`] in the task's label
+    /// list.  New tasks are appended to the task file and to the in-memory
+    /// task list so they are visible in the same iteration.
+    async fn sync_log_source_inbound(&mut self) {
+        let provider = match &self.log_source_provider {
+            Some(p) => p,
+            None => return,
+        };
+
+        let max_entries = log_source::effective_max_entries(&self.config.log_source);
+
+        let entries = match provider.query_entries(None, max_entries).await {
+            Ok(v) => v,
+            Err(e) => {
+                self.state
+                    .add_log(format!("Warning: log source inbound sync failed: {e}"));
+                return;
+            }
+        };
+
+        for entry in entries {
+            let source_label = format!("{}{}", log_source::LOG_SOURCE_LABEL_PREFIX, entry.id);
+
+            // Skip entries that have already been imported.
+            let already_imported = self
+                .state
+                .tasks
+                .iter()
+                .any(|t| t.labels.contains(&source_label));
+            if already_imported {
+                continue;
+            }
+
+            let task_id = crate::task_manager::generate_task_id(&self.state.tasks, "log-triage-");
+
+            let description = format!(
+                "[{}] {} — {} ({})",
+                entry.level, entry.message, entry.timestamp, entry.id
+            );
+
+            let new_task = Task {
+                id: task_id.clone(),
+                description,
+                status: TaskStatus::Pending,
+                role: crate::types::AgentRole::default(),
+                kind: crate::types::TaskKind::default(),
+                cooldown_seconds: None,
+                phase: 1,
+                depends_on: Vec::new(),
+                priority: 0,
+                complexity: 1,
+                timeout_seconds: None,
+                max_retries: None,
+                failed_attempts: 0,
+                last_attempt_at: None,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                runtime: crate::types::TaskRuntime::default(),
+                precondition_prompt: None,
+                parent_id: None,
+                labels: vec![source_label],
+                system_prompt_override: None,
+                acceptance_criteria: None,
+                evaluation: None,
+            };
+
+            match crate::task_manager::append_task(&self.config.task_file, new_task.clone()) {
+                Ok(()) => {
+                    self.state.add_log(format!(
+                        "Log source inbound sync: imported event {} as task {task_id}",
+                        entry.id
+                    ));
+                    self.state.tasks.push(new_task);
+                }
+                Err(e) => {
+                    self.state.add_log(format!(
+                        "Warning: failed to import log event {} as task: {e}",
+                        entry.id
+                    ));
+                }
+            }
+        }
+    }
+
     /// Build [`TaskSpanAttributes`] for a task before execution.
     ///
     /// Token counts and cost are left at zero here; they are filled in after
@@ -532,6 +628,10 @@ impl RalphLoop {
         // Poll the Kanban board for new inbound tickets and create wreck-it
         // tasks for any that have not yet been imported.
         self.sync_kanban_inbound().await;
+
+        // Poll the log source for new entries (errors, exceptions) and create
+        // wreck-it tasks for any that have not yet been imported.
+        self.sync_log_source_inbound().await;
 
         // Re-read the task file so that tasks dynamically appended by agents
         // during a previous iteration are incorporated into the queue.
