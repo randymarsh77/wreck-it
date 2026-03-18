@@ -3,12 +3,14 @@
 //!
 //! When `backend = "copilot_cli"` (the default), the command clones the
 //! repository into a subdirectory, checks out the PR branch, merges the
-//! base branch into it, invokes the Copilot CLI to resolve any conflicts,
-//! commits the result, and pushes to the PR branch.
+//! base branch into it, invokes the Copilot CLI `\pr` command to resolve
+//! any conflicts, commits the result, and pushes to the PR branch.
 //!
-//! When `backend = "cloud_agent"`, the command posts a `@copilot` comment
-//! directly on the conflicting PR, asking the coding agent to reapply the
-//! PR's changes on top of the latest base branch.
+//! When `backend = "cloud_agent"`, the command first checks whether the
+//! Copilot CLI is available.  If so it uses the CLI `\pr` command (same as
+//! the `copilot_cli` backend) for more effective conflict resolution.  If
+//! the CLI is **not** available it falls back to posting a `@copilot`
+//! comment on the conflicting PR.
 //!
 //! When `backend = "cli"`, the command performs a local `git merge` of the
 //! base branch into the PR branch and pushes the result directly.
@@ -39,9 +41,10 @@ const BACKEND_CLI: &str = "cli";
 ///
 /// `backend` selects how conflicts are resolved – `"copilot_cli"` (default)
 /// clones the repo into a subdirectory, merges the base branch into the PR
-/// branch, invokes the Copilot CLI to resolve conflicts, and pushes;
-/// `"cloud_agent"` posts a `@copilot` comment on the PR asking the agent to
-/// reapply changes; `"cli"` merges locally and pushes.
+/// branch, invokes the Copilot CLI `\pr` command to resolve conflicts, and
+/// pushes; `"cloud_agent"` uses the Copilot CLI `\pr` command when the CLI
+/// is available, otherwise falls back to a `@copilot` comment on the PR;
+/// `"cli"` merges locally and pushes.
 ///
 /// When `ralph` is provided, the merge command also loads/saves persistent
 /// state so that PRs created by previous runs are tracked and advanced
@@ -162,7 +165,18 @@ pub async fn run_merge(
             BACKEND_CLI => {
                 resolve_via_cli(work_dir, &pr_detail, &github_token, &repo_owner, &repo_name).await
             }
-            BACKEND_CLOUD_AGENT => resolve_via_cloud_agent(&client, &pr_detail, &mut state).await,
+            BACKEND_CLOUD_AGENT => {
+                resolve_via_cloud_agent(
+                    &client,
+                    &pr_detail,
+                    &mut state,
+                    work_dir,
+                    &github_token,
+                    &repo_owner,
+                    &repo_name,
+                )
+                .await
+            }
             other => {
                 anyhow::bail!(
                     "unknown merge backend '{}'; expected one of: copilot_cli, cloud_agent, cli",
@@ -323,12 +337,17 @@ fn build_merge_context(detail: &PrDetail, recent_base_commits: &str, diff_summar
     ctx
 }
 
-/// Resolve merge conflicts by posting a `@copilot` comment on the PR.
+/// Resolve merge conflicts using the Copilot CLI `\pr` command when available,
+/// falling back to posting a `@copilot` comment on the PR.
 ///
-/// Instead of creating a separate GitHub issue (which would start the
-/// coding agent on its own branch, unable to perform a real `git merge`),
-/// we comment directly on the conflicting PR.  The agent will work within
-/// the PR context and can reapply the changes on the latest base branch.
+/// When the `copilot` binary is found on `PATH`, the function delegates to
+/// [`resolve_via_copilot_cli`] which clones the repository, merges the base
+/// branch, invokes the Copilot CLI `\pr` command to resolve conflicts, and
+/// pushes.  This is generally more effective than the at-mention approach.
+///
+/// When the CLI is **not** available the function falls back to commenting
+/// `@copilot` directly on the conflicting PR, asking the coding agent to
+/// reapply the PR's changes on top of the latest base branch.
 ///
 /// The PR number is recorded in `state.pending_merge_issues` (with
 /// `comment_only = true`) as a deduplication guard so that subsequent
@@ -337,7 +356,28 @@ async fn resolve_via_cloud_agent(
     client: &CloudAgentClient,
     detail: &PrDetail,
     state: &mut crate::headless_state::HeadlessState,
+    work_dir: &Path,
+    github_token: &str,
+    repo_owner: &str,
+    repo_name: &str,
 ) -> Result<()> {
+    // Prefer the Copilot CLI \pr command when the binary is available.
+    if crate::agent::resolve_copilot_cli_path().is_some() {
+        println!(
+            "[wreck-it] merge: Copilot CLI available — using \\pr command \
+             instead of @copilot comment for PR #{}",
+            detail.number,
+        );
+        return resolve_via_copilot_cli(work_dir, detail, github_token, repo_owner, repo_name)
+            .await;
+    }
+
+    // Fall back to @copilot comment when the CLI is not installed.
+    println!(
+        "[wreck-it] merge: Copilot CLI not available — falling back to @copilot comment for PR #{}",
+        detail.number,
+    );
+
     // Gather context: recent base commits and diff.
     let recent_base_commits = fetch_recent_base_commits_via_api(client, &detail.base_ref).await;
     let diff_summary = fetch_diff_summary_via_api(client, detail.number).await;
@@ -381,8 +421,9 @@ async fn resolve_via_cloud_agent(
 }
 
 /// Resolve merge conflicts by cloning the repo into a subdirectory, merging
-/// the base branch into the PR branch, invoking the Copilot CLI to resolve
-/// any conflicts, committing the result, and pushing to the PR branch.
+/// the base branch into the PR branch, invoking the Copilot CLI `\pr`
+/// command to resolve any conflicts, committing the result, and pushing to
+/// the PR branch.
 async fn resolve_via_copilot_cli(
     work_dir: &Path,
     detail: &PrDetail,
@@ -515,8 +556,10 @@ async fn resolve_via_copilot_cli(
         return Ok(());
     }
 
-    // Merge produced conflicts — invoke the Copilot CLI to resolve them.
-    println!("[wreck-it] merge: merge conflicts detected, invoking Copilot CLI to resolve…",);
+    // Merge produced conflicts — invoke the Copilot CLI \pr command to resolve them.
+    println!(
+        "[wreck-it] merge: merge conflicts detected, invoking Copilot CLI \\pr command to resolve…",
+    );
 
     let cli_path = crate::agent::resolve_copilot_cli_path().context(
         "Could not find the 'copilot' binary on PATH. \
@@ -525,11 +568,12 @@ async fn resolve_via_copilot_cli(
     )?;
 
     let conflict_prompt = format!(
-        "There are merge conflicts in this repository after merging `origin/{}` into `{}`. \
+        "\\pr {}\n\n\
+         There are merge conflicts in this repository after merging `origin/{}` into `{}`. \
          Please resolve all merge conflicts in every file. For each conflicted file, \
          pick the correct resolution that preserves the intent of both branches. \
          After resolving, stage all changes with `git add .`.",
-        detail.base_ref, detail.head_ref,
+        detail.number, detail.base_ref, detail.head_ref,
     );
 
     use copilot_sdk_supercharged::*;
@@ -589,7 +633,7 @@ async fn resolve_via_copilot_cli(
             "--no-edit",
             "-m",
             &format!(
-                "Merge {} into {} (resolved by Copilot CLI)",
+                "Merge {} into {} (resolved by Copilot CLI \\pr)",
                 detail.base_ref, detail.head_ref,
             ),
         ])
@@ -617,7 +661,7 @@ async fn resolve_via_copilot_cli(
     }
 
     println!(
-        "[wreck-it] merge: resolved conflicts between {} and {} via Copilot CLI and pushed",
+        "[wreck-it] merge: resolved conflicts between {} and {} via Copilot CLI \\pr command and pushed",
         detail.base_ref, detail.head_ref,
     );
 
