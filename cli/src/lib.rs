@@ -37,6 +37,7 @@ mod install;
 mod integration_eval;
 mod interface_change_detector;
 mod kanban;
+mod log_source;
 pub mod mcp_server;
 mod notifier;
 mod openclaw;

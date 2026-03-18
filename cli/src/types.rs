@@ -13,6 +13,7 @@ pub use wreck_it_core::types::{
 };
 
 pub use crate::kanban::KanbanConfig;
+pub use crate::log_source::LogSourceConfig;
 pub use crate::otel::OtlpConfig;
 
 /// Strategy used to order and filter tasks when a cost budget is active.
@@ -242,6 +243,16 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "is_default_kanban")]
     pub kanban: KanbanConfig,
 
+    /// Structured log source integration.
+    ///
+    /// When configured, the ralph loop will query log entries (errors,
+    /// warnings, exceptions) from a remote log platform (e.g. Seq) and
+    /// automatically create wreck-it tasks for the agent to triage and fix.
+    ///
+    /// See [`LogSourceConfig`] for the available settings.
+    #[serde(default, skip_serializing_if = "is_default_log_source")]
+    pub log_source: LogSourceConfig,
+
     /// OpenTelemetry (OTLP) export configuration.
     ///
     /// When set, every task execution is wrapped in an OTEL span and exported
@@ -318,6 +329,10 @@ fn is_default_kanban(k: &KanbanConfig) -> bool {
     *k == KanbanConfig::default()
 }
 
+fn is_default_log_source(l: &LogSourceConfig) -> bool {
+    *l == LogSourceConfig::default()
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -344,6 +359,7 @@ impl Default for Config {
             work_dirs: HashMap::new(),
             prompt_dir: None,
             kanban: KanbanConfig::default(),
+            log_source: LogSourceConfig::default(),
             otel: None,
             budget_strategy: BudgetStrategy::default(),
             conservative_threshold: default_conservative_threshold(),
