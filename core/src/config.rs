@@ -123,10 +123,11 @@ pub struct RalphConfig {
     ///
     /// Supported values:
     /// - `"copilot_cli"` – clones the repo into a subdirectory, merges the
-    ///   base branch, invokes the Copilot CLI to resolve conflicts, and
-    ///   pushes.
-    /// - `"cloud_agent"` – creates a GitHub issue describing the work and
-    ///   assigns a coding agent to resolve it remotely.
+    ///   base branch, invokes the Copilot CLI `\pr` command to resolve
+    ///   conflicts, and pushes.
+    /// - `"cloud_agent"` – uses the Copilot CLI `\pr` command when the CLI
+    ///   is available; otherwise falls back to creating a GitHub issue or
+    ///   posting a `@copilot` comment to resolve it remotely.
     /// - `"cli"` – performs the work locally (e.g. git merge) and pushes the
     ///   result directly.
     ///
