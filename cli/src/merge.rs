@@ -337,6 +337,23 @@ fn build_merge_context(detail: &PrDetail, recent_base_commits: &str, diff_summar
     ctx
 }
 
+/// Build the prompt for the Copilot CLI `\pr` command that resolves merge
+/// conflicts.
+///
+/// The prompt begins with the `\pr <number>` slash command so the Copilot
+/// CLI loads the PR context, followed by instructions to resolve the
+/// conflicts.
+fn build_conflict_prompt(detail: &PrDetail) -> String {
+    format!(
+        "\\pr {}\n\n\
+         There are merge conflicts in this repository after merging `origin/{}` into `{}`. \
+         Please resolve all merge conflicts in every file. For each conflicted file, \
+         pick the correct resolution that preserves the intent of both branches. \
+         After resolving, stage all changes with `git add .`.",
+        detail.number, detail.base_ref, detail.head_ref,
+    )
+}
+
 /// Resolve merge conflicts using the Copilot CLI `\pr` command when available,
 /// falling back to posting a `@copilot` comment on the PR.
 ///
@@ -567,14 +584,7 @@ async fn resolve_via_copilot_cli(
          or ensure it is available in your shell environment.",
     )?;
 
-    let conflict_prompt = format!(
-        "\\pr {}\n\n\
-         There are merge conflicts in this repository after merging `origin/{}` into `{}`. \
-         Please resolve all merge conflicts in every file. For each conflicted file, \
-         pick the correct resolution that preserves the intent of both branches. \
-         After resolving, stage all changes with `git add .`.",
-        detail.number, detail.base_ref, detail.head_ref,
-    );
+    let conflict_prompt = build_conflict_prompt(detail);
 
     use copilot_sdk_supercharged::*;
 
@@ -1284,5 +1294,66 @@ mod tests {
         assert_eq!(loaded.pending_merge_issues.len(), 1);
         assert!(loaded.pending_merge_issues[0].comment_only);
         assert!(loaded.pending_merge_issues[0].head_sha.is_none());
+    }
+
+    #[test]
+    fn conflict_prompt_starts_with_pr_command() {
+        let detail = PrDetail {
+            number: 42,
+            title: "Add feature X".to_string(),
+            body: "desc".to_string(),
+            head_ref: "feature-x".to_string(),
+            head_sha: "abc123".to_string(),
+            base_ref: "main".to_string(),
+            has_conflicts: true,
+        };
+        let prompt = build_conflict_prompt(&detail);
+        assert!(
+            prompt.starts_with("\\pr 42"),
+            "prompt should start with \\pr <number>: {prompt}",
+        );
+    }
+
+    #[test]
+    fn conflict_prompt_includes_branch_refs() {
+        let detail = PrDetail {
+            number: 7,
+            title: "Fix".to_string(),
+            body: String::new(),
+            head_ref: "fix-typo".to_string(),
+            head_sha: "def456".to_string(),
+            base_ref: "develop".to_string(),
+            has_conflicts: true,
+        };
+        let prompt = build_conflict_prompt(&detail);
+        assert!(
+            prompt.contains("origin/develop"),
+            "prompt should reference base branch"
+        );
+        assert!(
+            prompt.contains("fix-typo"),
+            "prompt should reference head branch"
+        );
+    }
+
+    #[test]
+    fn conflict_prompt_varies_by_pr_number() {
+        let make_detail = |n: u64| PrDetail {
+            number: n,
+            title: "PR".to_string(),
+            body: String::new(),
+            head_ref: "branch".to_string(),
+            head_sha: "sha".to_string(),
+            base_ref: "main".to_string(),
+            has_conflicts: true,
+        };
+        let p1 = build_conflict_prompt(&make_detail(10));
+        let p2 = build_conflict_prompt(&make_detail(99));
+        assert_ne!(
+            p1, p2,
+            "different PR numbers should produce different prompts"
+        );
+        assert!(p1.contains("\\pr 10"));
+        assert!(p2.contains("\\pr 99"));
     }
 }
