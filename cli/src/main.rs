@@ -39,6 +39,7 @@ mod repo_config;
 mod report;
 mod security_gate;
 mod semantic_eval;
+mod splash;
 mod state_worktree;
 mod task_cli;
 mod task_manager;
