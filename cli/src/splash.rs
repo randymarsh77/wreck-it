@@ -36,7 +36,7 @@ impl ColoredArt {
                             .find(|r| r.ch == ch)
                             .map(|r| r.style)
                             .unwrap_or(self.default_style);
-                        Span::styled(String::from(ch), style)
+                        Span::styled(ch.to_string(), style)
                     })
                     .collect();
                 Line::from(spans)
@@ -145,6 +145,11 @@ pub fn title_art() -> ColoredArt {
     }
 }
 
+/// Pre-computed character counts for each TITLE_ART line.
+fn title_line_char_counts() -> Vec<usize> {
+    TITLE_ART.iter().map(|l| l.chars().count()).collect()
+}
+
 /// Render the splash screen: title on the left, Ralph art on the right.
 pub fn render_splash(f: &mut Frame, area: Rect) {
     let title = title_art();
@@ -155,11 +160,8 @@ pub fn render_splash(f: &mut Frame, area: Rect) {
 
     // Combine title + art side-by-side.
     // Title goes on the left, Ralph art on the right, separated by a gap.
-    let title_width = TITLE_ART
-        .iter()
-        .map(|l| l.chars().count())
-        .max()
-        .unwrap_or(0);
+    let char_counts = title_line_char_counts();
+    let title_width = char_counts.iter().copied().max().unwrap_or(0);
     let gap = 4;
 
     // Vertically center the title next to the art.
@@ -185,7 +187,7 @@ pub fn render_splash(f: &mut Frame, area: Rect) {
             let line_spans = title_lines[title_row].spans.clone();
             spans.extend(line_spans);
             // Pad to title_width
-            let line_char_count = TITLE_ART[title_row].chars().count();
+            let line_char_count = char_counts[title_row];
             if line_char_count < title_width {
                 spans.push(Span::raw(" ".repeat(title_width - line_char_count)));
             }
