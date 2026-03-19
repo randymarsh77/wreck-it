@@ -64,27 +64,27 @@ pub const TITLE_ART: &[&str] = &[
 /// The character ASCII art provided in the issue, rendered with monospace font.
 /// Each symbol can be independently colored via `ralph_art()` rules.
 pub const RALPH_ART: &[&str] = &[
-    "████████████████████████████████",
-    "██████▓▓▓▓█████▓▓▓▓████▓▓▓▓█████",
-    "████████▓▓▓▓▓▓▓▓▓▓▓██▓▓▓▓███████",
-    "███▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓███",
-    "█████▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓█████",
-    "█▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓█",
-    "███▓▓▓▓▓▓▓▓░░░░░░░░░░▓▓▓▓▓▓▓▓███",
-    "█████▓▓▓▓▒▒██░░░░░░██▒▒▓▓▓▓█████",
-    "███▓▓▓▓▓▓▒▒▒▒██▓▓██▒▒▒▒▓▓▓▓▓▓███",
-    "█▓▓▒▒▒▒▓▓▒▒────▒▒────▒▒▓▓▒▒▒▒▓▓█",
-    "███░░▒▒▓▓░░──██░▒██──░░▓▓▒▒░░███",
-    "███░░░░▓▓░░░░▓▓▓▓▓▓░░░░▓▓░░░░███",
-    "███████░░░░░░▓▓▓▓▓▓░░░░░░███████",
-    "███████░░░░░░░░░░░░░░░░░░███████",
-    "█████░░░░██▀▀▀▀▀▀▀▀▀▀██░░░░█████",
-    "█████░░██████████████████░░█████",
-    "█████░░██▒▒██▓▓▓▓▓▓██▒▒██░░█████",
-    "█████░░██▓█▀▀▀▀▀▀▀▀▀▀█▓██░░█████",
-    "███████░░░░░░░░░░░░░░░░░░███████",
-    "█████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒█████████",
-    "████████████████████████████████",
+    "                                ",
+    "      ▓▓▓▓     ▓▓▓▓    ▓▓▓▓     ",
+    "        ▓▓▓▓▓▓▓▓▓▓▓  ▓▓▓▓       ",
+    "   ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓   ",
+    "     ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓     ",
+    " ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ",
+    "   ▓▓▓▓▓▓▓▓░░░░░░░░░░▓▓▓▓▓▓▓▓   ",
+    "     ▓▓▓▓▒▒██░░░░░░██▒▒▓▓▓▓     ",
+    "   ▓▓▓▓▓▓▒▒▒▒██▓▓██▒▒▒▒▓▓▓▓▓▓   ",
+    " ▓▓▒▒▒▒▓▓▒▒────▒▒────▒▒▓▓▒▒▒▒▓▓ ",
+    "   ░░▒▒▓▓░░──██░▒██──░░▓▓▒▒░░   ",
+    "   ░░░░▓▓░░░░▓▓▓▓▓▓░░░░▓▓░░░░   ",
+    "       ░░░░░░▓▓▓▓▓▓░░░░░░       ",
+    "       ░░░░░░░░░░░░░░░░░░       ",
+    "     ░░░░██▀▀▀▀▀▀▀▀▀▀██░░░░     ",
+    "     ░░██████████████████░░     ",
+    "     ░░██▒▒██▓▓▓▓▓▓██▒▒██░░     ",
+    "     ░░██▓█▀▀▀▀▀▀▀▀▀▀█▓██░░     ",
+    "       ░░░░░░░░░░░░░░░░░░       ",
+    "         ▒▒▒▒▒▒▒▒▒▒▒▒▒▒         ",
+    "                                ",
 ];
 
 /// Build the colored art for the Ralph character.
@@ -168,7 +168,9 @@ struct AnimCell {
 #[derive(Clone, Copy, PartialEq)]
 enum AnimPhase {
     FallingIn,
-    Holding,
+    HoldPreShimmer,
+    Shimmer,
+    HoldPostShimmer,
     FallingOut,
     Done,
 }
@@ -179,8 +181,10 @@ enum AnimPhase {
 /// and animates each non-space character:
 ///   1. **Fall in** — characters drop from random positions above the screen
 ///      at randomized speeds and staggered delays.
-///   2. **Hold** — all characters rest at their final positions.
-///   3. **Fall out** — characters drop off the bottom in a randomized order.
+///   2. **Hold (pre-shimmer)** — brief pause.
+///   3. **Shimmer** — a fast diagonal band of white sweeps across.
+///   4. **Hold (post-shimmer)** — brief pause.
+///   5. **Fall out** — characters drop off the bottom in a randomized order.
 pub struct FallingCharAnimator {
     cells: Vec<AnimCell>,
     phase: AnimPhase,
@@ -188,6 +192,14 @@ pub struct FallingCharAnimator {
     out_tick: u64,
     hold_remaining: u16,
     area: Rect,
+    /// Shimmer: the current x-position of the leading edge of the diagonal band.
+    shimmer_x: f32,
+    /// How many columns wide the diagonal shimmer band is.
+    shimmer_width: f32,
+    /// How fast the shimmer sweeps (columns per tick).
+    shimmer_speed: f32,
+    /// The rightmost column the shimmer needs to pass before finishing.
+    shimmer_end: f32,
 }
 
 impl FallingCharAnimator {
@@ -234,13 +246,23 @@ impl FallingCharAnimator {
             }
         }
 
+        let max_col = cells.iter().map(|c| c.col).max().unwrap_or(0) as f32;
+        let shimmer_width = 6.0;
+        let shimmer_speed = 12.0;
+        // The diagonal offsets by row, so we need extra travel to clear all rows.
+        let shimmer_end = max_col + (area.height as f32) + shimmer_width;
+
         Self {
             cells,
             phase: AnimPhase::FallingIn,
             tick: 0,
             out_tick: 0,
-            hold_remaining: 30, // ~1 s at 30 fps
+            hold_remaining: 10, // brief pause (~0.3 s at 30 fps)
             area,
+            shimmer_x: -(area.height as f32) - shimmer_width,
+            shimmer_width,
+            shimmer_speed,
+            shimmer_end,
         }
     }
 
@@ -266,10 +288,23 @@ impl FallingCharAnimator {
                     }
                 }
                 if all_landed {
-                    self.phase = AnimPhase::Holding;
+                    self.phase = AnimPhase::HoldPreShimmer;
                 }
             }
-            AnimPhase::Holding => {
+            AnimPhase::HoldPreShimmer => {
+                self.hold_remaining = self.hold_remaining.saturating_sub(1);
+                if self.hold_remaining == 0 {
+                    self.phase = AnimPhase::Shimmer;
+                }
+            }
+            AnimPhase::Shimmer => {
+                self.shimmer_x += self.shimmer_speed;
+                if self.shimmer_x > self.shimmer_end {
+                    self.hold_remaining = 10; // brief pause after shimmer
+                    self.phase = AnimPhase::HoldPostShimmer;
+                }
+            }
+            AnimPhase::HoldPostShimmer => {
                 self.hold_remaining = self.hold_remaining.saturating_sub(1);
                 if self.hold_remaining == 0 {
                     self.phase = AnimPhase::FallingOut;
@@ -310,13 +345,28 @@ impl FallingCharAnimator {
         let w = area.width as usize;
         let h = area.height as usize;
 
+        // During shimmer phase, compute which cells are hit by the diagonal band.
+        let shimmer_style = Style::default().fg(Color::White);
+        let in_shimmer = matches!(self.phase, AnimPhase::Shimmer);
+
         // Collect visible cells grouped by row (sparse).
         let mut row_cells: Vec<Vec<(usize, char, Style)>> = vec![Vec::new(); h];
         for cell in &self.cells {
             let y = cell.current_y.round() as i32;
             let x = cell.col as usize;
             if y >= 0 && (y as usize) < h && x < w {
-                row_cells[y as usize].push((x, cell.ch, cell.style));
+                // Shimmer compositing: diagonal band position = shimmer_x - row
+                let style = if in_shimmer {
+                    let band_x = self.shimmer_x - (y as f32);
+                    if (x as f32) >= band_x && (x as f32) < band_x + self.shimmer_width {
+                        shimmer_style
+                    } else {
+                        cell.style
+                    }
+                } else {
+                    cell.style
+                };
+                row_cells[y as usize].push((x, cell.ch, style));
             }
         }
 
