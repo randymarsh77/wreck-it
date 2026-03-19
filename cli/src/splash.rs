@@ -11,6 +11,8 @@ use ratatui::{
 pub struct ArtColorRule {
     pub ch: char,
     pub style: Style,
+    /// When set, render this character instead of `ch`.
+    pub display: Option<char>,
 }
 
 /// A colored ASCII art image defined as lines of text plus a set of color rules.
@@ -30,13 +32,13 @@ impl ColoredArt {
                 let spans: Vec<Span<'static>> = line
                     .chars()
                     .map(|ch| {
-                        let style = self
+                        let (display_ch, style) = self
                             .rules
                             .iter()
                             .find(|r| r.ch == ch)
-                            .map(|r| r.style)
-                            .unwrap_or(self.default_style);
-                        Span::styled(ch.to_string(), style)
+                            .map(|r| (r.display.unwrap_or(ch), r.style))
+                            .unwrap_or((ch, self.default_style));
+                        Span::styled(display_ch.to_string(), style)
                     })
                     .collect();
                 Line::from(spans)
@@ -49,11 +51,11 @@ impl ColoredArt {
 
 /// Big block letter title "WRECK-IT" using █ block characters.
 pub const TITLE_ART: &[&str] = &[
-    "█     █ ████  █████  ███  █   █       █ █████",
-    "█     █ █   █ █     █   █ █  █        █   █  ",
-    "█  █  █ ████  ████  █     ███   ████  █   █  ",
-    "█ █ █ █ █  █  █     █   █ █  █        █   █  ",
-    " █   █  █   █ █████  ███  █   █       █   █  ",
+    "██       ██ ███████  █████ ██████  ██   ██    ██ ██████",
+    "██       ██ ██    ██ ██    ██   ██ ██  ██     ██   ██  ",
+    "██  ██   ██ ███████  ████  ██      █████  ███ ██   ██  ",
+    "██ ██ ██ ██ ██   ██  ██    ██   ██ ██  ██     ██   ██  ",
+    " ██     ██  ██    ██ █████ ██████  ██   ██    ██   ██  ",
 ];
 
 // ─── Ralph character art ─────────────────────────────────────────────
@@ -76,26 +78,15 @@ pub const RALPH_ART: &[&str] = &[
     "███████░░░░░░▓▓▓▓▓▓░░░░░░███████",
     "███████░░░░░░░░░░░░░░░░░░███████",
     "█████░░░░██▀▀▀▀▀▀▀▀▀▀██░░░░█████",
-    "█████░░████▄▄▄▄▄▄▄▄▄▄████░░█████",
     "█████░░██████████████████░░█████",
     "█████░░██▒▒██▓▓▓▓▓▓██▒▒██░░█████",
     "█████░░██▓█▀▀▀▀▀▀▀▀▀▀█▓██░░█████",
-    "█████░░████▄▄▄▄▄▄▄▄▄▄████░░█████",
     "███████░░░░░░░░░░░░░░░░░░███████",
     "█████████▒▒▒▒▒▒▒▒▒▒▒▒▒▒█████████",
     "████████████████████████████████",
 ];
 
 /// Build the colored art for the Ralph character.
-///
-/// Color rules (easy to hand-modify):
-///   ▓ → Red
-///   ░ → Skin tone (Rgb(255, 200, 150))
-///   █ → Dark blue
-///   ▒ → Yellow
-///   ─ → White (eyes/details)
-///   ▀ → White
-///   ▄ → White
 pub fn ralph_art() -> ColoredArt {
     ColoredArt {
         lines: RALPH_ART.to_vec(),
@@ -103,30 +94,37 @@ pub fn ralph_art() -> ColoredArt {
             ArtColorRule {
                 ch: '▓',
                 style: Style::default().fg(Color::Red),
+                display: Some('█'),
             },
             ArtColorRule {
                 ch: '░',
-                style: Style::default().fg(Color::Rgb(255, 200, 150)), // skin
+                style: Style::default().fg(Color::Rgb(242, 192, 156)), // skin
+                display: Some('█'),
             },
             ArtColorRule {
                 ch: '█',
-                style: Style::default().fg(Color::Rgb(40, 40, 120)), // dark blue
+                style: Style::default().fg(Color::Black),
+                display: Some('█'),
             },
             ArtColorRule {
                 ch: '▒',
-                style: Style::default().fg(Color::Yellow),
+                style: Style::default().fg(Color::Rgb(180, 100, 80)), // light brown
+                display: Some('█'),
             },
             ArtColorRule {
                 ch: '─',
                 style: Style::default().fg(Color::White),
+                display: Some('█'),
             },
             ArtColorRule {
                 ch: '▀',
                 style: Style::default().fg(Color::White),
+                display: Some('█'),
             },
             ArtColorRule {
                 ch: '▄',
                 style: Style::default().fg(Color::White),
+                display: Some('█'),
             },
         ],
         default_style: Style::default().fg(Color::White),
@@ -140,6 +138,7 @@ pub fn title_art() -> ColoredArt {
         rules: vec![ArtColorRule {
             ch: '█',
             style: Style::default().fg(Color::Cyan),
+            display: None,
         }],
         default_style: Style::default().fg(Color::Cyan),
     }
@@ -252,10 +251,12 @@ mod tests {
                 ArtColorRule {
                     ch: '█',
                     style: Style::default().fg(Color::Blue),
+                    display: None,
                 },
                 ArtColorRule {
                     ch: '▓',
                     style: Style::default().fg(Color::Red),
+                    display: None,
                 },
             ],
             default_style: Style::default(),
