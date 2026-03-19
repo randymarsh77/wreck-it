@@ -149,7 +149,7 @@ fn title_line_char_counts() -> Vec<usize> {
     TITLE_ART.iter().map(|l| l.chars().count()).collect()
 }
 
-/// Render the splash screen: title on the left, Ralph art on the right.
+/// Render the splash screen: title on the left, Ralph art on the right, centered.
 pub fn render_splash(f: &mut Frame, area: Rect) {
     let title = title_art();
     let ralph = ralph_art();
@@ -162,6 +162,12 @@ pub fn render_splash(f: &mut Frame, area: Rect) {
     let char_counts = title_line_char_counts();
     let title_width = char_counts.iter().copied().max().unwrap_or(0);
     let gap = 4;
+    let ralph_width = RALPH_ART
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    let content_width = title_width + gap + ralph_width;
 
     // Vertically center the title next to the art.
     let ralph_height = ralph_lines.len();
@@ -172,13 +178,38 @@ pub fn render_splash(f: &mut Frame, area: Rect) {
         0
     };
 
+    // +2 for the blank line at top and the subtitle line pair
+    let content_height = ralph_height + 3;
+
+    // Compute centering offsets
+    let h_pad = if (area.width as usize) > content_width {
+        (area.width as usize - content_width) / 2
+    } else {
+        0
+    };
+    let v_pad = if (area.height as usize) > content_height {
+        (area.height as usize - content_height) / 2
+    } else {
+        0
+    };
+
     let mut combined: Vec<Line<'static>> = Vec::new();
+
+    // Vertical padding
+    for _ in 0..v_pad {
+        combined.push(Line::from(""));
+    }
 
     // Blank line at top
     combined.push(Line::from(""));
 
+    let h_prefix = " ".repeat(h_pad);
+
     for (row, ralph_line) in ralph_lines.iter().enumerate() {
         let mut spans: Vec<Span<'static>> = Vec::new();
+
+        // Horizontal centering pad
+        spans.push(Span::raw(h_prefix.clone()));
 
         // Title portion (or padding)
         if row >= title_v_offset && row < title_v_offset + title_height {
@@ -205,8 +236,14 @@ pub fn render_splash(f: &mut Frame, area: Rect) {
 
     // Subtitle line
     combined.push(Line::from(""));
+    let subtitle = "Press any key to continue...";
+    let subtitle_pad = if (area.width as usize) > subtitle.len() {
+        (area.width as usize - subtitle.len()) / 2
+    } else {
+        0
+    };
     combined.push(Line::from(vec![Span::styled(
-        "                     Press any key to continue...",
+        format!("{}{}", " ".repeat(subtitle_pad), subtitle),
         Style::default().fg(Color::DarkGray),
     )]));
 
