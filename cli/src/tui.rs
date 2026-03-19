@@ -21,7 +21,6 @@ pub struct TuiApp {
     ralph_loop: RalphLoop,
     should_quit: bool,
     paused: bool,
-    show_splash: bool,
 }
 
 impl TuiApp {
@@ -30,7 +29,6 @@ impl TuiApp {
             ralph_loop,
             should_quit: false,
             paused: false,
-            show_splash: true,
         }
     }
 
@@ -64,13 +62,17 @@ impl TuiApp {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     ) -> Result<()> {
-        // Show splash screen first
-        while self.show_splash {
-            terminal.draw(|f| splash::render_splash(f, f.size()))?;
-
-            if event::poll(std::time::Duration::from_millis(100))? {
-                if let Event::Key(_) = event::read()? {
-                    self.show_splash = false;
+        // Animated splash screen
+        {
+            let area = terminal.size()?;
+            let mut animator = splash::new_splash_animator(area);
+            while !animator.is_done() {
+                terminal.draw(|f| animator.render(f, f.size()))?;
+                animator.tick();
+                if event::poll(std::time::Duration::from_millis(33))? {
+                    if let Event::Key(_) = event::read()? {
+                        break;
+                    }
                 }
             }
         }

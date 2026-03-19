@@ -1,3 +1,4 @@
+use rand::Rng;
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
@@ -149,27 +150,227 @@ fn title_line_char_counts() -> Vec<usize> {
     TITLE_ART.iter().map(|l| l.chars().count()).collect()
 }
 
-/// Render the splash screen: title on the left, Ralph art on the right, centered.
-pub fn render_splash(f: &mut Frame, area: Rect) {
+// ─── Generic falling-character animator ──────────────────────────────
+
+/// A positioned, styled character cell tracked by the animator.
+struct AnimCell {
+    ch: char,
+    style: Style,
+    col: u16,
+    final_row: f32,
+    current_y: f32,
+    speed_in: f32,
+    delay_in: u16,
+    speed_out: f32,
+    delay_out: u16,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum AnimPhase {
+    FallingIn,
+    Holding,
+    FallingOut,
+    Done,
+}
+
+/// A generic falling-character animator.
+///
+/// Takes arbitrary styled `Line`s, centers them in the terminal area,
+/// and animates each non-space character:
+///   1. **Fall in** — characters drop from random positions above the screen
+///      at randomized speeds and staggered delays.
+///   2. **Hold** — all characters rest at their final positions.
+///   3. **Fall out** — characters drop off the bottom in a randomized order.
+pub struct FallingCharAnimator {
+    cells: Vec<AnimCell>,
+    phase: AnimPhase,
+    tick: u64,
+    out_tick: u64,
+    hold_remaining: u16,
+    area: Rect,
+}
+
+impl FallingCharAnimator {
+    /// Create a new animator from styled lines, centered in the given area.
+    pub fn new(lines: Vec<Line<'static>>, area: Rect) -> Self {
+        let content_height = lines.len();
+        let content_width = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.chars().count())
+                    .sum::<usize>()
+            })
+            .max()
+            .unwrap_or(0);
+
+        let v_offset = (area.height as usize).saturating_sub(content_height) / 2;
+        let h_offset = (area.width as usize).saturating_sub(content_width) / 2;
+
+        let mut rng = rand::thread_rng();
+        let mut cells = Vec::new();
+
+        for (row_idx, line) in lines.iter().enumerate() {
+            let mut col = h_offset as u16;
+            for span in &line.spans {
+                for ch in span.content.chars() {
+                    if ch != ' ' {
+                        let final_row = (v_offset + row_idx) as f32;
+                        cells.push(AnimCell {
+                            ch,
+                            style: span.style,
+                            col,
+                            final_row,
+                            current_y: rng.gen_range(-(area.height as f32)..0.0),
+                            speed_in: rng.gen_range(1.6..5.0),
+                            delay_in: rng.gen_range(0..4),
+                            speed_out: rng.gen_range(1.6..6.0),
+                            delay_out: rng.gen_range(0..10),
+                        });
+                    }
+                    col += 1;
+                }
+            }
+        }
+
+        Self {
+            cells,
+            phase: AnimPhase::FallingIn,
+            tick: 0,
+            out_tick: 0,
+            hold_remaining: 30, // ~1 s at 30 fps
+            area,
+        }
+    }
+
+    /// Advance the animation by one frame.
+    pub fn tick(&mut self) {
+        self.tick += 1;
+        match self.phase {
+            AnimPhase::FallingIn => {
+                let tick = self.tick;
+                let mut all_landed = true;
+                for cell in &mut self.cells {
+                    if tick <= cell.delay_in as u64 {
+                        all_landed = false;
+                        continue;
+                    }
+                    if cell.current_y < cell.final_row {
+                        cell.current_y += cell.speed_in;
+                        if cell.current_y >= cell.final_row {
+                            cell.current_y = cell.final_row;
+                        } else {
+                            all_landed = false;
+                        }
+                    }
+                }
+                if all_landed {
+                    self.phase = AnimPhase::Holding;
+                }
+            }
+            AnimPhase::Holding => {
+                self.hold_remaining = self.hold_remaining.saturating_sub(1);
+                if self.hold_remaining == 0 {
+                    self.phase = AnimPhase::FallingOut;
+                }
+            }
+            AnimPhase::FallingOut => {
+                self.out_tick += 1;
+                let out_tick = self.out_tick;
+                let area_h = self.area.height as f32;
+                let mut all_gone = true;
+                for cell in &mut self.cells {
+                    if out_tick <= cell.delay_out as u64 {
+                        all_gone = false;
+                        continue;
+                    }
+                    if cell.current_y <= area_h {
+                        cell.current_y += cell.speed_out;
+                        if cell.current_y <= area_h {
+                            all_gone = false;
+                        }
+                    }
+                }
+                if all_gone {
+                    self.phase = AnimPhase::Done;
+                }
+            }
+            AnimPhase::Done => {}
+        }
+    }
+
+    /// Returns true when the full animation cycle has completed.
+    pub fn is_done(&self) -> bool {
+        matches!(self.phase, AnimPhase::Done)
+    }
+
+    /// Render the current animation frame.
+    pub fn render(&self, f: &mut Frame, area: Rect) {
+        let w = area.width as usize;
+        let h = area.height as usize;
+
+        // Collect visible cells grouped by row (sparse).
+        let mut row_cells: Vec<Vec<(usize, char, Style)>> = vec![Vec::new(); h];
+        for cell in &self.cells {
+            let y = cell.current_y.round() as i32;
+            let x = cell.col as usize;
+            if y >= 0 && (y as usize) < h && x < w {
+                row_cells[y as usize].push((x, cell.ch, cell.style));
+            }
+        }
+
+        let lines: Vec<Line<'static>> = row_cells
+            .into_iter()
+            .map(|mut cells_in_row| {
+                if cells_in_row.is_empty() {
+                    return Line::from("");
+                }
+                cells_in_row.sort_by_key(|&(x, _, _)| x);
+                let mut spans = Vec::new();
+                let mut cursor = 0usize;
+                for (x, ch, style) in cells_in_row {
+                    if x > cursor {
+                        spans.push(Span::raw(" ".repeat(x - cursor)));
+                    }
+                    spans.push(Span::styled(ch.to_string(), style));
+                    cursor = x + 1;
+                }
+                Line::from(spans)
+            })
+            .collect();
+
+        f.render_widget(Paragraph::new(lines), area);
+
+        // Fixed "Press any key to continue..." at the bottom
+        let hint = "Press any key to continue...";
+        let hint_x = (area.width as usize).saturating_sub(hint.len()) / 2;
+        let hint_y = area.height.saturating_sub(2);
+        let hint_area = Rect::new(hint_x as u16, hint_y, hint.len() as u16, 1);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                hint,
+                Style::default().fg(Color::DarkGray),
+            ))),
+            hint_area,
+        );
+    }
+}
+
+// ─── Splash-specific content builder ─────────────────────────────────
+
+/// Build the splash content as styled lines (title beside Ralph art)
+/// without any centering — the animator handles positioning.
+pub fn build_splash_content() -> Vec<Line<'static>> {
     let title = title_art();
     let ralph = ralph_art();
-
     let title_lines = title.to_lines();
     let ralph_lines = ralph.to_lines();
 
-    // Combine title + art side-by-side.
-    // Title goes on the left, Ralph art on the right, separated by a gap.
     let char_counts = title_line_char_counts();
     let title_width = char_counts.iter().copied().max().unwrap_or(0);
     let gap = 4;
-    let ralph_width = RALPH_ART
-        .iter()
-        .map(|l| l.chars().count())
-        .max()
-        .unwrap_or(0);
-    let content_width = title_width + gap + ralph_width;
 
-    // Vertically center the title next to the art.
     let ralph_height = ralph_lines.len();
     let title_height = title_lines.len();
     let title_v_offset = if ralph_height > title_height {
@@ -178,45 +379,14 @@ pub fn render_splash(f: &mut Frame, area: Rect) {
         0
     };
 
-    // +2 for the blank line at top and the subtitle line pair
-    let content_height = ralph_height + 3;
-
-    // Compute centering offsets
-    let h_pad = if (area.width as usize) > content_width {
-        (area.width as usize - content_width) / 2
-    } else {
-        0
-    };
-    let v_pad = if (area.height as usize) > content_height {
-        (area.height as usize - content_height) / 2
-    } else {
-        0
-    };
-
-    let mut combined: Vec<Line<'static>> = Vec::new();
-
-    // Vertical padding
-    for _ in 0..v_pad {
-        combined.push(Line::from(""));
-    }
-
-    // Blank line at top
-    combined.push(Line::from(""));
-
-    let h_prefix = " ".repeat(h_pad);
+    let mut lines = Vec::new();
 
     for (row, ralph_line) in ralph_lines.iter().enumerate() {
         let mut spans: Vec<Span<'static>> = Vec::new();
 
-        // Horizontal centering pad
-        spans.push(Span::raw(h_prefix.clone()));
-
-        // Title portion (or padding)
         if row >= title_v_offset && row < title_v_offset + title_height {
             let title_row = row - title_v_offset;
-            let line_spans = title_lines[title_row].spans.clone();
-            spans.extend(line_spans);
-            // Pad to title_width
+            spans.extend(title_lines[title_row].spans.clone());
             let line_char_count = char_counts[title_row];
             if line_char_count < title_width {
                 spans.push(Span::raw(" ".repeat(title_width - line_char_count)));
@@ -225,30 +395,18 @@ pub fn render_splash(f: &mut Frame, area: Rect) {
             spans.push(Span::raw(" ".repeat(title_width)));
         }
 
-        // Gap
         spans.push(Span::raw(" ".repeat(gap)));
-
-        // Ralph art portion
         spans.extend(ralph_line.spans.clone());
 
-        combined.push(Line::from(spans));
+        lines.push(Line::from(spans));
     }
 
-    // Subtitle line
-    combined.push(Line::from(""));
-    let subtitle = "Press any key to continue...";
-    let subtitle_pad = if (area.width as usize) > subtitle.len() {
-        (area.width as usize - subtitle.len()) / 2
-    } else {
-        0
-    };
-    combined.push(Line::from(vec![Span::styled(
-        format!("{}{}", " ".repeat(subtitle_pad), subtitle),
-        Style::default().fg(Color::DarkGray),
-    )]));
+    lines
+}
 
-    let splash = Paragraph::new(combined);
-    f.render_widget(splash, area);
+/// Create a splash screen animator for the given terminal area.
+pub fn new_splash_animator(area: Rect) -> FallingCharAnimator {
+    FallingCharAnimator::new(build_splash_content(), area)
 }
 
 #[cfg(test)]
