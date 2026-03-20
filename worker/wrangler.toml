@@ -15,3 +15,8 @@ command = "cargo install worker-build && worker-build --release"
 #   GITHUB_WEBHOOK_SECRET    – Webhook secret for HMAC-SHA256 verification
 #   GITHUB_APP_ID            – Numeric GitHub App ID
 #   GITHUB_APP_PRIVATE_KEY   – PEM-encoded RSA private key from the GitHub App
+
+[observability]
+[observability.logs]
+enabled = false
+invocation_logs = true
