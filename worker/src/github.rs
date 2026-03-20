@@ -97,7 +97,7 @@ impl GitHubClient {
             url_encode(branch),
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -177,7 +177,7 @@ impl GitHubClient {
         let body_json =
             serde_json::to_string(&body).map_err(|e| format!("Failed to serialize body: {e}"))?;
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -219,7 +219,7 @@ impl GitHubClient {
             url_encode(branch),
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -280,7 +280,7 @@ impl GitHubClient {
         let body_json =
             serde_json::to_string(&payload).map_err(|e| format!("Failed to serialize: {e}"))?;
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -335,7 +335,7 @@ impl GitHubClient {
         let body_json = serde_json::to_string(query)
             .map_err(|e| format!("Failed to serialize GraphQL query: {e}"))?;
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -448,7 +448,7 @@ impl GitHubClient {
             issue_number,
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -530,7 +530,7 @@ impl GitHubClient {
             },
         });
 
-        let mut gql_headers = worker::Headers::new();
+        let gql_headers = worker::Headers::new();
         gql_headers
             .set(
                 "GraphQL-Features",
@@ -545,7 +545,7 @@ impl GitHubClient {
             Err(_) => return false,
         };
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -632,6 +632,7 @@ impl GitHubClient {
     // -----------------------------------------------------------------------
 
     /// Check the merge readiness of a pull request.
+    #[allow(dead_code)]
     pub async fn check_pr_merge_status(&self, pr_number: u64) -> Result<PrMergeStatus, String> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/pulls/{}",
@@ -640,7 +641,7 @@ impl GitHubClient {
             pr_number,
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -691,6 +692,7 @@ impl GitHubClient {
     }
 
     /// Merge a pull request using a squash merge.
+    #[allow(dead_code)]
     pub async fn merge_pr(&self, pr_number: u64) -> Result<(), String> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/pulls/{}/merge",
@@ -701,7 +703,7 @@ impl GitHubClient {
 
         let body_json = r#"{"merge_method":"squash"}"#;
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -744,7 +746,7 @@ impl GitHubClient {
             pr_number,
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -809,6 +811,7 @@ impl GitHubClient {
     }
 
     /// Mark a draft PR as ready for review.
+    #[allow(dead_code)]
     pub async fn mark_pr_ready_for_review(&self, pr_number: u64) -> Result<(), String> {
         // Fetch the PR node_id.
         let pr_url = format!(
@@ -818,7 +821,7 @@ impl GitHubClient {
             pr_number,
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -883,7 +886,7 @@ impl GitHubClient {
             pr_number,
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -926,7 +929,7 @@ impl GitHubClient {
             url_encode(base_branch),
         );
 
-        let mut prot_headers = worker::Headers::new();
+        let prot_headers = worker::Headers::new();
         prot_headers.set("Accept", "application/vnd.github+json").ok();
         prot_headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -961,7 +964,7 @@ impl GitHubClient {
             url_encode(base_branch),
         );
 
-        let mut rules_headers = worker::Headers::new();
+        let rules_headers = worker::Headers::new();
         rules_headers
             .set("Accept", "application/vnd.github+json")
             .ok();
@@ -1011,6 +1014,7 @@ impl GitHubClient {
     ///
     /// Returns `true` when at least one check run is pending (not yet
     /// completed), `false` otherwise.
+    #[allow(dead_code)]
     pub async fn has_pending_checks_for_pr(&self, pr_number: u64) -> Result<bool, String> {
         // Fetch the PR to obtain the head SHA.
         let pr_url = format!(
@@ -1020,7 +1024,7 @@ impl GitHubClient {
             pr_number,
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -1064,7 +1068,7 @@ impl GitHubClient {
                 status,
             );
 
-            let mut chk_headers = worker::Headers::new();
+            let chk_headers = worker::Headers::new();
             chk_headers.set("Accept", "application/vnd.github+json").ok();
             chk_headers
                 .set("Authorization", &format!("Bearer {}", self.token))
@@ -1110,6 +1114,7 @@ impl GitHubClient {
     ///
     /// Returns `true` when at least one check run has failed, `false`
     /// otherwise (all passing, still pending, or unable to determine).
+    #[allow(dead_code)]
     pub async fn has_failing_checks_for_pr(&self, pr_number: u64) -> Result<bool, String> {
         // Fetch the PR to obtain the head SHA.
         let pr_url = format!(
@@ -1119,7 +1124,7 @@ impl GitHubClient {
             pr_number,
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -1164,7 +1169,7 @@ impl GitHubClient {
             url_encode(head_sha),
         );
 
-        let mut chk_headers = worker::Headers::new();
+        let chk_headers = worker::Headers::new();
         chk_headers.set("Accept", "application/vnd.github+json").ok();
         chk_headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -1207,6 +1212,7 @@ impl GitHubClient {
     }
 
     /// Post a comment on a pull request (via the issues comments API).
+    #[allow(dead_code)]
     pub async fn comment_on_pr(&self, pr_number: u64, body: &str) -> Result<(), String> {
         let url = format!(
             "https://api.github.com/repos/{}/{}/issues/{}/comments",
@@ -1219,7 +1225,7 @@ impl GitHubClient {
         let body_json =
             serde_json::to_string(&payload).map_err(|e| format!("Failed to serialize: {e}"))?;
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -1271,7 +1277,7 @@ impl GitHubClient {
             pr_number,
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -1326,7 +1332,7 @@ impl GitHubClient {
                 status_filter,
             );
 
-            let mut run_headers = worker::Headers::new();
+            let run_headers = worker::Headers::new();
             run_headers.set("Accept", "application/vnd.github+json").ok();
             run_headers
                 .set("Authorization", &format!("Bearer {}", self.token))
@@ -1426,7 +1432,7 @@ impl GitHubClient {
                 run_id,
             );
 
-            let mut approve_headers = worker::Headers::new();
+            let approve_headers = worker::Headers::new();
             approve_headers
                 .set("Accept", "application/vnd.github+json")
                 .ok();
@@ -1528,7 +1534,7 @@ impl GitHubClient {
             run_id,
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))
@@ -1583,7 +1589,7 @@ impl GitHubClient {
             Err(_) => return false,
         };
 
-        let mut post_headers = worker::Headers::new();
+        let post_headers = worker::Headers::new();
         post_headers
             .set("Accept", "application/vnd.github+json")
             .ok();
@@ -1640,7 +1646,7 @@ impl GitHubClient {
             run_id,
         );
 
-        let mut headers = worker::Headers::new();
+        let headers = worker::Headers::new();
         headers.set("Accept", "application/vnd.github+json").ok();
         headers
             .set("Authorization", &format!("Bearer {}", self.token))

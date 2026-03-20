@@ -56,7 +56,7 @@ pub async fn vend_installation_token(
 ) -> Result<String, String> {
     let url = format!("https://api.github.com/app/installations/{installation_id}/access_tokens");
 
-    let mut headers = worker::Headers::new();
+    let headers = worker::Headers::new();
     headers.set("Accept", "application/vnd.github+json").ok();
     headers.set("Authorization", &format!("Bearer {jwt}")).ok();
     headers.set("User-Agent", "wreck-it-worker").ok();
