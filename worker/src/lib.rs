@@ -325,7 +325,7 @@ async fn resolve_github_token(
 async fn fetch_authenticated_login(token: &str) -> Option<String> {
     let url = "https://api.github.com/user";
 
-    let mut headers = worker::Headers::new();
+    let headers = worker::Headers::new();
     headers.set("Accept", "application/vnd.github+json").ok();
     headers
         .set("Authorization", &format!("Bearer {}", token))

@@ -17,6 +17,4 @@ command = "cargo install worker-build && worker-build --release"
 #   GITHUB_APP_PRIVATE_KEY   – PEM-encoded RSA private key from the GitHub App
 
 [observability]
-[observability.logs]
-enabled = false
-invocation_logs = true
+enabled = true
