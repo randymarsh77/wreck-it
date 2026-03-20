@@ -23,6 +23,9 @@ result-*
 .env
 *.local
 
+# secrets
+.secrets
+
 # Task files
 tasks/
 *.task.json
