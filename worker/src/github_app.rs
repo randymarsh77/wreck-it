@@ -54,6 +54,11 @@ pub async fn vend_installation_token(
     jwt: &str,
     repo_name: &str,
 ) -> Result<String, String> {
+    worker::console_log!(
+        "[wreck-it][auth] vending token for installation={} repo={}",
+        installation_id,
+        repo_name,
+    );
     let url = format!("https://api.github.com/app/installations/{installation_id}/access_tokens");
 
     let headers = worker::Headers::new();
@@ -85,10 +90,14 @@ pub async fn vend_installation_token(
     let status = response.status_code();
     if status != 201 {
         let body = response.text().await.unwrap_or_default();
+        worker::console_error!(
+            "[wreck-it][auth] token vending failed ({status}): {body}",
+        );
         return Err(format!(
             "Failed to vend installation token ({status}): {body}"
         ));
     }
+    worker::console_log!("[wreck-it][auth] token vended successfully");
 
     let body: serde_json::Value = response
         .json()
@@ -154,14 +163,40 @@ mod tests {
 
     #[test]
     fn generate_jwt_produces_three_parts() {
-        // Generate a test RSA key pair for JWT signing.
-        use rsa::rand_core::OsRng;
-        let private_key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
-        let pem =
-            rsa::pkcs8::EncodePrivateKey::to_pkcs8_pem(&private_key, rsa::pkcs8::LineEnding::LF)
-                .unwrap();
+        // Use a pre-generated 2048-bit RSA test key.  Generating one at
+        // runtime via `RsaPrivateKey::new(&mut OsRng, 2048)` interacts
+        // badly with the `spin` mutex used by the `rsa` crate and causes
+        // the test harness to hang on exit.
+        let pem = "-----BEGIN PRIVATE KEY-----\n\
+MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC5QHAlqN27Tfon\n\
+vQxeahClBM3E+a2ts0geMEJkE8YmuOaJrAJU7HvCOgceCjoHNqTuhPjqr0bsXPeP\n\
+8XeI5BrfzWg8xbvl1lt+9mi0ppla2ockXzYPnsl131Gfin0Byf2FYR48KJHtbWLg\n\
+23KnwfNDy8NvnszmcZ5vW1ia2IlGgGDLytf2HhvFVzEY/M3Sxuou0GfUHeOPdV0n\n\
+IYug1z2uyZku75MDdhWyTOubWVosfepmr6dGd0fukNpf80mPsh/ozo/qQTdISrdM\n\
+2djaN7Fqc406KqcLMnQP60z6RpMV9+IaranIuNbGY6CwOClyUT7jJTVgxg4abgct\n\
+XR4I3aHRAgMBAAECggEACnfWXn/BAoPmLjdZQD86GuO/RPGJm5Z/7W9zW6MKascU\n\
+BT+Puit1gC+LQL/523fTsMQZf27Re9XHtNNDmpwD22sIsuEcPGFKi6LHnpMIzhYp\n\
+1ieohGVyo5Mvp5ZJzhS98Lrg3IFmYvDwH3NccpexHr71l5R0+6imoqBEzNXjm/TY\n\
+VLlrPka9QbyREgoEtAtjlXAv7mneM4C/x3/z2wQxMv/m57SOA77h/qbXMrxbPqFl\n\
+N9aL/kKO7IzFRmIsWrHkL45BLoFe2TACFINH3/COqd1/gSzr7xCxXTFA7xqpk3XY\n\
+KjceK1FGECkAX01kJwQFmDcENNLL17RLPJpTwgXi4QKBgQD6Ljm+7r3cAYFOyOJh\n\
+SZ/0BBMhSvnKzyexjhzR2HA6WTKVYMVeMIpX2A4CrmZVHzYBDucPDa/Ek1cT7MxR\n\
+XX3kUpBfsTWY5aCe3FwakuU7qk59cOqFtcvvffBlb/JDCR4u8FcSO1b5h/4WG4eD\n\
+90WIEAL1gAoDBT1CvVJkMgRJ/QKBgQC9j5MJGsdfZGgOAVyM1jMD72XxVG8gQqg6\n\
+51Wx4adJQST2SJpZfIrX9/VqUHoMiqIEcpMxuE2s/H8w01KnHo4VPJPyaruFsQqO\n\
+Gn7SkEpOsAzRkknHAjhzHLK6KxmxMCUqkQSsTmxSed1HRrsw/yiFXA4U2I3poweM\n\
+eZyPDGyFZQKBgHBvB9qsFr1iG8fZdgu899rFXgePV3Vy5ebg9EjGmaFPZvFFHU44\n\
+SGQ0IA/KawkETtPo66STRRP2F6NHv4ctmh9bj7DBxlGhmS7r36S9sbG/1yh+75cJ\n\
+3c4S7k/YIKtJ1LvJnYf/DRZ1rJYo5x1Cqof8kifc1CMJXr+4r+eBpvXNAoGAJy/D\n\
+CaLLjGDJUfveEg9FxI582ILH5jdhZ6vi/z7SwkYBShiAL/ebDEJqLWwtjuIp1BmL\n\
+bD/ZbuVTtdg5weqDHMjFHNwLn/uVXwMDLKw/cDzcqYZAUi+XU9Se7fVy/johtMb9\n\
+3FDp+7LNl6p7kAlvawI4tv59d8sICHYrczbySDECgYA/wnSBmedL9XLCQZpsDPyS\n\
+M/JZ+qqV10EJaeUVXyzLLCD284QEeLbYhuWWaBCuNG1nry9mRu7qD5/RrbY2iHqb\n\
+TFP9Qi4H/k4ElALICRDApsPXiLYmxvvu7qbMbGqvAqKhHfCLAQRLRPfz1PY0Zoxs\n\
+2Rk0jLPIKBsyQ5YIyEYCtw==\n\
+-----END PRIVATE KEY-----";
 
-        let jwt = generate_jwt("12345", pem.as_ref(), 1_700_000_000).unwrap();
+        let jwt = generate_jwt("12345", pem, 1_700_000_000).unwrap();
         let parts: Vec<&str> = jwt.split('.').collect();
         assert_eq!(parts.len(), 3, "JWT must have header.payload.signature");
 

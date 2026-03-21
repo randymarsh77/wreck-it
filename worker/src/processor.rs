@@ -34,16 +34,23 @@ pub async fn process_iteration(
     default_branch: &str,
 ) -> Result<IterationResult, String> {
     // Step 1: Read repo config from the default branch.
+    worker::console_log!("[wreck-it][processor] reading config from {}", default_branch);
     let config = read_repo_config(client, default_branch).await?;
 
     // Step 2: Determine ralph contexts.
     let contexts: Vec<RalphContext> = if config.ralphs.is_empty() {
+        worker::console_log!("[wreck-it][processor] no ralphs configured, using default");
         vec![RalphContext {
             name: "default".into(),
             task_file: "tasks.json".into(),
             state_file: ".wreck-it-state.json".into(),
         }]
     } else {
+        worker::console_log!(
+            "[wreck-it][processor] {} ralph context(s): {}",
+            config.ralphs.len(),
+            config.ralphs.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(", "),
+        );
         config
             .ralphs
             .iter()
@@ -58,8 +65,19 @@ pub async fn process_iteration(
     let mut summaries = Vec::new();
     let mut any_changed = false;
     let task_branch = config.effective_task_branch();
+    worker::console_log!(
+        "[wreck-it][processor] state_branch={} task_branch={}",
+        config.state_branch,
+        task_branch,
+    );
 
     for ctx in &contexts {
+        worker::console_log!(
+            "[wreck-it][processor] processing ralph '{}' (tasks={}, state={})",
+            ctx.name,
+            ctx.task_file,
+            ctx.state_file,
+        );
         let result = process_ralph(client, &config.state_branch, task_branch, ctx).await?;
         if result.changed {
             any_changed = true;
@@ -284,6 +302,7 @@ pub async fn process_merged_pr(
     default_branch: &str,
     pr_number: u64,
 ) -> Result<IterationResult, String> {
+    worker::console_log!("[wreck-it][processor] handling merged PR #{}", pr_number);
     let config = read_repo_config(client, default_branch).await?;
 
     let contexts: Vec<RalphContext> = if config.ralphs.is_empty() {

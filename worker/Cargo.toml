@@ -6,7 +6,7 @@ license = "MIT"
 description = "Cloudflare Worker webhook handler for the wreck-it orchestration framework"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wreck-it-core = { path = "../core" }

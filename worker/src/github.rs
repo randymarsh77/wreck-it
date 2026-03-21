@@ -124,6 +124,12 @@ impl GitHubClient {
 
         if response.status_code() != 200 {
             let body = response.text().await.unwrap_or_default();
+            worker::console_error!(
+                "[wreck-it][github] GET {} returned {}: {}",
+                url,
+                response.status_code(),
+                body,
+            );
             return Err(format!(
                 "GitHub API returned {}: {}",
                 response.status_code(),
@@ -203,6 +209,12 @@ impl GitHubClient {
         let status = response.status_code();
         if status != 200 && status != 201 {
             let body = response.text().await.unwrap_or_default();
+            worker::console_error!(
+                "[wreck-it][github] PUT {} returned {}: {}",
+                url,
+                status,
+                body,
+            );
             return Err(format!("GitHub API returned {status}: {body}"));
         }
 
@@ -306,6 +318,12 @@ impl GitHubClient {
         let status = response.status_code();
         if status != 201 {
             let body = response.text().await.unwrap_or_default();
+            worker::console_error!(
+                "[wreck-it][github] POST {} returned {}: {}",
+                url,
+                status,
+                body,
+            );
             return Err(format!("Failed to create issue ({status}): {body}"));
         }
 
@@ -360,6 +378,11 @@ impl GitHubClient {
 
         if response.status_code() != 200 {
             let body = response.text().await.unwrap_or_default();
+            worker::console_error!(
+                "[wreck-it][github] GraphQL returned {}: {}",
+                response.status_code(),
+                body,
+            );
             return Err(format!(
                 "GraphQL returned {}: {body}",
                 response.status_code()

@@ -74,7 +74,20 @@ fn should_process_pr_event(
 }
 
 #[event(fetch)]
-async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
+async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    match handle_webhook(req, env).await {
+        Ok(resp) => {
+            console_log!("[wreck-it] → {} response", resp.status_code());
+            Ok(resp)
+        }
+        Err(e) => {
+            console_error!("[wreck-it] ✗ unhandled error: {e}");
+            Response::error(format!("Internal error: {e}"), 500)
+        }
+    }
+}
+
+async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
     // Only accept POST requests at the webhook endpoint.
     if req.method() != Method::Post {
         return Response::ok("wreck-it webhook worker is running");
@@ -98,6 +111,7 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .unwrap_or_default();
 
     if !verify_signature(&signature, &webhook_secret, &body_bytes) {
+        console_warn!("[wreck-it] ✗ invalid webhook signature");
         return Response::error("Invalid signature", 401);
     }
 
@@ -111,8 +125,30 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let event = WebhookEvent::from_header(&event_header);
 
     // Parse the payload.
-    let payload: types::WebhookPayload = serde_json::from_slice(&body_bytes)
-        .map_err(|e| Error::RustError(format!("Failed to parse payload: {e}")))?;
+    let payload: types::WebhookPayload = match serde_json::from_slice(&body_bytes) {
+        Ok(p) => p,
+        Err(e) => {
+            console_error!(
+                "[wreck-it] ✗ failed to parse {} payload ({} bytes): {e}",
+                event_header,
+                body_bytes.len(),
+            );
+            return Err(Error::RustError(format!("Failed to parse payload: {e}")));
+        }
+    };
+
+    let action = payload.action.as_deref().unwrap_or("-");
+    let repo_name_log = payload
+        .repository
+        .as_ref()
+        .map(|r| r.full_name.as_str())
+        .unwrap_or("unknown");
+    console_log!(
+        "[wreck-it] ← event={} action={} repo={}",
+        event_header,
+        action,
+        repo_name_log,
+    );
 
     // Quick filter: immediately handle or reject events we never process.
     match &event {
@@ -141,7 +177,21 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     //
     // Use App credentials (GITHUB_APP_ID + GITHUB_APP_PRIVATE_KEY) to vend
     // an installation token scoped to this specific repository.
-    let github_token = resolve_github_token(&env, &payload, repo_name).await?;
+    console_log!("[wreck-it] resolving app token for {}/{}", owner, repo_name);
+    let github_token = match resolve_github_token(&env, &payload, repo_name).await {
+        Ok(t) => {
+            console_log!("[wreck-it] ✓ app token resolved for {}/{}", owner, repo_name);
+            t
+        }
+        Err(e) => {
+            console_error!(
+                "[wreck-it] ✗ token resolution failed for {}/{}: {e}",
+                owner,
+                repo_name,
+            );
+            return Err(e);
+        }
+    };
 
     // Resolve the authenticated user's login for trust checks.
     //
@@ -149,6 +199,10 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
     // and the authenticated_login is not needed for the trust check.
     let authenticated_login = fetch_authenticated_login(&github_token).await;
     let auth_login_ref = authenticated_login.as_deref();
+    console_log!(
+        "[wreck-it] authenticated_login={}",
+        auth_login_ref.unwrap_or("(none)"),
+    );
 
     // Only process events we care about.
     let should_process = match &event {
@@ -169,26 +223,55 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
                 .as_ref()
                 .map(|i| is_trusted_issue_author(i, auth_login_ref))
                 .unwrap_or(false);
+            let issue_user = payload
+                .issue
+                .as_ref()
+                .and_then(|i| i.user.as_ref())
+                .map(|u| format!("{}({})", u.login, u.user_type.as_deref().unwrap_or("?")))
+                .unwrap_or_else(|| "(no user)".into());
+            console_log!(
+                "[wreck-it] issue filter: action={} has_label={} trusted={} user={}",
+                action,
+                has_label,
+                trusted,
+                issue_user,
+            );
             (action == "opened" && has_label || action == "labeled" && has_label) && trusted
         }
         WebhookEvent::Push => {
             // Process pushes to the state branch (external state updates).
+            console_log!("[wreck-it] push event — will process");
             true
         }
         WebhookEvent::PullRequest => {
             let action = payload.action.as_deref().unwrap_or("");
-            payload
+            let result = payload
                 .pull_request
                 .as_ref()
                 .map(|pr| should_process_pr_event(action, pr, auth_login_ref))
-                .unwrap_or(false)
+                .unwrap_or(false);
+            let pr_user = payload
+                .pull_request
+                .as_ref()
+                .and_then(|pr| pr.user.as_ref())
+                .map(|u| u.login.as_str())
+                .unwrap_or("(no user)");
+            console_log!(
+                "[wreck-it] PR filter: action={} user={} should_process={}",
+                action,
+                pr_user,
+                result,
+            );
+            result
         }
         _ => false,
     };
 
     if !should_process {
+        console_log!("[wreck-it] event filtered out — ignoring");
         return Response::ok("event ignored");
     }
+    console_log!("[wreck-it] event accepted — processing");
 
     // Create GitHub client and run the iteration.
     let client = github::GitHubClient::new(owner, repo_name, &github_token);
@@ -200,8 +283,11 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .map_err(|e| Error::RustError(e))?;
 
     if config_file.is_none() {
+        console_log!("[wreck-it] no .wreck-it/config.toml found on {} — skipping", default_branch);
         return Response::ok("no wreck-it configuration found; skipping");
     }
+
+    console_log!("[wreck-it] config found — proceeding with event handling");
 
     // For PR events from trusted authors, approve pending workflow runs
     // and enable auto-merge when required checks are detected.  This
@@ -215,13 +301,15 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             if action == "closed" && merged {
                 // Merged PR — handle task completion.
+                console_log!("[wreck-it] handling merged PR #{}", pr.number);
                 match processor::process_merged_pr(&client, default_branch, pr.number).await {
                     Ok(result) => {
                         let status = if result.changed { "processed" } else { "no-op" };
+                        console_log!("[wreck-it] pr-merged {}: {}", status, result.summary);
                         return Response::ok(format!("pr-merged {status}: {}", result.summary));
                     }
                     Err(e) => {
-                        console_error!("PR merge handling failed: {e}");
+                        console_error!("[wreck-it] ✗ PR merge handling failed: {e}");
                         // Fall through to the normal iteration processing.
                     }
                 }
@@ -267,13 +355,15 @@ async fn main(mut req: Request, env: Env, _ctx: Context) -> Result<Response> {
         }
     }
 
+    console_log!("[wreck-it] running iteration for {}/{}", owner, repo_name);
     match processor::process_iteration(&client, default_branch).await {
         Ok(result) => {
             let status = if result.changed { "processed" } else { "no-op" };
+            console_log!("[wreck-it] iteration {}: {}", status, result.summary);
             Response::ok(format!("{status}: {}", result.summary))
         }
         Err(e) => {
-            console_error!("Iteration failed: {e}");
+            console_error!("[wreck-it] ✗ iteration failed: {e}");
             Response::error(format!("Processing failed: {e}"), 500)
         }
     }

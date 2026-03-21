@@ -1886,6 +1886,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires a live Copilot server — run with --ignored"]
     async fn evaluate_precondition_returns_true_when_marker_exists() {
         let dir = tempdir().unwrap();
         init_git_repo(dir.path());
