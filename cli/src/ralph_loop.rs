@@ -553,17 +553,13 @@ impl RalphLoop {
 
             // Close associated GitHub issue if one exists.
             if let Some(ref client) = gh_client {
-                let issue_number = self
-                    .github_issue_numbers
-                    .remove(&task_id)
-                    .map(|n| std::future::ready(Some(n)));
-
-                let resolved = match issue_number {
-                    Some(fut) => fut.await,
-                    None => client.find_open_issue(&task_id).await,
+                let issue_num = if let Some(num) = self.github_issue_numbers.remove(&task_id) {
+                    Some(num)
+                } else {
+                    client.find_open_issue(&task_id).await
                 };
 
-                if let Some(num) = resolved {
+                if let Some(num) = issue_num {
                     if let Err(e) = client.close_issue(num).await {
                         self.state.add_log(format!(
                             "Warning: failed to close GitHub Issue #{num} for redundant task {task_id}: {e}"
