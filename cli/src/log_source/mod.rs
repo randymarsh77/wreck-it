@@ -18,6 +18,7 @@
 //! keys in the wreck-it config.  See [`LogSourceConfig`] and
 //! [`provider_from_config`] for details.
 
+pub mod cloudflare;
 pub mod seq;
 
 use anyhow::Result;
@@ -48,12 +49,14 @@ pub struct LogEntry {
 #[serde(rename_all = "lowercase")]
 pub enum LogSourceBackend {
     Seq,
+    Cloudflare,
 }
 
 impl std::fmt::Display for LogSourceBackend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Seq => write!(f, "Seq"),
+            Self::Cloudflare => write!(f, "Cloudflare"),
         }
     }
 }
@@ -83,6 +86,8 @@ pub struct LogSourceConfig {
     /// Base URL of the log platform instance.
     ///
     /// * **Seq** – e.g. `http://localhost:5341` or `https://seq.example.com`
+    /// * **Cloudflare** – e.g. `https://api.cloudflare.com/client/v4`
+    ///   (defaults to the public API)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_base_url: Option<String>,
 
@@ -90,8 +95,19 @@ pub struct LogSourceConfig {
     ///
     /// * **Seq** – a Seq filter expression, e.g. `"@Level = 'Error'"` or
     ///   `"has(@Exception)"`.
+    /// * **Cloudflare** – a SQL-like filter clause for the Workers Telemetry
+    ///   API, e.g. `"outcome = 'exception'"` or `"status >= 500"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
+
+    /// Cloudflare Account ID (required when `provider` is `Cloudflare`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+
+    /// Cloudflare Worker script name (required when `provider` is
+    /// `Cloudflare`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_name: Option<String>,
 
     /// Maximum number of log entries to fetch per sync cycle.
     /// Defaults to `20` when not set.
@@ -133,6 +149,7 @@ pub trait LogSourceProvider: Send + Sync {
 /// object-safety issues with async methods.
 pub enum LogSourceClient {
     Seq(seq::SeqProvider),
+    Cloudflare(cloudflare::CloudflareProvider),
 }
 
 impl LogSourceClient {
@@ -140,12 +157,14 @@ impl LogSourceClient {
     pub fn provider_name(&self) -> &str {
         match self {
             Self::Seq(p) => p.provider_name(),
+            Self::Cloudflare(p) => p.provider_name(),
         }
     }
 
     pub async fn query_entries(&self, since: Option<&str>, count: usize) -> Result<Vec<LogEntry>> {
         match self {
             Self::Seq(p) => p.query_entries(since, count).await,
+            Self::Cloudflare(p) => p.query_entries(since, count).await,
         }
     }
 }
@@ -182,6 +201,40 @@ pub fn provider_from_config(cfg: &LogSourceConfig) -> Option<LogSourceClient> {
             Some(LogSourceClient::Seq(seq::SeqProvider::new(
                 api_key, base_url, filter,
             )))
+        }
+        LogSourceBackend::Cloudflare => {
+            let account_id = match &cfg.account_id {
+                Some(id) => id.clone(),
+                None => {
+                    eprintln!("Warning: Cloudflare log source requires `account_id`");
+                    return None;
+                }
+            };
+            let script_name = match &cfg.script_name {
+                Some(n) => n.clone(),
+                None => {
+                    eprintln!("Warning: Cloudflare log source requires `script_name`");
+                    return None;
+                }
+            };
+            let api_token = cfg.api_token.clone().unwrap_or_default();
+            let api_url = cfg
+                .api_base_url
+                .clone()
+                .unwrap_or_else(|| cloudflare::DEFAULT_CF_API.to_string());
+            let filter = cfg
+                .filter
+                .clone()
+                .unwrap_or_else(|| "outcome = 'exception'".to_string());
+            Some(LogSourceClient::Cloudflare(
+                cloudflare::CloudflareProvider::new(
+                    api_token,
+                    account_id,
+                    script_name,
+                    api_url,
+                    filter,
+                ),
+            ))
         }
     }
 }
@@ -260,6 +313,8 @@ mod tests {
             api_base_url: Some("http://localhost:5341".into()),
             filter: Some("@Level = 'Error'".into()),
             max_entries: Some(50),
+            account_id: None,
+            script_name: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: LogSourceConfig = serde_json::from_str(&json).unwrap();
@@ -274,6 +329,8 @@ mod tests {
         assert!(cfg.api_base_url.is_none());
         assert!(cfg.filter.is_none());
         assert!(cfg.max_entries.is_none());
+        assert!(cfg.account_id.is_none());
+        assert!(cfg.script_name.is_none());
     }
 
     #[test]
@@ -307,5 +364,74 @@ mod tests {
     #[test]
     fn log_source_backend_display() {
         assert_eq!(format!("{}", LogSourceBackend::Seq), "Seq");
+        assert_eq!(format!("{}", LogSourceBackend::Cloudflare), "Cloudflare");
+    }
+
+    #[test]
+    fn log_source_backend_cloudflare_serde_roundtrip() {
+        let json = serde_json::to_string(&LogSourceBackend::Cloudflare).unwrap();
+        assert_eq!(json, r#""cloudflare""#);
+        let back: LogSourceBackend = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, LogSourceBackend::Cloudflare);
+    }
+
+    #[test]
+    fn provider_from_config_creates_cloudflare() {
+        let cfg = LogSourceConfig {
+            provider: Some(LogSourceBackend::Cloudflare),
+            api_token: Some("cf-tok".into()),
+            account_id: Some("acct-123".into()),
+            script_name: Some("my-worker".into()),
+            ..Default::default()
+        };
+        let p = provider_from_config(&cfg);
+        assert!(p.is_some());
+        assert_eq!(p.unwrap().provider_name(), "Cloudflare");
+    }
+
+    #[test]
+    fn provider_from_config_cloudflare_requires_account_id() {
+        let cfg = LogSourceConfig {
+            provider: Some(LogSourceBackend::Cloudflare),
+            api_token: Some("cf-tok".into()),
+            script_name: Some("my-worker".into()),
+            ..Default::default()
+        };
+        assert!(provider_from_config(&cfg).is_none());
+    }
+
+    #[test]
+    fn provider_from_config_cloudflare_requires_script_name() {
+        let cfg = LogSourceConfig {
+            provider: Some(LogSourceBackend::Cloudflare),
+            api_token: Some("cf-tok".into()),
+            account_id: Some("acct-123".into()),
+            ..Default::default()
+        };
+        assert!(provider_from_config(&cfg).is_none());
+    }
+
+    #[test]
+    fn log_source_config_cloudflare_roundtrip() {
+        let cfg = LogSourceConfig {
+            provider: Some(LogSourceBackend::Cloudflare),
+            api_token: Some("cf-tok".into()),
+            api_base_url: Some("https://api.cloudflare.com/client/v4".into()),
+            filter: Some("outcome = 'exception'".into()),
+            max_entries: Some(10),
+            account_id: Some("acct-123".into()),
+            script_name: Some("my-worker".into()),
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: LogSourceConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cfg);
+    }
+
+    #[test]
+    fn log_source_config_serialise_omits_cloudflare_defaults() {
+        let cfg = LogSourceConfig::default();
+        let json = serde_json::to_string(&cfg).unwrap();
+        assert!(!json.contains("account_id"));
+        assert!(!json.contains("script_name"));
     }
 }
