@@ -149,6 +149,29 @@ pub struct HeadlessState {
     pub task_statuses: HashMap<String, TaskStatus>,
 }
 
+/// Collapse consecutive duplicate memory entries.
+///
+/// When the same line appears N > 1 times in a row, it is emitted once
+/// with a `(×N)` suffix.  Non-consecutive duplicates are left as-is so
+/// that the chronological narrative is preserved.
+pub fn collapse_memory(memory: &[String]) -> Vec<String> {
+    let mut collapsed: Vec<String> = Vec::new();
+    let mut iter = memory.iter().peekable();
+    while let Some(line) = iter.next() {
+        let mut count: usize = 1;
+        while iter.peek() == Some(&line) {
+            iter.next();
+            count += 1;
+        }
+        if count > 1 {
+            collapsed.push(format!("{} (×{})", line, count));
+        } else {
+            collapsed.push(line.clone());
+        }
+    }
+    collapsed
+}
+
 impl Default for HeadlessState {
     fn default() -> Self {
         Self {
@@ -165,5 +188,74 @@ impl Default for HeadlessState {
             pending_merge_issues: Vec::new(),
             task_statuses: HashMap::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn collapse_memory_empty() {
+        assert!(collapse_memory(&[]).is_empty());
+    }
+
+    #[test]
+    fn collapse_memory_no_duplicates() {
+        let mem = vec!["a".into(), "b".into(), "c".into()];
+        assert_eq!(collapse_memory(&mem), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn collapse_memory_consecutive_duplicates() {
+        let mem = vec![
+            "enabled auto-merge for PR #162".into(),
+            "enabled auto-merge for PR #162".into(),
+            "enabled auto-merge for PR #162".into(),
+        ];
+        assert_eq!(
+            collapse_memory(&mem),
+            vec!["enabled auto-merge for PR #162 (×3)"]
+        );
+    }
+
+    #[test]
+    fn collapse_memory_mixed() {
+        let mem = vec![
+            "triggered agent (issue #10)".into(),
+            "created PR #5".into(),
+            "created PR #5".into(),
+            "merged PR #5".into(),
+            "merged PR #5".into(),
+            "merged PR #5".into(),
+            "triggered agent (issue #20)".into(),
+        ];
+        assert_eq!(
+            collapse_memory(&mem),
+            vec![
+                "triggered agent (issue #10)",
+                "created PR #5 (×2)",
+                "merged PR #5 (×3)",
+                "triggered agent (issue #20)",
+            ]
+        );
+    }
+
+    #[test]
+    fn collapse_memory_non_consecutive_duplicates_preserved() {
+        let mem = vec!["a".into(), "b".into(), "a".into()];
+        assert_eq!(collapse_memory(&mem), vec!["a", "b", "a"]);
+    }
+
+    #[test]
+    fn collapse_memory_single_entry() {
+        let mem = vec!["only one".into()];
+        assert_eq!(collapse_memory(&mem), vec!["only one"]);
+    }
+
+    #[test]
+    fn collapse_memory_all_same() {
+        let mem = vec!["x".into(), "x".into(), "x".into(), "x".into(), "x".into()];
+        assert_eq!(collapse_memory(&mem), vec!["x (×5)"]);
     }
 }

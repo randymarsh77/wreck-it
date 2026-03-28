@@ -106,7 +106,8 @@ pub(crate) fn build_issue_body(
     let memory_section = if memory.is_empty() {
         String::new()
     } else {
-        let bullets = memory
+        let collapsed = wreck_it_core::state::collapse_memory(memory);
+        let bullets = collapsed
             .iter()
             .map(|m| format!("- {}", m))
             .collect::<Vec<_>>()
