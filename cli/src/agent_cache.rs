@@ -561,9 +561,7 @@ mod tests {
             },
         );
         let key = "expiredkey";
-        cache
-            .store(key, "task-4", "sha", "stale response")
-            .unwrap();
+        cache.store(key, "task-4", "sha", "stale response").unwrap();
         let result = cache.lookup(key, "task-4").unwrap();
         assert!(matches!(result, CacheResult::Miss));
     }
@@ -574,7 +572,10 @@ mod tests {
         let cache = make_cache(&dir, true);
         let key = "corruptkey";
         // Write garbage into the cache file.
-        let path = dir.path().join(".wreck-it-cache").join(format!("{key}.json"));
+        let path = dir
+            .path()
+            .join(".wreck-it-cache")
+            .join(format!("{key}.json"));
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"not valid json").unwrap();
         let result = cache.lookup(key, "task-5").unwrap();
