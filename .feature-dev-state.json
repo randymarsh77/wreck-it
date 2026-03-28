@@ -1,9 +1,9 @@
 {
   "phase": "agent_working",
-  "iteration": 51,
-  "current_task_id": "ideas-html-report",
-  "issue_number": 844,
-  "last_prompt": "Research and design an HTML report generator for wreck-it run summaries. The report should capture: overall run statistics (total tasks, completed/failed/pending counts, total cost, total tokens, elapsed time), a per-task timeline table (id, role, status, duration, cost, retries), a dependency graph rendered inline as an SVG or Mermaid diagram, and a section for failed tasks showing error output excerpts. Review existing data sources: `cli/src/cost_tracker.rs` (cost and token data), `cli/src/openclaw.rs` (provenance events), `cli/src/graph.rs` (dependency graph Mermaid output), and `core/src/task_manager.rs` (task state). Design a `ReportData` struct that aggregates all necessary data, a Handlebars or simple string-template approach for HTML generation, and a `wreck-it report --output report.html` CLI sub-command. Document the design as inline comments in a new stub file `cli/src/report.rs`.",
+  "iteration": 52,
+  "current_task_id": "ideas-error-classification",
+  "issue_number": 846,
+  "last_prompt": "Research and design an error classification and smart recovery system for wreck-it. Currently all task failures are treated identically: retried up to `max_retries` times and then re-planned after `replan_threshold` consecutive failures. Design a system that classifies errors into categories: `Transient` (e.g. rate-limit HTTP 429, network timeout), `Permanent` (e.g. compile error, test failure), `NeedsReplan` (e.g. task description ambiguous, wrong file targeted), and `ContextOverflow` (e.g. agent returned truncated output). Review `cli/src/headless.rs`, `cli/src/agent.rs`, and `cli/src/ralph_loop.rs` to identify where error handling occurs. For each error category, propose a recovery strategy: `Transient` → exponential backoff retry; `Permanent` → invoke critic with error output injected; `NeedsReplan` → immediate re-plan trigger; `ContextOverflow` → task splitting. Document the design as inline comments in a new stub file `cli/src/error_classifier.rs`.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
     "iteration 1: agent created PR #132 for task Some(\"ideas-webhook-notifications\")",
@@ -246,21 +246,23 @@
     "iteration 36: triggered cloud agent for task eval-semantic-evaluation (issue #660)",
     "iteration 42: triggered cloud agent for task eval-semantic-evaluation (issue #748)",
     "iteration 50: agent completed without PR for task Some(\"ideas-agent-output-caching\")",
-    "iteration 51: triggered cloud agent for task ideas-html-report (issue #844)"
+    "iteration 51: triggered cloud agent for task ideas-html-report (issue #844)",
+    "iteration 51: agent completed without PR for task Some(\"ideas-html-report\")",
+    "iteration 52: triggered cloud agent for task ideas-error-classification (issue #846)"
   ],
   "task_statuses": {
-    "adaptive-prompt-optimizer": "inprogress",
-    "ideas-error-classification": "inprogress",
-    "otel-metrics-export": "inprogress",
-    "ideas-html-report": "inprogress",
-    "ideas-dependency-pruning": "inprogress",
-    "visual-workflow-exporter": "inprogress",
-    "natural-language-task-query": "inprogress",
-    "mcp-server-integration": "inprogress",
-    "llm-cost-optimizer-routing": "inprogress",
-    "ideas-cloudflare-log-source": "inprogress",
-    "ideas-task-lifecycle-hooks": "inprogress",
     "ideas-agent-output-caching": "inprogress",
-    "cross-platform-notification-hub": "inprogress"
+    "ideas-task-lifecycle-hooks": "inprogress",
+    "otel-metrics-export": "inprogress",
+    "ideas-cloudflare-log-source": "inprogress",
+    "cross-platform-notification-hub": "inprogress",
+    "ideas-dependency-pruning": "inprogress",
+    "adaptive-prompt-optimizer": "inprogress",
+    "ideas-html-report": "inprogress",
+    "natural-language-task-query": "inprogress",
+    "ideas-error-classification": "inprogress",
+    "visual-workflow-exporter": "inprogress",
+    "llm-cost-optimizer-routing": "inprogress",
+    "mcp-server-integration": "inprogress"
   }
 }
