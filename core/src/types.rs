@@ -101,7 +101,7 @@ pub enum TaskKind {
 ///
 /// When absent in a JSON task file the field defaults to [`AgentRole::Implementer`]
 /// so that pre-existing task files continue to work without modification.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 #[serde(rename_all = "snake_case")]
 pub enum AgentRole {

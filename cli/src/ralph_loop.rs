@@ -522,6 +522,69 @@ impl RalphLoop {
         }
     }
 
+    /// Detect and close redundant pending tasks.
+    ///
+    /// Two pending tasks are considered redundant when they share the same
+    /// normalised `(description, role)` pair.  For each group the first
+    /// occurrence is kept; extras are marked `Completed` and any associated
+    /// GitHub issues are closed.  The updated task list is persisted to disk
+    /// so the deduplication survives restarts.
+    async fn deduplicate_pending_tasks(&mut self) {
+        let duplicates =
+            wreck_it_core::task_manager::find_redundant_pending_tasks(&self.state.tasks);
+
+        if duplicates.is_empty() {
+            return;
+        }
+
+        self.state.add_log(format!(
+            "Issue cleanup: found {} redundant pending task(s)",
+            duplicates.len()
+        ));
+
+        let gh_client = self.make_github_client();
+
+        for &idx in &duplicates {
+            let task_id = self.state.tasks[idx].id.clone();
+            self.state.tasks[idx].status = TaskStatus::Completed;
+
+            self.state
+                .add_log(format!("Issue cleanup: closed redundant task {task_id}"));
+
+            // Close associated GitHub issue if one exists.
+            if let Some(ref client) = gh_client {
+                let issue_number = self
+                    .github_issue_numbers
+                    .remove(&task_id)
+                    .map(|n| std::future::ready(Some(n)));
+
+                let resolved = match issue_number {
+                    Some(fut) => fut.await,
+                    None => client.find_open_issue(&task_id).await,
+                };
+
+                if let Some(num) = resolved {
+                    if let Err(e) = client.close_issue(num).await {
+                        self.state.add_log(format!(
+                            "Warning: failed to close GitHub Issue #{num} for redundant task {task_id}: {e}"
+                        ));
+                    } else {
+                        self.state.add_log(format!(
+                            "Issue cleanup: closed GitHub Issue #{num} for redundant task {task_id}"
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Persist the updated statuses so the dedup survives restarts.
+        if let Err(e) = save_tasks(&self.config.task_file, &self.state.tasks) {
+            self.state.add_log(format!(
+                "Warning: failed to persist deduplicated task list: {e}"
+            ));
+        }
+    }
+
     /// Build [`TaskSpanAttributes`] for a task before execution.
     ///
     /// Token counts and cost are left at zero here; they are filled in after
@@ -656,6 +719,11 @@ impl RalphLoop {
                 }
             }
         }
+
+        // Detect and close redundant pending tasks that share the same
+        // normalised description and role.  This prevents duplicate work
+        // and closes any associated GitHub issues.
+        self.deduplicate_pending_tasks().await;
 
         // Check if all tasks are complete
         if self.state.all_tasks_complete() {

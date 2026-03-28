@@ -88,6 +88,46 @@ fn dfs_has_cycle<'a>(
     false
 }
 
+/// Normalise a task description for redundancy comparison.
+///
+/// Trims leading/trailing whitespace, collapses internal whitespace runs to a
+/// single space, and lowercases the result.
+pub fn normalize_description(desc: &str) -> String {
+    desc.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// Identify indices of redundant **pending** tasks.
+///
+/// Two pending tasks are considered redundant when they share the same
+/// normalised `(description, role)` pair.  For each group of duplicates the
+/// first occurrence (by index) is kept; the remaining indices are returned so
+/// the caller can mark them as completed and close associated issues.
+pub fn find_redundant_pending_tasks(tasks: &[Task]) -> Vec<usize> {
+    let mut seen: HashMap<(String, AgentRole), usize> = HashMap::new();
+    let mut duplicates: Vec<usize> = Vec::new();
+
+    for (idx, task) in tasks.iter().enumerate() {
+        if task.status != TaskStatus::Pending {
+            continue;
+        }
+
+        let key = (normalize_description(&task.description), task.role);
+        match seen.entry(key) {
+            std::collections::hash_map::Entry::Occupied(_) => {
+                duplicates.push(idx);
+            }
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(idx);
+            }
+        }
+    }
+
+    duplicates
+}
+
 /// Validate and append a new task to an in-memory task list.
 ///
 /// Safeguards:
@@ -293,5 +333,109 @@ mod tests {
         let result = validate_and_append_task(&mut tasks, extra);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("task limit"));
+    }
+
+    // ---- normalize_description tests ----
+
+    #[test]
+    fn normalize_description_trims_and_lowercases() {
+        assert_eq!(normalize_description("  Hello WORLD  "), "hello world");
+    }
+
+    #[test]
+    fn normalize_description_collapses_whitespace() {
+        assert_eq!(
+            normalize_description("  multiple   spaces\ttab\nnewline  "),
+            "multiple spaces tab newline"
+        );
+    }
+
+    #[test]
+    fn normalize_description_empty_string() {
+        assert_eq!(normalize_description(""), "");
+    }
+
+    // ---- find_redundant_pending_tasks tests ----
+
+    #[test]
+    fn find_redundant_no_duplicates() {
+        let tasks = vec![
+            make_task("a", TaskStatus::Pending, vec![]),
+            make_task("b", TaskStatus::Pending, vec![]),
+        ];
+        assert!(find_redundant_pending_tasks(&tasks).is_empty());
+    }
+
+    #[test]
+    fn find_redundant_detects_exact_duplicate_descriptions() {
+        let mut t1 = make_task("a", TaskStatus::Pending, vec![]);
+        t1.description = "implement caching".to_string();
+        let mut t2 = make_task("b", TaskStatus::Pending, vec![]);
+        t2.description = "implement caching".to_string();
+        let tasks = vec![t1, t2];
+
+        let dupes = find_redundant_pending_tasks(&tasks);
+        assert_eq!(dupes, vec![1]); // keeps index 0, marks index 1
+    }
+
+    #[test]
+    fn find_redundant_normalises_before_comparing() {
+        let mut t1 = make_task("a", TaskStatus::Pending, vec![]);
+        t1.description = "  Implement  Caching ".to_string();
+        let mut t2 = make_task("b", TaskStatus::Pending, vec![]);
+        t2.description = "implement caching".to_string();
+        let tasks = vec![t1, t2];
+
+        let dupes = find_redundant_pending_tasks(&tasks);
+        assert_eq!(dupes, vec![1]);
+    }
+
+    #[test]
+    fn find_redundant_ignores_non_pending_tasks() {
+        let mut t1 = make_task("a", TaskStatus::Completed, vec![]);
+        t1.description = "same description".to_string();
+        let mut t2 = make_task("b", TaskStatus::Pending, vec![]);
+        t2.description = "same description".to_string();
+        let mut t3 = make_task("c", TaskStatus::Pending, vec![]);
+        t3.description = "same description".to_string();
+        let tasks = vec![t1, t2, t3];
+
+        // t1 is Completed so ignored; t2 is kept; t3 is the duplicate
+        let dupes = find_redundant_pending_tasks(&tasks);
+        assert_eq!(dupes, vec![2]);
+    }
+
+    #[test]
+    fn find_redundant_different_roles_not_redundant() {
+        let mut t1 = make_task("a", TaskStatus::Pending, vec![]);
+        t1.description = "implement caching".to_string();
+        t1.role = AgentRole::Implementer;
+        let mut t2 = make_task("b", TaskStatus::Pending, vec![]);
+        t2.description = "implement caching".to_string();
+        t2.role = AgentRole::Evaluator;
+        let tasks = vec![t1, t2];
+
+        assert!(find_redundant_pending_tasks(&tasks).is_empty());
+    }
+
+    #[test]
+    fn find_redundant_multiple_groups() {
+        let mut tasks = Vec::new();
+        for (id, desc) in [
+            ("a", "foo"),
+            ("b", "bar"),
+            ("c", "foo"),
+            ("d", "bar"),
+            ("e", "baz"),
+        ] {
+            let mut t = make_task(id, TaskStatus::Pending, vec![]);
+            t.description = desc.to_string();
+            tasks.push(t);
+        }
+
+        let mut dupes = find_redundant_pending_tasks(&tasks);
+        dupes.sort();
+        // "foo" group: keeps 0, marks 2; "bar" group: keeps 1, marks 3
+        assert_eq!(dupes, vec![2, 3]);
     }
 }
