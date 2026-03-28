@@ -247,18 +247,18 @@
     "iteration 42: triggered cloud agent for task eval-semantic-evaluation (issue #748)"
   ],
   "task_statuses": {
-    "cross-platform-notification-hub": "inprogress",
-    "mcp-server-integration": "inprogress",
     "ideas-cloudflare-log-source": "inprogress",
-    "ideas-error-classification": "inprogress",
-    "otel-metrics-export": "inprogress",
     "ideas-agent-output-caching": "inprogress",
+    "otel-metrics-export": "inprogress",
+    "mcp-server-integration": "inprogress",
     "adaptive-prompt-optimizer": "inprogress",
     "llm-cost-optimizer-routing": "inprogress",
     "ideas-task-lifecycle-hooks": "inprogress",
+    "ideas-error-classification": "inprogress",
     "natural-language-task-query": "inprogress",
     "ideas-dependency-pruning": "inprogress",
     "visual-workflow-exporter": "inprogress",
-    "ideas-html-report": "inprogress"
+    "ideas-html-report": "inprogress",
+    "cross-platform-notification-hub": "inprogress"
   }
 }
