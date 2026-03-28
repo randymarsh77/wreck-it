@@ -52,6 +52,16 @@ struct CreateIssueResponse {
     pub number: u64,
 }
 
+#[derive(Debug, Deserialize)]
+struct SearchIssuesResponse {
+    pub items: Vec<SearchIssueItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchIssueItem {
+    pub number: u64,
+}
+
 #[derive(Debug, Serialize)]
 struct UpdateIssueRequest<'a> {
     state: &'a str,
@@ -163,6 +173,62 @@ impl GitHubIssueClient {
             .context("Failed to parse create-issue response from GitHub")?;
 
         Ok(created.number)
+    }
+
+    /// Search for an existing **open** GitHub Issue created by wreck-it for the
+    /// given `task_id`.
+    ///
+    /// Uses the GitHub Search API to look for open issues in the repository
+    /// that carry the `wreck-it` label and whose title contains the task id
+    /// marker (e.g. `[my-task]`).
+    ///
+    /// Returns `Some(issue_number)` when a matching issue is found, `None`
+    /// otherwise.  Search failures are logged as warnings and treated as "not
+    /// found" so the caller can fall back to creating a new issue.
+    pub async fn find_open_issue(&self, task_id: &str) -> Option<u64> {
+        // Sanitize task_id: strip characters that have special meaning in
+        // GitHub search syntax so they cannot alter the query semantics.
+        let sanitized: String = task_id
+            .chars()
+            .filter(|c| !matches!(c, '"' | '\\' | ':'))
+            .collect();
+        let query = format!(
+            "repo:{} is:issue is:open label:{} \"[{}]\" in:title",
+            self.repo, WRECK_IT_LABEL, sanitized,
+        );
+        let url = format!("{}/search/issues", self.api_base);
+
+        let resp = match http_client()
+            .get(&url)
+            .query(&[("per_page", "1"), ("q", &query)])
+            .bearer_auth(&self.token)
+            .header("User-Agent", "wreck-it")
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("GitHub issue search request failed: {e}");
+                return None;
+            }
+        };
+
+        if !resp.status().is_success() {
+            warn!(
+                "GitHub issue search returned non-success status ({})",
+                resp.status(),
+            );
+            return None;
+        }
+
+        match resp.json::<SearchIssuesResponse>().await {
+            Ok(body) => body.items.first().map(|item| item.number),
+            Err(e) => {
+                warn!("Failed to parse issue search response: {e}");
+                None
+            }
+        }
     }
 
     /// Close an existing GitHub Issue by number.
@@ -588,6 +654,58 @@ mod tests {
         assert!(
             err_msg.contains("401"),
             "error message should mention the 401 status, got: {err_msg}"
+        );
+    }
+
+    // ── find_open_issue ──────────────────────────────────────────────────────
+
+    /// (5) find_open_issue returns the issue number when a matching open issue
+    ///     exists in the search results.
+    #[tokio::test]
+    async fn find_open_issue_returns_existing_issue_number() {
+        let resp_body = r#"{"total_count": 1, "items": [{"number": 99}]}"#;
+        let (base_url, req_fut) = mock_github_server("HTTP/1.1 200 OK", resp_body).await;
+
+        let client = GitHubIssueClient::new_with_base_url("owner/repo", "fake-token", &base_url);
+
+        let (result, raw_req) = tokio::join!(client.find_open_issue("impl-auth"), req_fut);
+
+        assert_eq!(result, Some(99), "should return the existing issue number");
+
+        // Verify that the search request targets /search/issues.
+        let req_line = request_line(&raw_req);
+        assert!(
+            req_line.starts_with("GET /search/issues"),
+            "expected GET /search/issues, got: {req_line}"
+        );
+    }
+
+    /// (6) find_open_issue returns None when there are no matching issues.
+    #[tokio::test]
+    async fn find_open_issue_returns_none_when_no_match() {
+        let resp_body = r#"{"total_count": 0, "items": []}"#;
+        let (base_url, req_fut) = mock_github_server("HTTP/1.1 200 OK", resp_body).await;
+
+        let client = GitHubIssueClient::new_with_base_url("owner/repo", "fake-token", &base_url);
+
+        let (result, _raw_req) = tokio::join!(client.find_open_issue("no-such-task"), req_fut);
+
+        assert_eq!(result, None, "should return None when no issues match");
+    }
+
+    /// (7) find_open_issue returns None (without panicking) on API errors.
+    #[tokio::test]
+    async fn find_open_issue_returns_none_on_api_error() {
+        let resp_body = r#"{"message": "Requires authentication"}"#;
+        let (base_url, req_fut) = mock_github_server("HTTP/1.1 401 Unauthorized", resp_body).await;
+
+        let client = GitHubIssueClient::new_with_base_url("owner/repo", "bad-token", &base_url);
+
+        let (result, _raw_req) = tokio::join!(client.find_open_issue("task-1"), req_fut);
+
+        assert_eq!(
+            result, None,
+            "should return None on API error so callers can fall back to creating"
         );
     }
 }

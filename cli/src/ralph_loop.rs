@@ -803,19 +803,30 @@ impl RalphLoop {
         .await;
 
         // Open a GitHub Issue for this task when the integration is enabled.
-        if let Some(gh_client) = self.make_github_client() {
-            match gh_client.create_issue(&task_id, &task_desc).await {
-                Ok(issue_number) => {
-                    self.github_issue_numbers
-                        .insert(task_id.clone(), issue_number);
+        // Skip if we already know an issue number (dedup within a run) or if a
+        // matching open issue already exists on GitHub (dedup across restarts).
+        if !self.github_issue_numbers.contains_key(&task_id) {
+            if let Some(gh_client) = self.make_github_client() {
+                if let Some(existing) = gh_client.find_open_issue(&task_id).await {
+                    self.github_issue_numbers.insert(task_id.clone(), existing);
                     self.state.add_log(format!(
-                        "GitHub Issue #{issue_number} opened for task {task_id}"
+                        "Reusing existing GitHub Issue #{existing} for task {task_id}"
                     ));
-                }
-                Err(e) => {
-                    self.state.add_log(format!(
-                        "Warning: failed to open GitHub Issue for task {task_id}: {e}"
-                    ));
+                } else {
+                    match gh_client.create_issue(&task_id, &task_desc).await {
+                        Ok(issue_number) => {
+                            self.github_issue_numbers
+                                .insert(task_id.clone(), issue_number);
+                            self.state.add_log(format!(
+                                "GitHub Issue #{issue_number} opened for task {task_id}"
+                            ));
+                        }
+                        Err(e) => {
+                            self.state.add_log(format!(
+                                "Warning: failed to open GitHub Issue for task {task_id}: {e}"
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -1643,22 +1654,34 @@ impl RalphLoop {
         }
 
         // Open GitHub Issues for each parallel task when the integration is enabled.
+        // Skip tasks that already have a tracked issue number (dedup within a run)
+        // or that have a matching open issue on GitHub (dedup across restarts).
         for &idx in &eligible_indices {
             let task_id = self.state.tasks[idx].id.clone();
             let task_desc = self.state.tasks[idx].description.clone();
+            if self.github_issue_numbers.contains_key(&task_id) {
+                continue;
+            }
             if let Some(gh_client) = self.make_github_client() {
-                match gh_client.create_issue(&task_id, &task_desc).await {
-                    Ok(issue_number) => {
-                        self.github_issue_numbers
-                            .insert(task_id.clone(), issue_number);
-                        self.state.add_log(format!(
-                            "GitHub Issue #{issue_number} opened for task {task_id}"
-                        ));
-                    }
-                    Err(e) => {
-                        self.state.add_log(format!(
-                            "Warning: failed to open GitHub Issue for task {task_id}: {e}"
-                        ));
+                if let Some(existing) = gh_client.find_open_issue(&task_id).await {
+                    self.github_issue_numbers.insert(task_id.clone(), existing);
+                    self.state.add_log(format!(
+                        "Reusing existing GitHub Issue #{existing} for task {task_id}"
+                    ));
+                } else {
+                    match gh_client.create_issue(&task_id, &task_desc).await {
+                        Ok(issue_number) => {
+                            self.github_issue_numbers
+                                .insert(task_id.clone(), issue_number);
+                            self.state.add_log(format!(
+                                "GitHub Issue #{issue_number} opened for task {task_id}"
+                            ));
+                        }
+                        Err(e) => {
+                            self.state.add_log(format!(
+                                "Warning: failed to open GitHub Issue for task {task_id}: {e}"
+                            ));
+                        }
                     }
                 }
             }
