@@ -85,7 +85,18 @@ jobs:
           STATE_BRANCH="wreck-it-state"
           if git rev-parse --verify "refs/heads/${STATE_BRANCH}" >/dev/null 2>&1; then
             echo "Pushing state branch '${STATE_BRANCH}'"
-            git push origin "${STATE_BRANCH}"
+            # Fetch the latest remote state so a concurrent run's push does not
+            # cause a non-fast-forward rejection.  Merge remote changes if they
+            # exist, then push.  If any step fails (e.g. diverged histories),
+            # emit a warning rather than failing the workflow – the next run
+            # will re-sync state.
+            git fetch origin "${STATE_BRANCH}" 2>/dev/null \
+              || echo "[wreck-it] warning: failed to fetch state branch — may be a network issue or new branch"
+            if git rev-parse --verify "refs/remotes/origin/${STATE_BRANCH}" >/dev/null 2>&1; then
+              git merge --ff-only "origin/${STATE_BRANCH}" 2>/dev/null \
+                || echo "[wreck-it] warning: state branch histories have diverged — pushing local state; manual reconciliation may be needed"
+            fi
+            git push origin "${STATE_BRANCH}" || echo "[wreck-it] warning: failed to push state branch — state will sync on next run"
           else
             echo "State branch '${STATE_BRANCH}' does not exist (nothing to push)"
           fi

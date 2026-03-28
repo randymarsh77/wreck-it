@@ -274,6 +274,7 @@ Assign agent roles to tasks for specialised handling:
 | `ideas` | Research, explore, and generate follow-up tasks |
 | `implementer` (default) | Write code and make changes |
 | `evaluator` | Review and validate completed work |
+| `security_gate` | Run `cargo audit` / `npm audit` and persist findings as an artefact |
 
 ### Artefact Chaining
 
@@ -510,6 +511,90 @@ github_repo           = "owner/repo"
 When enabled:
 - A new issue titled `[wreck-it] <task-id>: <description>` is opened when a task moves to `InProgress`.
 - The issue is closed automatically when the task reaches `Completed` or `Failed`.
+
+### Security Gate
+
+A `security_gate` task automatically runs a security audit scanner — `cargo audit` for Rust projects and `npm audit` for Node.js projects — without invoking the LLM:
+
+```json
+[
+  {
+    "id": "security-scan",
+    "description": "Run a security audit and surface any critical vulnerabilities",
+    "status": "pending",
+    "role": "security_gate",
+    "outputs": [{ "kind": "json", "name": "findings", "path": ".wreck-it/security-findings.json" }]
+  },
+  {
+    "id": "fix-vulns",
+    "description": "Review .wreck-it/security-findings.json and remediate critical/high vulnerabilities",
+    "status": "pending",
+    "depends_on": ["security-scan"],
+    "inputs": ["security-scan/findings"]
+  }
+]
+```
+
+The gate **fails** (marking the task failed) when critical or high severity vulnerabilities are found, giving downstream implementer tasks a concrete artefact to work from.
+
+### HTML Run Report
+
+Generate a self-contained HTML summary of any run:
+
+```bash
+wreck-it report
+wreck-it report --task-file .wreck-it/my-tasks.json --output report.html
+```
+
+The report includes run statistics (total/completed/failed tasks, estimated cost, token totals), a per-task timeline table, the dependency graph as a Mermaid diagram, and a collapsible section for failed tasks with error excerpts.
+
+### MCP Server
+
+wreck-it can act as a [Model Context Protocol](https://spec.modelcontextprotocol.io/) server so AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor, etc.) can manage your task pipeline directly:
+
+```bash
+wreck-it mcp --task-file tasks.json --work-dir .
+```
+
+Add to your Claude Desktop `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "wreck-it": {
+      "command": "wreck-it",
+      "args": ["mcp", "--task-file", "/abs/path/to/tasks.json", "--work-dir", "/abs/path/to/project"]
+    }
+  }
+}
+```
+
+The server exposes five tools: `list_tasks`, `add_task`, `update_task_status`, `read_artefact`, and `trigger_iteration`.
+
+### Fix Failing Checks (Unstuck)
+
+Use `wreck-it unstuck` to automatically handle stuck PRs and broken builds:
+
+```bash
+wreck-it unstuck
+```
+
+This scans open PRs and the default branch for failing CI checks. For PRs it comments `@copilot` to request fixes; for the default branch it opens a GitHub issue and assigns a coding agent to fix the build. Requires `GITHUB_TOKEN` with `repo` scope.
+
+### Resolve Merge Conflicts
+
+Use `wreck-it merge` to automatically resolve merge conflicts in open PRs:
+
+```bash
+# Default: use the Copilot CLI for best results
+wreck-it merge
+
+# Post a @copilot comment when the CLI is unavailable
+wreck-it merge --backend cloud_agent
+
+# Merge locally without AI assistance
+wreck-it merge --backend cli
+```
 
 ## Next Steps
 
