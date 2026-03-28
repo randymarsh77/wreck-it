@@ -224,7 +224,13 @@ pub fn collect_report_data(task_file: &Path, work_dir: Option<&Path>) -> Result<
     let tasks = load_tasks(task_file)
         .with_context(|| format!("Failed to load task file: {}", task_file.display()))?;
 
-    let mermaid_graph = generate_mermaid(&tasks);
+    // Only generate the Mermaid graph when there are tasks to show; an empty
+    // task list would produce a bare "flowchart TD" header that is not useful.
+    let mermaid_graph = if tasks.is_empty() {
+        String::new()
+    } else {
+        generate_mermaid(&tasks)
+    };
 
     // Build per-task rows, loading provenance when a work dir is provided.
     let mut task_rows: Vec<TaskRow> = Vec::with_capacity(tasks.len());
@@ -860,6 +866,14 @@ mod tests {
         let data = collect_report_data(Path::new("/nonexistent/tasks.json"), None)
             .expect("should succeed");
         assert_eq!(data.total_tasks, 0);
+        // An empty task list must not produce a mermaid graph string – the
+        // bare "flowchart TD" header is not useful and the section should be
+        // omitted from the rendered HTML report.
+        assert!(
+            data.mermaid_graph.is_empty(),
+            "mermaid_graph should be empty for an empty task list, got: {:?}",
+            data.mermaid_graph
+        );
     }
 
     #[test]
@@ -882,6 +896,29 @@ mod tests {
         assert_eq!(data.failed_count, 1);
         assert_eq!(data.pending_count, 0);
         assert_eq!(data.task_rows.len(), 2);
+        // Non-empty task list should produce a non-empty mermaid graph.
+        assert!(
+            !data.mermaid_graph.is_empty(),
+            "mermaid_graph should be non-empty for a non-empty task list"
+        );
+    }
+
+    #[test]
+    fn collect_report_data_empty_task_list_produces_no_mermaid_in_html() {
+        // When task list is empty, collect_report_data must set mermaid_graph
+        // to an empty string so that generate_html omits the Dependency Graph
+        // section entirely (rather than rendering a bare "flowchart TD" header).
+        let data = collect_report_data(Path::new("/nonexistent/tasks.json"), None)
+            .expect("collect_report_data failed");
+        let html = generate_html(&data);
+        assert!(
+            !html.contains("Dependency Graph"),
+            "Dependency Graph section must be absent when task list is empty"
+        );
+        assert!(
+            !html.contains("class=\"mermaid\""),
+            "mermaid div must be absent when task list is empty"
+        );
     }
 
     // ── generate_html – structural requirements ──────────────────────────────
