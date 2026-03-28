@@ -186,9 +186,15 @@ impl GitHubIssueClient {
     /// otherwise.  Search failures are logged as warnings and treated as "not
     /// found" so the caller can fall back to creating a new issue.
     pub async fn find_open_issue(&self, task_id: &str) -> Option<u64> {
+        // Sanitize task_id: strip characters that have special meaning in
+        // GitHub search syntax so they cannot alter the query semantics.
+        let sanitized: String = task_id
+            .chars()
+            .filter(|c| !matches!(c, '"' | '\\' | ':'))
+            .collect();
         let query = format!(
-            "repo:{} is:issue is:open label:{} [{}] in:title",
-            self.repo, WRECK_IT_LABEL, task_id,
+            "repo:{} is:issue is:open label:{} \"[{}]\" in:title",
+            self.repo, WRECK_IT_LABEL, sanitized,
         );
         let url = format!("{}/search/issues", self.api_base);
 
