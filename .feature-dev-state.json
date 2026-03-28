@@ -1,8 +1,8 @@
 {
   "phase": "agent_working",
-  "iteration": 43,
-  "current_task_id": "llm-cost-optimizer-routing",
-  "issue_number": 752,
+  "iteration": 44,
+  "current_task_id": "visual-workflow-exporter",
+  "issue_number": 753,
   "last_prompt": "Evaluate the semantic evaluation feature end-to-end. Create a minimal task with `evaluation: { mode: \"semantic\" }` and a known git diff fixture, then run the unit-level evaluation function with a stubbed agent to verify verdict parsing and fallback logic. Confirm no regressions by running `cargo test --lib`. Review `cli/src/semantic_eval.rs` for prompt quality: does it provide enough context (diff, task description, criteria)? Does the verdict rationale get logged and displayed correctly? Write a brief evaluation summary as a comment block at the top of `cli/src/semantic_eval.rs` noting results, limitations (e.g. large diffs exceeding context window), and recommended follow-up work.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -247,11 +247,12 @@
     "iteration 42: triggered cloud agent for task eval-semantic-evaluation (issue #748)"
   ],
   "task_statuses": {
-    "ideas-error-classification": "inprogress",
-    "otel-metrics-export": "inprogress",
+    "adaptive-prompt-optimizer": "inprogress",
+    "visual-workflow-exporter": "inprogress",
     "mcp-server-integration": "inprogress",
+    "otel-metrics-export": "inprogress",
     "llm-cost-optimizer-routing": "inprogress",
     "ideas-html-report": "inprogress",
-    "adaptive-prompt-optimizer": "inprogress"
+    "ideas-error-classification": "inprogress"
   }
 }
