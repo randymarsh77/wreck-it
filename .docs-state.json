@@ -1,5 +1,5 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_trigger",
   "iteration": 5,
   "current_task_id": "docs-review",
   "issue_number": 663,
@@ -102,7 +102,8 @@
     "iteration 4: enabled auto-merge for PR #165",
     "iteration 4: enabled auto-merge for PR #165",
     "iteration 4: enabled auto-merge for PR #165",
-    "advance: merged PR #165"
+    "advance: merged PR #165",
+    "iteration 5: agent completed without PR for task Some(\"docs-review\")"
   ],
   "task_statuses": {
     "docs-review": "inprogress"
