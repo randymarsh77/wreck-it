@@ -255,18 +255,18 @@
     "iteration 54: triggered cloud agent for task mcp-server-integration (issue #850)"
   ],
   "task_statuses": {
-    "llm-cost-optimizer-routing": "inprogress",
-    "ideas-dependency-pruning": "inprogress",
-    "ideas-error-classification": "inprogress",
-    "ideas-cloudflare-log-source": "inprogress",
-    "natural-language-task-query": "inprogress",
-    "otel-metrics-export": "inprogress",
-    "ideas-task-lifecycle-hooks": "inprogress",
-    "visual-workflow-exporter": "inprogress",
-    "ideas-agent-output-caching": "inprogress",
     "cross-platform-notification-hub": "inprogress",
     "adaptive-prompt-optimizer": "inprogress",
+    "natural-language-task-query": "inprogress",
     "mcp-server-integration": "inprogress",
-    "ideas-html-report": "inprogress"
+    "ideas-html-report": "inprogress",
+    "ideas-error-classification": "inprogress",
+    "ideas-cloudflare-log-source": "inprogress",
+    "otel-metrics-export": "inprogress",
+    "visual-workflow-exporter": "inprogress",
+    "ideas-agent-output-caching": "inprogress",
+    "ideas-task-lifecycle-hooks": "inprogress",
+    "llm-cost-optimizer-routing": "inprogress",
+    "ideas-dependency-pruning": "inprogress"
   }
 }
