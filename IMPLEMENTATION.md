@@ -40,10 +40,17 @@ A TUI agent harness implementing the Ralph Wiggum loop pattern for automated mul
    - Command-line argument parsing with clap
    - `run` command for executing the loop
    - `init` command for creating sample task files
-   - `plan` command for LLM-powered task generation
+   - `plan` command for LLM-powered task generation (local or cloud)
    - `provenance` command for inspecting the execution audit trail
    - `export-openclaw` command for exporting the full run as an openclaw JSON document
    - `template list/apply` commands for built-in project templates
+   - `install` command for bootstrapping a project with the engineering-team setup
+   - `graph` command for exporting the task dependency graph (Mermaid / DOT)
+   - `report` command for generating a self-contained HTML run-summary report
+   - `mcp` command for starting a Model Context Protocol JSON-RPC server
+   - `unstuck` command for fixing failing CI checks on open PRs and the default branch
+   - `merge` command for resolving merge conflicts in open PRs
+   - `tasks list/add/set-status/validate` sub-commands for task file management
    - Environment variable support
 
 6. **Project Management API** (`cli/src/project_api.rs`)
@@ -153,26 +160,55 @@ wreck-it/
 │       ├── agent.rs           # Model-provider interface (GitHub Models / Copilot / Llama)
 │       ├── agent_memory.rs    # Per-task agent memory (.wreck-it-memory/)
 │       ├── artefact_store.rs  # Typed artefact persistence
+│       ├── changelog_generator.rs # Automated changelog generation
 │       ├── cli.rs             # Command-line interface
 │       ├── cloud_agent.rs     # Cloud coding-agent client
 │       ├── config_manager.rs  # .wreck-it/config.toml management
+│       ├── cost_tracker.rs    # Cumulative API cost tracking
+│       ├── coverage_enforcer.rs # Test-coverage guardian
+│       ├── error_classifier.rs # Error categorisation for re-planning hints
+│       ├── fan_out.rs         # Fan-out / fan-in sub-task spawning
 │       ├── ffi.rs             # C-ABI FFI layer (Swift / native consumers)
 │       ├── gastown_client.rs  # Gastown cloud runtime integration
+│       ├── github_auth.rs     # GitHub App / PAT authentication helpers
+│       ├── github_client.rs   # GitHub REST + GraphQL API client
+│       ├── graph.rs           # Dependency graph export (Mermaid / DOT)
 │       ├── headless.rs        # Headless state machine
+│       ├── headless_config.rs # Headless runner configuration
+│       ├── headless_state.rs  # Headless persistent state (de)serialisation
+│       ├── install.rs         # `wreck-it install` bootstrapper
 │       ├── integration_eval.rs# End-to-end acceptance tests
+│       ├── interface_change_detector.rs # Public-API diff detection
+│       ├── kanban/            # Kanban board integration (Linear/JIRA/Trello)
+│       ├── lib.rs             # Crate entry point
+│       ├── log_source/        # Log platform ingest (Seq / Cloudflare)
 │       ├── main.rs            # Entry point
+│       ├── mcp_server.rs      # MCP JSON-RPC 2.0 stdio server
+│       ├── merge.rs           # Merge-conflict resolution command
+│       ├── notifier.rs        # Webhook / GitHub Issues notifications
 │       ├── openclaw.rs        # Openclaw export
+│       ├── otel.rs            # OTLP tracing (opentelemetry 0.27)
+│       ├── plan_migration.rs  # Cloud-agent plan-file migration
+│       ├── plan_wizard.rs     # Interactive plan wizard
 │       ├── planner.rs         # LLM-powered task planner
 │       ├── project_api.rs     # Epics & sub-tasks project management API
+│       ├── prompt_loader.rs   # Per-role / per-task prompt template loader
+│       ├── prompt_optimizer.rs# Prompt quality optimisation helpers
 │       ├── provenance.rs      # Execution audit trail
 │       ├── ralph_loop.rs      # Core loop implementation
 │       ├── replanner.rs       # Adaptive re-planner
 │       ├── repo_config.rs     # Repository config types
+│       ├── report.rs          # HTML run-summary report generator
+│       ├── security_gate.rs   # Security audit runner (cargo/npm audit)
+│       ├── semantic_eval.rs   # Semantic similarity evaluation helpers
+│       ├── splash.rs          # ASCII splash screen
 │       ├── state_worktree.rs  # Git state worktree management
+│       ├── task_cli.rs        # `wreck-it tasks` sub-commands
 │       ├── task_manager.rs    # Task persistence and scheduling
 │       ├── templates.rs       # Built-in project templates
 │       ├── tui.rs             # Terminal UI
-│       └── types.rs           # Core types
+│       ├── types.rs           # Core types
+│       └── unstuck.rs         # Unstuck helper (failing-checks fixer)
 ├── worker/                 # Cloudflare Worker (WASM)
 │   ├── Cargo.toml
 │   ├── README.md
