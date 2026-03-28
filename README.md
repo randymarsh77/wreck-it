@@ -28,7 +28,7 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 🧪 **Automatic Testing**: Runs tests after each task execution (cargo, npm, pytest)
 - 💾 **Git Integration**: Automatically commits successful changes
 - 🔒 **Safety Limits**: Configurable max iterations to prevent runaway costs
-- 🎭 **Role-Based Agents**: Assign `ideas`, `implementer`, or `evaluator` roles to tasks
+- 🎭 **Role-Based Agents**: Assign `ideas`, `implementer`, `evaluator`, or `security_gate` roles to tasks
 - 🔁 **Critic-Actor Reflection**: Optional critic feedback loop to refine agent output before tests
 - 🛠️ **Adaptive Re-Planning**: Automatically restructure tasks after consecutive failures
 - 📦 **Artefact Store**: Chain task outputs as inputs to downstream tasks
@@ -43,6 +43,15 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 💡 **Per-Task Agent Memory**: Agents learn from prior attempts via persistent per-task memory files
 - 🔔 **Webhook Notifications**: HTTP POST alerts on task status transitions (`--notify-webhook <URL>`); failures are logged as warnings and never abort the loop
 - 🐛 **GitHub Issues Integration**: Automatically open a GitHub Issue when a task moves to `InProgress` and close it when the task reaches `Completed` or `Failed` (`--github-issues --github-repo owner/repo`)
+- 🔀 **Fan-Out / Fan-In**: `ideas` tasks can emit a `SubTaskManifest` artefact to dynamically spawn parallel sub-tasks with an optional fan-in aggregator
+- 🔒 **Security Gate**: Dedicated `security_gate` role runs `cargo audit` or `npm audit` automatically and persists findings as an artefact for downstream tasks
+- 📡 **OTEL Tracing**: Export task lifecycle spans to any OTLP-compatible collector (Jaeger, Honeycomb, Grafana Cloud) via the `[otel]` config section
+- 📋 **Kanban Integration**: Sync task status with Linear, JIRA, or Trello boards via the `kanban_provider` config option
+- 📊 **Log Source Ingest**: Pull error/exception log entries from Seq (or Cloudflare Workers) and automatically create wreck-it tasks to triage and fix them
+- 📈 **HTML Run Reports**: Generate a self-contained HTML summary of any run (`wreck-it report`) with task timeline, dependency graph, and cost breakdown
+- 🔌 **MCP Server**: Expose the task pipeline over the Model Context Protocol so AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can manage tasks directly
+- 🔧 **Unstuck Helper**: Scan open PRs and the default branch for failing CI checks and automatically comment `@copilot` to request fixes (`wreck-it unstuck`)
+- 🔗 **Merge Conflict Resolution**: Scan open PRs for merge conflicts and resolve them via the Copilot CLI or by posting a `@copilot` comment (`wreck-it merge`)
 
 ## Installation
 
@@ -120,6 +129,10 @@ Options:
   When the tracked spend reaches this threshold the loop aborts before starting the next task.
   Leave unset to impose no limit. Only costs reported by the GitHub Models HTTP path are metered
   (Copilot SDK and Llama calls contribute $0.00 to the estimate).
+- `--budget-strategy <greedy|critical-path|conservative>`: Task prioritisation strategy when `--max-cost` is set.
+  `greedy` maximises completed tasks by strongly preferring low-complexity work; `critical-path` (default) runs highest-priority tasks first; `conservative` behaves like `critical-path` until the remaining budget drops below 20% then switches to `greedy`.
+- `--prompt-dir <PATH>`: Directory containing per-role and per-task system-prompt template files (e.g. `ideas.md`, `implementer.md`, `impl-my-task.md`). Overrides the `prompt_dir` value from the ralph config.
+- `--max-autopilot-continues <NUM>`: Maximum autonomous continuation steps when using `--model-provider copilot-autopilot`. Maps to Copilot CLI's `--max-autopilot-continues` flag.
 
 **Note**: When using `--model-provider copilot`, the Copilot CLI must be authenticated and available in your PATH. When using `--model-provider github-models`, set `GITHUB_TOKEN` in your environment.
 
@@ -197,6 +210,74 @@ Options:
 - `-f, --format <mermaid|dot>`: Output format (default: `mermaid`)
 - `-o, --output <PATH>`: Write output to file instead of stdout
 
+### Generate an HTML Run Report
+
+```bash
+wreck-it report
+wreck-it report --task-file .wreck-it/my-tasks.json --output report.html
+```
+
+Generates a self-contained HTML page with run statistics (task counts, estimated cost, token totals), a per-task timeline table, the dependency graph rendered as a Mermaid diagram, and a collapsible section for failed tasks showing error excerpts.
+
+Options:
+- `-t, --task-file <PATH>`: Task file to read (default: `tasks.json`)
+- `-w, --work-dir <PATH>`: Directory containing `.wreck-it-provenance/` records
+- `-o, --output <PATH>`: Output file (default: `report.html`)
+
+### Start an MCP Server
+
+wreck-it can act as a [Model Context Protocol](https://spec.modelcontextprotocol.io/) server, exposing the task pipeline to any MCP-compatible AI assistant (Claude Desktop, VS Code Copilot Chat, Cursor, etc.):
+
+```bash
+wreck-it mcp --task-file tasks.json --work-dir .
+```
+
+Add to your Claude Desktop `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "wreck-it": {
+      "command": "wreck-it",
+      "args": ["mcp", "--task-file", "/path/to/tasks.json", "--work-dir", "/path/to/project"]
+    }
+  }
+}
+```
+
+Exposed tools: `list_tasks`, `add_task`, `update_task_status`, `read_artefact`, `trigger_iteration`.
+
+Options:
+- `-t, --task-file <PATH>`: Task file (default: `tasks.json`)
+- `-w, --work-dir <PATH>`: Working directory used to locate artefacts (default: `.`)
+
+### Fix Failing Checks (Unstuck)
+
+```bash
+wreck-it unstuck
+```
+
+Scans open PRs and the default branch for failing CI checks. For PRs it comments `@copilot` to request fixes. For the default branch it opens a GitHub issue and assigns a coding agent to fix the build. Requires `GITHUB_TOKEN` (or `--api-token`) with `repo` scope.
+
+Can also be used as a ralph command by setting `command = "unstuck"` in a `[[ralphs]]` entry in `.wreck-it/config.toml`.
+
+### Resolve Merge Conflicts
+
+```bash
+# Default: resolve conflicts via the Copilot CLI (recommended)
+wreck-it merge
+
+# Post a @copilot comment when the CLI is unavailable
+wreck-it merge --backend cloud_agent
+
+# Merge locally without AI assistance
+wreck-it merge --backend cli
+```
+
+Scans open PRs for merge conflicts with the base branch and resolves them. Requires `GITHUB_TOKEN` with `repo` scope.
+
+Can also be used as a ralph command by setting `command = "merge"` in a `[[ralphs]]` entry.
+
 ### Manage Tasks from the CLI
 
 The `wreck-it tasks` family of sub-commands lets you inspect and edit task files without touching raw JSON.
@@ -240,7 +321,7 @@ Options:
 - `-t, --task-file <PATH>`: Task file to append to (default: `tasks.json`)
 - `--id <ID>`: Unique task identifier *(required)*
 - `-d, --description <TEXT>`: Human-readable task description *(required)*
-- `--role <ideas|implementer|evaluator>`: Agent role (default: `implementer`)
+- `--role <ideas|implementer|evaluator|security_gate>`: Agent role (default: `implementer`)
 - `--phase <N>`: Execution phase — lower phases run first (default: `1`)
 - `--priority <N>`: Scheduling priority — higher values run sooner (default: `0`)
 - `--depends-on <ID,...>`: Comma-separated list of task IDs this task depends on
@@ -322,7 +403,7 @@ A task with all available fields:
 | `id` | Unique task identifier | *(required)* |
 | `description` | What the agent should do | *(required)* |
 | `status` | `pending`, `inprogress`, `completed`, or `failed` | *(required)* |
-| `role` | Agent role: `ideas`, `implementer`, `evaluator` | `implementer` |
+| `role` | Agent role: `ideas`, `implementer`, `evaluator`, `security_gate` | `implementer` |
 | `kind` | `milestone` (one-shot) or `recurring` (resets after cooldown) | `milestone` |
 | `cooldown_seconds` | Seconds before a recurring task resets (optional, only used with `recurring`) | *(none)* |
 | `phase` | Execution phase (lower runs first; same phase may run in parallel) | `1` |
