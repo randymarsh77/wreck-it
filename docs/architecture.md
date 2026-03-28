@@ -144,14 +144,22 @@ Terminal UI for monitoring:
 - `--work-dir`: Repository directory (default: .)
 - `--api-endpoint`: API endpoint
 - `--api-token`: API token (or set `COPILOT_API_TOKEN` env var)
-- `--model-provider`: `github-models`, `copilot`, or `llama`
+- `--model-provider`: `github-models`, `copilot`, `copilot-autopilot`, or `llama`
 - `--verify-command`: Custom verification command
 - `--evaluation-mode`: `command` or `agent-file`
 - `--headless`: Run without TUI for CI environments
 - `--reflection-rounds`: Critic-actor rounds (default: 2, 0 to disable)
 - `--replan-threshold`: Failures before re-planning (default: 2, 0 to disable)
-- `--ralph`: Named ralph context from `.wreck-it/config.toml`
+- `--ralph`: Named ralph context from `.wreck-it/config.toml`; use `all` to run every ralph sequentially (headless only)
 - `--goal`: Generate tasks from a natural-language goal before starting
+- `--max-cost`: Maximum cumulative estimated API cost in USD (GitHub Models only)
+- `--budget-strategy`: `greedy`, `critical-path` (default), or `conservative` — used with `--max-cost`
+- `--prompt-dir`: Directory of per-role / per-task system-prompt template files
+- `--work-dir-map`: Per-role or per-task working directory overrides (`ROLE_OR_ID=PATH`, repeatable)
+- `--notify-webhook`: HTTP URL(s) to notify on task status transitions (repeatable)
+- `--github-issues`: Enable GitHub Issues integration
+- `--github-repo`: GitHub repository for Issues integration (`owner/repo`)
+- `--max-autopilot-continues`: Maximum autopilot continuation steps for `copilot-autopilot` provider
 
 ## Best Practices
 
@@ -625,7 +633,116 @@ the openclaw plan-graph visualiser.
 
 ---
 
-## End-to-End Integration
+### Security Gate
+
+A `security_gate` task skips the LLM entirely and runs a security audit scanner:
+
+- **Rust** (`Cargo.toml` present) → `cargo audit --json`
+- **Node.js** (`package.json` present) → `npm audit --json`
+
+Findings are serialised to JSON and written to the path declared in the task's first output artefact (defaulting to `.wreck-it/security-findings.json`).  The task **fails** when critical or high severity vulnerabilities are found.  Downstream `implementer` tasks can consume the artefact to self-remediate.
+
+```json
+[
+  { "id": "sec", "role": "security_gate", "description": "Audit dependencies",
+    "outputs": [{ "kind": "json", "name": "findings", "path": ".wreck-it/security-findings.json" }] },
+  { "id": "fix", "description": "Fix critical vulnerabilities from findings",
+    "inputs": ["sec/findings"], "depends_on": ["sec"] }
+]
+```
+
+**Implementation**: `cli/src/security_gate.rs` — `SecurityGateFindings`, `run_security_gate`.
+`core/src/types.rs` — `AgentRole::SecurityGate`.
+
+---
+
+### Fan-Out / Fan-In Sub-Task Spawning
+
+An `ideas`-role task can dynamically spawn a set of parallel sub-tasks by writing a `SubTaskManifest` artefact.  After the task completes the runner:
+
+1. Parses each `SubTaskManifest` artefact as a `SubTaskManifestSpec`.
+2. Creates one `Task` per entry in `sub_tasks` at `parent.phase + 1`.
+3. Optionally creates a fan-in aggregator `Task` at `parent.phase + 2` with `depends_on` set to all sibling IDs and `inputs` pre-populated from their declared outputs.
+
+This pattern enables dynamic parallelism without pre-defining the task list:
+
+```json
+{
+  "id": "planner",
+  "role": "ideas",
+  "description": "Analyse the codebase and produce a parallel refactor plan",
+  "outputs": [{ "kind": "sub_task_manifest", "name": "plan", "path": ".wreck-it/plan.json" }]
+}
+```
+
+**Implementation**: `cli/src/fan_out.rs` — `detect_and_spawn_fan_out`.
+`core/src/types.rs` — `SubTaskManifestSpec`, `SubTaskSpec`, `FanInSpec`, `ArtefactKind::SubTaskManifest`.
+
+---
+
+### OTEL Tracing
+
+Every task execution can be wrapped in an OTEL span exported to any OTLP-compatible collector (Jaeger, Honeycomb, Grafana Cloud, etc.).  Spans carry:
+
+- Task `id`, `description`, `role`, `phase`, `complexity`, `priority`
+- Model name, `prompt_tokens`, `completion_tokens`, estimated cost in USD
+- Task outcome (`success` / `failure`) and retry attempt number
+
+Configure via the `[otel]` section in your `wreck-it.toml`:
+
+```toml
+[otel]
+endpoint     = "http://localhost:4318"   # OTLP HTTP base URL
+service_name = "my-project"              # optional, defaults to "wreck-it"
+
+# Optional per-header overrides, e.g. Honeycomb API key:
+# [otel.headers]
+# "x-honeycomb-team" = "YOUR_API_KEY"
+```
+
+When `otel` is absent or `endpoint` is empty, no spans are created.
+
+**Implementation**: `cli/src/otel.rs` — `init_otel`, `TaskSpan`, `shutdown_otel`.
+
+---
+
+### Kanban Integration
+
+wreck-it can synchronise task status with external project-management boards.  The `KanbanProvider` trait abstracts operations on Linear, JIRA, and Trello so the rest of the codebase is provider-agnostic.
+
+Configure via `kanban_provider` in `.wreck-it/config.toml` or `wreck-it.toml`:
+
+```toml
+kanban_provider = "linear"   # or "jira" / "trello"
+kanban_api_key  = "lin_api_…"
+kanban_team_id  = "…"
+```
+
+Each iteration, `sync_kanban_inbound()` pulls description edits and new comments from the board back into the local task definitions; outbound sync pushes status changes and attaches GitHub Issue / PR URLs to the board item.
+
+**Implementation**: `cli/src/kanban/` — `KanbanProvider`, `LinearProvider`, `JiraProvider`, `TrelloProvider`.
+
+---
+
+### Log Source Ingest
+
+wreck-it can pull error/exception log entries from a structured log platform and automatically create tasks for an agent to triage and fix:
+
+```toml
+[log_source]
+provider    = "seq"         # or "cloudflare"
+url         = "http://seq-host:5341"
+api_key     = "your-seq-api-key"
+filter      = "outcome = 'exception'"   # Seq CLEF filter expression
+```
+
+Each iteration, `sync_log_source_inbound()` queries the platform for new entries since the last run, deduplicates them via the `kanban-source:` label prefix, and creates `pending` implementer tasks from each unique error.
+
+**Implementation**: `cli/src/log_source/` — `LogSourceProvider`, `SeqProvider`, `CloudflareProvider`.
+
+---
+
+
 
 All Horizon 2–3 features are exercised together in the
 `eval7_full_horizon2_horizon3_acceptance_gate` test in
