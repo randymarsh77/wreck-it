@@ -15,6 +15,7 @@
 #![allow(dead_code)]
 
 mod agent;
+mod agent_cache;
 mod agent_memory;
 mod artefact_store;
 mod changelog_generator;
