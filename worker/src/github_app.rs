@@ -8,6 +8,7 @@
 //!
 //! Reference: <https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-json-web-token-jwt-for-a-github-app>
 
+use rsa::pkcs1::DecodeRsaPrivateKey;
 use rsa::pkcs8::DecodePrivateKey;
 use rsa::RsaPrivateKey;
 use sha2::Sha256;
@@ -17,9 +18,12 @@ use worker::Fetch;
 /// Generate a GitHub App JWT from the app ID and PEM-encoded RSA private key.
 ///
 /// The JWT is valid for 10 minutes (GitHub's maximum) and backdated by 60
-/// seconds to account for clock drift.
+/// seconds to account for clock drift.  Accepts both PKCS#8
+/// (`-----BEGIN PRIVATE KEY-----`) and PKCS#1
+/// (`-----BEGIN RSA PRIVATE KEY-----`) PEM formats.
 pub fn generate_jwt(app_id: &str, private_key_pem: &str, now_secs: u64) -> Result<String, String> {
     let private_key = RsaPrivateKey::from_pkcs8_pem(private_key_pem)
+        .or_else(|_| RsaPrivateKey::from_pkcs1_pem(private_key_pem))
         .map_err(|e| format!("Failed to parse RSA private key: {e}"))?;
 
     let signing_key = rsa::pkcs1v15::SigningKey::<Sha256>::new(private_key);
@@ -209,6 +213,42 @@ TFP9Qi4H/k4ElALICRDApsPXiLYmxvvu7qbMbGqvAqKhHfCLAQRLRPfz1PY0Zoxs\n\
         let payload_bytes = base64url_decode(parts[1]);
         let payload = String::from_utf8(payload_bytes).unwrap();
         assert!(payload.contains("12345"));
+    }
+
+    #[test]
+    fn generate_jwt_accepts_pkcs1_pem() {
+        // PKCS#1 format key (BEGIN RSA PRIVATE KEY) as GitHub generates.
+        let pem = "-----BEGIN RSA PRIVATE KEY-----\n\
+MIIEpAIBAAKCAQEAjjRGwEEXjrKk33blQgqIjSOaBbG8TSGFJfQI2rgWVu2+xZr+\n\
+jb/EczBSG1FAzIYmnpZgYwqEAeos6utqYouW9P6vPId9d/4JP+Ehb+7ci9Ugtp2F\n\
+jnCHNGmfjJOhVwQMdOfSXP5TnksEoOJpOm3g5wSVYnZGB/iEBczyY872v9k61VtL\n\
+zOFgquG7v6FM7GKbpr2U0padfLW8WRGJ9gA8+upuZ1yRiZ2ZumQdDUR8lBu4sGhu\n\
+JMJe85qc6bjkhXCK1lhDz5zqqw5sUx/sfTtr84z7hX8BAZ7vJ4KfPzKV8c6RSIoZ\n\
+Nsdlkh7llV7Xb1ANZ5VyzhItQOuKOPoKXY8LVwIDAQABAoIBAAWTdsn0UEH2Yh3b\n\
+e3MS490M7iD9CCvKF0t9FzL99u18fKq8JvEhLOKlAwMyzqSpoGGlkEZlIJBmqB49\n\
+RVQNGMoNVorvRFpsXRAV+gngLUiHMeiXPEGkMSXUyNg251bfJl6xj5kf5XpJtl1Z\n\
+cDp45oTu50cPtjOuNf14PNgj3Gvg8yblmUaVrpWVgNx1wgyRqmOyUb1GJ61BfNcG\n\
+5BVOoyfxzetA8gCfjnSc0D1WCylecLFkvNGPOUYn7na1QvXQiOwcdRT2ZrTLv4u9\n\
+ieRQZEkuQ9o10np+5u5PzpDNClAFp6BiTgfZYsIpVREfYhdDzQV9mYgVwx3EFj/F\n\
+bkssRBECgYEAyPQV0fl9jaGtTRyu9UCHbuYFCZbNZtvdQfw+VshdrtTVGsQ1jhuV\n\
+SQgrViSLBHPkqLwuBYh0aO9tAWa/O/wd60RRpEL6oLZvlVUO/YFLReBdGPcf50KS\n\
+YNiDfZf9xO/3GjT2YbKDnv1DcvOdivMRmFCu3Td27BsS5LfvGyWvepkCgYEAtShi\n\
+VAMcilPj4EPjfQkbkowDA+RuU4RCNCPUgQAjGMy/zse0vsaY+Tvtf/xSNvlX/XYg\n\
+ucpDrVEQMrV4Ks9ikY83+ZpF/s20OUmMejS2XrNwQViCnaEvcI+iqGBqrcu2TqW5\n\
+c3EdzOHz+JfylrdjbV6vDf+29+AiARFXomRY228CgYEAvJ73WEcRhX6LV4Uj6Apw\n\
+1TRM6CpHlFOthAFLVlPuM2uMt/oRttjHMGzdmJbmcgCCUauImyLw+Yo6zATwXVKR\n\
+lsJiy4cfDvkPFaFoV6UjzWwClqtno7+F/CdejOW8ij0fuNabqSpRh0t8IwruBn2P\n\
+N2QMLpKgKpBjFJJdeiLOaokCgYBNUgNF4F4aHFwyqEc8YtrF3cSbsK/2LYkkP/a/\n\
+aJOSTjG/zDU1CAbaud1Qtx1QIXSQ1g55vf7MxsCnJBU6EHH9tqcpfdNKQfoeSWoP\n\
+7te369aJzYFSTi21WVkPjLd7nmsdflZ9E1aoz/gVrqT39yYU1EjbLL2nZp6c3g4N\n\
+Xc8fOQKBgQC47rHUJOoFUv3yJWyhj0sIzg/Sul20kVXG3wXUYX669J2uAAqHKthg\n\
+MyxJVt5tmhTc0MCb7Ifw2sR68+QY3pcTIff3DK1LMwPJsX0w82Ytf54I4shimsti\n\
+P6p7MJfHu0M6fe77vtvnXdeiXvrNg1lgGwb2MZjjk051u0YktWJ5ZA==\n\
+-----END RSA PRIVATE KEY-----";
+
+        let jwt = generate_jwt("99999", pem, 1_700_000_000).unwrap();
+        let parts: Vec<&str> = jwt.split('.').collect();
+        assert_eq!(parts.len(), 3, "JWT must have header.payload.signature");
     }
 
     /// Minimal base64url decoder for test verification only.
