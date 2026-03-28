@@ -1,5 +1,105 @@
 [
   {
+    "id": "visual-workflow-exporter",
+    "description": "Implement a `wreck-it export-graph` command that serialises the current task dependency graph as a Mermaid flowchart or Graphviz DOT file, showing task phases, dependency edges, status colours (pending/inprogress/completed/failed), artefact flows, and fan-out sub-task clusters. Auto-embed the generated diagram into a `WORKFLOW.md` file that is updated at the end of each loop iteration via a recurring evaluator-role task. This transforms wreck-it's internal DAG representation into living documentation that stakeholders can read without CLI access, directly leveraging the existing phase/depends_on/parent_id data model.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "depends_on": [],
+    "priority": 8,
+    "complexity": 4
+  },
+  {
+    "id": "llm-cost-optimizer-routing",
+    "description": "Build an intelligent model-routing layer that assigns the cheapest LLM tier capable of completing a task based on its complexity score, role, and historical success rates. Low-complexity (1–3) tasks are routed to fast/cheap models (e.g., gpt-4o-mini, claude-haiku); medium-complexity (4–6) tasks to mid-tier; high-complexity (7–10) tasks to flagship models. After a model fails, automatically escalate to the next tier and record the escalation in per-task agent memory for future routing decisions. Expose a `--model-routing` flag and a `[model_routing]` config section. This directly builds on the existing complexity field, cost_tracker, and multi-provider model support to cut average run costs by routing simple tasks cheaply.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "depends_on": [],
+    "priority": 9,
+    "complexity": 6
+  },
+  {
+    "id": "adversarial-debate-review",
+    "description": "Implement an adversarial debate review pattern for high-complexity tasks: before committing, spawn a second 'devil's advocate' agent that receives the git diff and critiques the implementation from an opposing perspective (security risks, alternative approaches, edge cases). The original implementer agent then rebuts the critique. A judge-role agent scores both arguments and decides whether to commit or retry with the combined feedback. Integrate as an optional task-level field `debate: true` that triggers this three-way exchange in the reflection loop. This extends the existing critic-actor reflection loop with a structured multi-agent debate pattern inspired by debate-as-alignment research.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["visual-workflow-exporter"],
+    "priority": 7,
+    "complexity": 8
+  },
+  {
+    "id": "natural-language-task-query",
+    "description": "Add a `wreck-it query '<question>'` sub-command that translates a natural-language question into a structured query over the task graph, artefact store, provenance audit trail, and agent memory files. Examples: 'which tasks failed more than twice?', 'what code did the auth task modify?', 'how much did last week's run cost?'. The command sends the question plus a schema description of the available data to the LLM, receives a JSON filter/aggregation plan, executes it locally, and prints a human-readable result. This surfaces wreck-it's rich structured data to users who prefer prose over CLI flags, uniquely combining the provenance trail and artefact system with LLM-powered query translation.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "depends_on": [],
+    "priority": 7,
+    "complexity": 5
+  },
+  {
+    "id": "ephemeral-sandbox-execution",
+    "description": "Add an optional sandbox execution mode where each agent task runs inside an ephemeral Docker container (or a Firecracker microVM via a configurable backend). The container is seeded with a snapshot of the work directory, runs the agent's code edits and tests in isolation, and only merges changes back to the host workspace if tests pass. Configure via `sandbox = 'docker'` in config. This addresses the growing concern about autonomous agents making irreversible changes to a live codebase, and aligns with the 'minimal footprint' principle emerging in agentic safety research. Integrates with the existing test runner and commit pipeline.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["llm-cost-optimizer-routing"],
+    "priority": 8,
+    "complexity": 8
+  },
+  {
+    "id": "architecture-drift-detector",
+    "description": "Implement a recurring `architecture_drift` evaluator-role task that reads a declarative architecture manifest (`.wreck-it/architecture.md` or `.wreck-it/architecture.toml`) describing intended module boundaries, dependency rules, and naming conventions. Each iteration, it runs static analysis on the actual codebase (using treesitter or regex-based heuristics) to detect violations — e.g., a module importing from a layer it should not, or a file placed in the wrong directory. Detected violations are written as artefacts and trigger automatically generated remediation tasks. This uniquely combines wreck-it's recurring task cooldown, artefact chaining, and dynamic task generation into an automated architectural governance loop.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["natural-language-task-query"],
+    "priority": 6,
+    "complexity": 7
+  },
+  {
+    "id": "cross-platform-notification-hub",
+    "description": "Extend wreck-it's existing webhook notification system into a first-class multi-channel notification hub supporting Slack (Block Kit messages), Discord (embeds), Microsoft Teams (Adaptive Cards), and email (SMTP). Notifications include task status transitions, loop completion summaries, budget threshold warnings, and failure reports with git diff links. Each channel is configured independently under `[[notifiers]]` in config.toml with per-channel event filters. This builds on the existing `--notify-webhook` infrastructure and replaces it with a typed, pluggable notifier trait, making wreck-it composable with the communication stacks teams already use.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 1,
+    "depends_on": [],
+    "priority": 7,
+    "complexity": 5
+  },
+  {
+    "id": "task-effort-estimator",
+    "description": "Build a task effort estimation subsystem that, before each task execution, predicts its likely token cost, wall-clock duration, and probability of first-attempt success using a local regression model trained on historical execution data stored in the provenance trail. Predictions are surfaced in the TUI (as a 'forecast' column) and used by the scheduler to reorder the queue when budget is constrained. After each task completes, actual vs. predicted values are logged back into a rolling training dataset. The local model starts with a simple linear regressor over complexity/role/model features and can be upgraded to a neural model as data accumulates. This uniquely leverages wreck-it's provenance audit trail as a training dataset for meta-learning about agent behaviour.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["llm-cost-optimizer-routing"],
+    "priority": 6,
+    "complexity": 7
+  },
+  {
+    "id": "time-travel-task-debugger",
+    "description": "Implement a `wreck-it replay <task-id>` command that reconstructs and re-runs a previously executed task in a read-only trace mode: it replays the exact prompt, codebase snapshot (via git at the commit before the task ran), and recorded LLM responses from the provenance audit trail — without consuming new LLM tokens or making new changes. The replay produces a structured diff between the original agent output and an optional new run (with a `--live` flag for fresh execution) to compare behaviour. This transforms the provenance audit trail from a passive log into an interactive debugging tool, enabling developers to diagnose why an agent produced unexpected output and iterate on prompt improvements offline.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": ["natural-language-task-query"],
+    "priority": 6,
+    "complexity": 6
+  },
+  {
+    "id": "community-template-registry",
+    "description": "Build a community template registry that allows users to publish, discover, and install wreck-it task template collections from a central index (hosted at wreckit.app or a GitHub-backed registry). Extend the existing `wreck-it template list/apply` commands with `template publish` (packages and uploads a local template set) and `template search <query>` (queries the registry). Templates are versioned, signed, and include metadata (domain, language, author, download count). Locally installed templates are cached in `~/.wreck-it/templates/`. This leverages the existing template system and extends the wreck-it ecosystem via a community flywheel — similar to how Helm charts or Terraform modules accelerated adoption of their respective tools.",
+    "status": "pending",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": ["architecture-drift-detector", "adversarial-debate-review"],
+    "priority": 5,
+    "complexity": 7
+  },
+  {
     "id": "mcp-server-integration",
     "description": "Implement an MCP (Model Context Protocol) server mode for wreck-it so that AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can directly query and manage the task pipeline via the standard MCP protocol. Expose MCP tools for: listing tasks and their statuses, adding new tasks, updating task status, reading artefacts, and triggering a loop iteration. This bridges wreck-it's structured task graph with the rapidly emerging MCP ecosystem, enabling humans to supervise autonomous loops through their preferred AI assistant interface rather than the CLI or TUI.",
     "status": "pending",
