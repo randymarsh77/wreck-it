@@ -94,9 +94,7 @@ pub async fn vend_installation_token(
     let status = response.status_code();
     if status != 201 {
         let body = response.text().await.unwrap_or_default();
-        worker::console_error!(
-            "[wreck-it][auth] token vending failed ({status}): {body}",
-        );
+        worker::console_error!("[wreck-it][auth] token vending failed ({status}): {body}",);
         return Err(format!(
             "Failed to vend installation token ({status}): {body}"
         ));

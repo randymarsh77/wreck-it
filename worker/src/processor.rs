@@ -34,7 +34,10 @@ pub async fn process_iteration(
     default_branch: &str,
 ) -> Result<IterationResult, String> {
     // Step 1: Read repo config from the default branch.
-    worker::console_log!("[wreck-it][processor] reading config from {}", default_branch);
+    worker::console_log!(
+        "[wreck-it][processor] reading config from {}",
+        default_branch
+    );
     let config = read_repo_config(client, default_branch).await?;
 
     // Step 2: Determine ralph contexts.
@@ -49,7 +52,12 @@ pub async fn process_iteration(
         worker::console_log!(
             "[wreck-it][processor] {} ralph context(s): {}",
             config.ralphs.len(),
-            config.ralphs.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(", "),
+            config
+                .ralphs
+                .iter()
+                .map(|r| r.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
         );
         config
             .ralphs

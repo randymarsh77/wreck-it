@@ -345,10 +345,7 @@ impl GitHubClient {
     // -----------------------------------------------------------------------
 
     /// Execute a GraphQL query/mutation against the GitHub API.
-    async fn graphql(
-        &self,
-        query: &serde_json::Value,
-    ) -> Result<serde_json::Value, String> {
+    async fn graphql(&self, query: &serde_json::Value) -> Result<serde_json::Value, String> {
         let url = "https://api.github.com/graphql";
         let body_json = serde_json::to_string(query)
             .map_err(|e| format!("Failed to serialize GraphQL query: {e}"))?;
@@ -400,8 +397,7 @@ impl GitHubClient {
     // -----------------------------------------------------------------------
 
     /// Known coding agent logins, tried in priority order.
-    const KNOWN_AGENT_LOGINS: &[&str] =
-        &["copilot-swe-agent", "copilot", "claude", "codex"];
+    const KNOWN_AGENT_LOGINS: &[&str] = &["copilot-swe-agent", "copilot", "claude", "codex"];
 
     /// Discover a coding agent via the `suggestedActors` GraphQL query.
     ///
@@ -501,11 +497,7 @@ impl GitHubClient {
     ///
     /// Discovers an agent via `suggestedActors`, then uses the
     /// `addAssigneesToAssignable` GraphQL mutation.  Returns `true` on success.
-    pub async fn assign_agent(
-        &self,
-        issue_number: u64,
-        issue_node_id: Option<&str>,
-    ) -> bool {
+    pub async fn assign_agent(&self, issue_number: u64, issue_node_id: Option<&str>) -> bool {
         // Resolve the issue node ID if not provided.
         let owned_node_id;
         let assignable_id = match issue_node_id {
@@ -516,10 +508,7 @@ impl GitHubClient {
                     owned_node_id.as_str()
                 }
                 None => {
-                    worker::console_warn!(
-                        "Could not resolve node_id for issue #{}",
-                        issue_number,
-                    );
+                    worker::console_warn!("Could not resolve node_id for issue #{}", issue_number,);
                     return false;
                 }
             },
@@ -603,10 +592,7 @@ impl GitHubClient {
         };
 
         if response.status_code() != 200 {
-            worker::console_warn!(
-                "Agent assignment returned {}",
-                response.status_code(),
-            );
+            worker::console_warn!("Agent assignment returned {}", response.status_code(),);
             return false;
         }
 
@@ -752,7 +738,9 @@ impl GitHubClient {
         let status = response.status_code();
         if status != 200 {
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("Failed to merge PR #{pr_number} ({status}): {body}"));
+            return Err(format!(
+                "Failed to merge PR #{pr_number} ({status}): {body}"
+            ));
         }
 
         worker::console_log!("Merged PR #{}", pr_number);
@@ -953,7 +941,9 @@ impl GitHubClient {
         );
 
         let prot_headers = worker::Headers::new();
-        prot_headers.set("Accept", "application/vnd.github+json").ok();
+        prot_headers
+            .set("Accept", "application/vnd.github+json")
+            .ok();
         prot_headers
             .set("Authorization", &format!("Bearer {}", self.token))
             .ok();
@@ -995,9 +985,7 @@ impl GitHubClient {
             .set("Authorization", &format!("Bearer {}", self.token))
             .ok();
         rules_headers.set("User-Agent", "wreck-it-worker").ok();
-        rules_headers
-            .set("X-GitHub-Api-Version", "2022-11-28")
-            .ok();
+        rules_headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
 
         let rules_request = worker::Request::new_with_init(
             &rules_url,
@@ -1092,14 +1080,14 @@ impl GitHubClient {
             );
 
             let chk_headers = worker::Headers::new();
-            chk_headers.set("Accept", "application/vnd.github+json").ok();
+            chk_headers
+                .set("Accept", "application/vnd.github+json")
+                .ok();
             chk_headers
                 .set("Authorization", &format!("Bearer {}", self.token))
                 .ok();
             chk_headers.set("User-Agent", "wreck-it-worker").ok();
-            chk_headers
-                .set("X-GitHub-Api-Version", "2022-11-28")
-                .ok();
+            chk_headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
 
             let chk_request = worker::Request::new_with_init(
                 &checks_url,
@@ -1193,7 +1181,9 @@ impl GitHubClient {
         );
 
         let chk_headers = worker::Headers::new();
-        chk_headers.set("Accept", "application/vnd.github+json").ok();
+        chk_headers
+            .set("Accept", "application/vnd.github+json")
+            .ok();
         chk_headers
             .set("Authorization", &format!("Bearer {}", self.token))
             .ok();
@@ -1225,9 +1215,8 @@ impl GitHubClient {
         let has_failure = body["check_runs"]
             .as_array()
             .map(|runs| {
-                runs.iter().any(|r| {
-                    r["conclusion"].as_str() == Some("failure")
-                })
+                runs.iter()
+                    .any(|r| r["conclusion"].as_str() == Some("failure"))
             })
             .unwrap_or(false);
 
@@ -1356,7 +1345,9 @@ impl GitHubClient {
             );
 
             let run_headers = worker::Headers::new();
-            run_headers.set("Accept", "application/vnd.github+json").ok();
+            run_headers
+                .set("Accept", "application/vnd.github+json")
+                .ok();
             run_headers
                 .set("Authorization", &format!("Bearer {}", self.token))
                 .ok();
@@ -1511,10 +1502,7 @@ impl GitHubClient {
             // Fall back to the pending_deployments endpoint.  This handles
             // runs in `waiting` status (deployment protection rules) as well
             // as other cases where the `/approve` endpoint is not sufficient.
-            if self
-                .approve_pending_deployments(*run_id, pr_number)
-                .await
-            {
+            if self.approve_pending_deployments(*run_id, pr_number).await {
                 approved_count += 1;
                 continue;
             }
@@ -1620,9 +1608,7 @@ impl GitHubClient {
             .set("Authorization", &format!("Bearer {}", self.token))
             .ok();
         post_headers.set("User-Agent", "wreck-it-worker").ok();
-        post_headers
-            .set("X-GitHub-Api-Version", "2022-11-28")
-            .ok();
+        post_headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
         post_headers.set("Content-Type", "application/json").ok();
 
         let post_request = match worker::Request::new_with_init(

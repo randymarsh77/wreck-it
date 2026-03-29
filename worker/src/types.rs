@@ -16,6 +16,24 @@ pub use wreck_it_core::types::{
 };
 
 // ---------------------------------------------------------------------------
+// Pulse registry types
+// ---------------------------------------------------------------------------
+
+/// A registered repository for the pulse (scheduled) trigger system.
+///
+/// When the worker processes a webhook, it records the repository's
+/// coordinates and installation ID so that subsequent cron-triggered
+/// "pulse" invocations can iterate over all known repositories without
+/// relying on an incoming webhook payload.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct PulseRegistration {
+    pub owner: String,
+    pub repo: String,
+    pub installation_id: u64,
+    pub default_branch: String,
+}
+
+// ---------------------------------------------------------------------------
 // Webhook payload types
 //
 // Fields are populated by deserialization and exposed for consumers; suppress
@@ -223,6 +241,42 @@ state_file = ".docs-state.json"
         let user = pr.user.unwrap();
         assert_eq!(user.login, "copilot-swe-agent[bot]");
         assert_eq!(user.user_type.as_deref(), Some("Bot"));
+    }
+
+    #[test]
+    fn pulse_registration_roundtrip() {
+        let reg = PulseRegistration {
+            owner: "octo".into(),
+            repo: "repo".into(),
+            installation_id: 42,
+            default_branch: "main".into(),
+        };
+        let json = serde_json::to_string(&reg).unwrap();
+        let loaded: PulseRegistration = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded, reg);
+    }
+
+    #[test]
+    fn pulse_registration_vec_roundtrip() {
+        let regs = vec![
+            PulseRegistration {
+                owner: "a".into(),
+                repo: "b".into(),
+                installation_id: 1,
+                default_branch: "main".into(),
+            },
+            PulseRegistration {
+                owner: "c".into(),
+                repo: "d".into(),
+                installation_id: 2,
+                default_branch: "develop".into(),
+            },
+        ];
+        let json = serde_json::to_string(&regs).unwrap();
+        let loaded: Vec<PulseRegistration> = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].owner, "a");
+        assert_eq!(loaded[1].default_branch, "develop");
     }
 
     #[test]
