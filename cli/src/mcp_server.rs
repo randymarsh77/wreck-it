@@ -308,19 +308,13 @@ fn handle_trigger_iteration(ctx: &ServerContext, params: &Value) -> Result<Value
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let task_file = ctx.task_file.to_string_lossy();
-    let work_dir = ctx.work_dir.to_string_lossy();
+    let task_file = shell_quote(&ctx.task_file.to_string_lossy());
+    let work_dir = shell_quote(&ctx.work_dir.to_string_lossy());
 
     let cmd = if headless {
-        format!(
-            "wreck-it run --task-file {:?} --work-dir {:?} --headless",
-            task_file, work_dir
-        )
+        format!("wreck-it run --task-file {task_file} --work-dir {work_dir} --headless")
     } else {
-        format!(
-            "wreck-it run --task-file {:?} --work-dir {:?}",
-            task_file, work_dir
-        )
+        format!("wreck-it run --task-file {task_file} --work-dir {work_dir}")
     };
 
     Ok(mcp_text(format!(
@@ -557,6 +551,45 @@ fn mcp_text(text: impl Into<String>) -> Value {
     json!({
         "content": [{"type": "text", "text": text.into()}]
     })
+}
+
+/// Return a shell-safe representation of `s`.
+///
+/// Paths that contain no shell-special characters are returned as-is.
+/// All other strings are wrapped in single quotes with any embedded single
+/// quotes escaped using the `'\''` idiom.
+fn shell_quote(s: &str) -> String {
+    let needs_quoting = s.chars().any(|c| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                '\'' | '"'
+                    | '\\'
+                    | '$'
+                    | '!'
+                    | '&'
+                    | '|'
+                    | ';'
+                    | '('
+                    | ')'
+                    | '<'
+                    | '>'
+                    | '`'
+                    | '{'
+                    | '}'
+                    | '*'
+                    | '?'
+                    | '['
+                    | ']'
+                    | '#'
+                    | '~'
+            )
+    });
+    if needs_quoting {
+        format!("'{}'", s.replace('\'', r"'\''"))
+    } else {
+        s.to_string()
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -946,5 +979,74 @@ mod tests {
             .filter(|l| !l.starts_with('-') && !l.starts_with("ID"))
             .collect();
         assert_eq!(lines.len(), 1, "expected exactly one data row: {text}");
+    }
+
+    // ── shell_quote ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn shell_quote_plain_path() {
+        assert_eq!(shell_quote("/path/to/tasks.json"), "/path/to/tasks.json");
+    }
+
+    #[test]
+    fn shell_quote_path_with_spaces() {
+        assert_eq!(
+            shell_quote("/my projects/tasks.json"),
+            "'/my projects/tasks.json'"
+        );
+    }
+
+    #[test]
+    fn shell_quote_path_with_single_quote() {
+        assert_eq!(shell_quote("/it's/tasks.json"), "'/it'\\''s/tasks.json'");
+    }
+
+    #[test]
+    fn shell_quote_dollar_sign() {
+        assert_eq!(
+            shell_quote("/path/$HOME/tasks.json"),
+            "'/path/$HOME/tasks.json'"
+        );
+    }
+
+    #[test]
+    fn shell_quote_ampersand() {
+        assert_eq!(
+            shell_quote("/path/a&b/tasks.json"),
+            "'/path/a&b/tasks.json'"
+        );
+    }
+
+    #[test]
+    fn shell_quote_semicolon() {
+        assert_eq!(
+            shell_quote("/path/a;b/tasks.json"),
+            "'/path/a;b/tasks.json'"
+        );
+    }
+
+    // ── trigger_iteration path formatting ────────────────────────────────────
+
+    #[test]
+    fn trigger_iteration_no_extra_quotes_for_plain_paths() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 41,
+            "method": "tools/call",
+            "params": {
+                "name": "trigger_iteration",
+                "arguments": {"headless": false}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        // Plain paths should not be wrapped in extra Rust debug quotes.
+        assert!(!text.contains("\\\""), "unexpected escaped quotes: {text}");
+        assert!(text.contains("wreck-it run"));
+        assert!(!text.contains("--headless"));
     }
 }
