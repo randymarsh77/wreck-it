@@ -724,7 +724,10 @@ mod tests {
         let v: Value = serde_json::from_str(&resp).unwrap();
         let text = v["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("t1"));
-        assert!(text.contains("Do something"), "description should appear in list output");
+        assert!(
+            text.contains("Do something"),
+            "description should appear in list output"
+        );
     }
 
     #[test]
@@ -755,7 +758,10 @@ mod tests {
         let v: Value = serde_json::from_str(&resp).unwrap();
         let text = v["result"]["content"][0]["text"].as_str().unwrap();
         // The description should be truncated with an ellipsis.
-        assert!(text.contains('…'), "long description should be truncated with ellipsis: {text}");
+        assert!(
+            text.contains('…'),
+            "long description should be truncated with ellipsis: {text}"
+        );
         // The full 50-char description should NOT appear verbatim.
         assert!(
             !text.contains(&"A".repeat(50)),
@@ -796,7 +802,10 @@ mod tests {
         let resp = process_message(&ctx, &list_req).unwrap();
         let v: Value = serde_json::from_str(&resp).unwrap();
         let text = v["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains('…'), "unicode description should be truncated: {text}");
+        assert!(
+            text.contains('…'),
+            "unicode description should be truncated: {text}"
+        );
     }
 
     // ── truncate_description ─────────────────────────────────────────────────
@@ -809,7 +818,11 @@ mod tests {
     #[test]
     fn truncate_description_exact_limit() {
         let s = "A".repeat(42);
-        assert_eq!(truncate_description(&s), s, "exactly 42 chars should not be truncated");
+        assert_eq!(
+            truncate_description(&s),
+            s,
+            "exactly 42 chars should not be truncated"
+        );
     }
 
     #[test]
@@ -817,7 +830,11 @@ mod tests {
         let s = "A".repeat(50);
         let result = truncate_description(&s);
         let prefix: String = result.chars().take_while(|&c| c == 'A').collect();
-        assert_eq!(prefix.chars().count(), 42, "prefix should be exactly 42 chars");
+        assert_eq!(
+            prefix.chars().count(),
+            42,
+            "prefix should be exactly 42 chars"
+        );
         assert!(result.ends_with('…'));
     }
 
