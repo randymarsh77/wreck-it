@@ -121,7 +121,7 @@ async fn github_api_get(url: &str, token: &str) -> std::result::Result<serde_jso
         .map_err(|e| format!("GitHub API request failed: {e}"))?;
 
     let status = response.status_code();
-    if status < 200 || status >= 300 {
+    if !(200..300).contains(&status) {
         let body = response.text().await.unwrap_or_default();
         return Err(format!("GitHub API error ({status}): {body}"));
     }
@@ -269,7 +269,7 @@ async fn auth_callback(req: Request, ctx: RouteContext<()>) -> Result<Response> 
     // Fetch user info.
     let user = github_api_get("https://api.github.com/user", &access_token)
         .await
-        .map_err(|e| Error::RustError(e))?;
+        .map_err(Error::RustError)?;
 
     // Generate HMAC session token.
     let mut mac = HmacSha256::new_from_slice(session_secret.as_bytes())
@@ -318,7 +318,7 @@ async fn auth_user(req: Request, ctx: RouteContext<()>) -> Result<Response> {
 
     let user = github_api_get("https://api.github.com/user", &github_token)
         .await
-        .map_err(|e| Error::RustError(e))?;
+        .map_err(Error::RustError)?;
 
     json_response(&user, 200)
 }
@@ -338,7 +338,7 @@ async fn list_installations(req: Request, ctx: RouteContext<()>) -> Result<Respo
         &github_token,
     )
     .await
-    .map_err(|e| Error::RustError(e))?;
+    .map_err(Error::RustError)?;
 
     json_response(&data, 200)
 }
@@ -359,7 +359,7 @@ async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<
     );
     let data = github_api_get(&url, &github_token)
         .await
-        .map_err(|e| Error::RustError(e))?;
+        .map_err(Error::RustError)?;
 
     json_response(&data, 200)
 }
@@ -539,7 +539,7 @@ async fn put_config(mut req: Request, ctx: RouteContext<()>) -> Result<Response>
     let mut put_resp = Fetch::Request(put_req).send().await?;
 
     let status = put_resp.status_code();
-    if status < 200 || status >= 300 {
+    if !(200..300).contains(&status) {
         let err_body = put_resp.text().await.unwrap_or_default();
         console_error!("[wreck-it][portal] config write failed ({status}): {err_body}");
         return error_response(
@@ -559,7 +559,7 @@ async fn put_config(mut req: Request, ctx: RouteContext<()>) -> Result<Response>
 /// Standard base64 encoding with padding.
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut result = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
