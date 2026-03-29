@@ -897,6 +897,34 @@ mod tests {
         assert_eq!(v["result"]["isError"], true);
     }
 
+    #[test]
+    fn add_task_with_depends_on() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 6,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {
+                    "id": "child-task",
+                    "description": "Depends on parent",
+                    "depends_on": ["parent-task"]
+                }
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert!(!v["result"]["isError"].as_bool().unwrap_or(false));
+
+        // Verify that depends_on was persisted.
+        let tasks = task_manager::load_tasks(&task_file).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].depends_on, vec!["parent-task".to_string()]);
+    }
+
     // ── update_task_status ───────────────────────────────────────────────────
 
     #[test]
@@ -947,6 +975,31 @@ mod tests {
         let resp = process_message(&ctx, &req).unwrap();
         let v: Value = serde_json::from_str(&resp).unwrap();
         assert_eq!(v["result"]["isError"], true);
+    }
+
+    #[test]
+    fn update_task_status_task_not_found() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        // Try to update a task that doesn't exist in the (empty) task file.
+        let req = json!({
+            "jsonrpc": "2.0", "id": 23,
+            "method": "tools/call",
+            "params": {
+                "name": "update_task_status",
+                "arguments": {"id": "nonexistent-task", "status": "completed"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert_eq!(v["result"]["isError"], true);
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("nonexistent-task"),
+            "error message should mention the missing task id: {text}"
+        );
     }
 
     // ── read_artefact ────────────────────────────────────────────────────────
@@ -1030,6 +1083,20 @@ mod tests {
         let text = v["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("wreck-it run"));
         assert!(text.contains("--headless"));
+    }
+
+    // ── ping ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn ping_returns_empty_result() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = r#"{"jsonrpc":"2.0","id":98,"method":"ping","params":{}}"#;
+        let resp = process_message(&ctx, req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert_eq!(v["id"], 98);
+        assert_eq!(v["result"], json!({}));
     }
 
     // ── unknown method ───────────────────────────────────────────────────────
