@@ -12,6 +12,11 @@ command = "cargo install worker-build && worker-build --release"
 #   GITHUB_APP_ID            – Numeric GitHub App ID
 #   GITHUB_APP_PRIVATE_KEY   – PEM-encoded RSA private key from the GitHub App
 #   API_TOKEN                – Bearer token for the REST API endpoints
+#
+# Portal OAuth:
+#   GITHUB_CLIENT_ID         – GitHub App client ID (OAuth)
+#   GITHUB_CLIENT_SECRET     – GitHub App client secret (OAuth)
+#   PORTAL_SESSION_SECRET    – Random secret for session token HMAC
 
 # KV namespace for task and state persistence.
 # Create with: wrangler kv namespace create WRECK_IT_STORE

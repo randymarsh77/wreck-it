@@ -1,0 +1,17 @@
+# Cloudflare Pages deployment configuration for the wreck-it portal.
+#
+# Deploy with:
+#   cd site/portal && npx wrangler pages deploy dist
+#
+# Or set up CI/CD:
+#   npx wrangler pages project create wreck-it-portal
+#   npx wrangler pages deploy dist --project-name wreck-it-portal
+#
+# Custom domain (portal.wreckit.app):
+#   Configure in the Cloudflare dashboard under Pages > wreck-it-portal > Custom domains
+
+name = "wreck-it-portal"
+compatibility_date = "2024-01-01"
+
+[site]
+bucket = "./dist"

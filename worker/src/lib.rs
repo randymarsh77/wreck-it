@@ -42,6 +42,7 @@ mod api;
 mod github;
 mod github_app;
 mod kv_store;
+mod portal_api;
 mod processor;
 mod pulse;
 mod types;
@@ -101,6 +102,7 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     if path.starts_with("/api/") {
         let router = Router::new();
         let router = api::register_routes(router);
+        let router = portal_api::register_portal_routes(router);
         return router.run(req, env).await;
     }
 

@@ -43,6 +43,8 @@ test-e2e.sh
 site/docs/node_modules/
 site/docs/build/
 site/docs/.docusaurus/
+site/portal/node_modules/
+site/portal/dist/
 site/output/
 
 # Worker build artifacts
