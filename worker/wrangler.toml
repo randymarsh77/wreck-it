@@ -11,6 +11,14 @@ command = "cargo install worker-build && worker-build --release"
 #   GITHUB_WEBHOOK_SECRET    – Webhook secret for HMAC-SHA256 verification
 #   GITHUB_APP_ID            – Numeric GitHub App ID
 #   GITHUB_APP_PRIVATE_KEY   – PEM-encoded RSA private key from the GitHub App
+#   API_TOKEN                – Bearer token for the REST API endpoints
+
+# KV namespace for task and state persistence.
+# Create with: wrangler kv namespace create WRECK_IT_STORE
+# Then paste the generated id below.
+[[kv_namespaces]]
+binding = "WRECK_IT_STORE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
 [observability]
 enabled = true

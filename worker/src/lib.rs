@@ -22,8 +22,10 @@
 //! - `GITHUB_APP_ID` — numeric App ID.
 //! - `GITHUB_APP_PRIVATE_KEY` — PEM-encoded RSA private key.
 
+mod api;
 mod github;
 mod github_app;
+mod kv_store;
 mod processor;
 mod types;
 mod webhook;
@@ -75,6 +77,17 @@ fn should_process_pr_event(
 
 #[event(fetch)]
 async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    let url = req.url()?;
+    let path = url.path();
+
+    // Route API requests through the Router.
+    if path.starts_with("/api/") {
+        let router = Router::new();
+        let router = api::register_routes(router);
+        return router.run(req, env).await;
+    }
+
+    // Everything else goes to the webhook handler.
     match handle_webhook(req, env).await {
         Ok(resp) => {
             console_log!("[wreck-it] → {} response", resp.status_code());
