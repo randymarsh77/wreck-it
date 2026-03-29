@@ -63,13 +63,10 @@ fn json_response<T: serde::Serialize>(value: &T, status: u16) -> Result<Response
         .map_err(|e| Error::RustError(format!("JSON serialization failed: {e}")))?;
     let mut resp = Response::ok(body)?;
     resp.headers_mut().set("Content-Type", "application/json")?;
-    if status == 200 {
-        return Ok(resp);
+    if status != 200 {
+        resp = resp.with_status(status);
     }
-    let headers = resp.headers().clone();
-    Ok(Response::ok(serde_json::to_string(value).unwrap_or_default())?
-        .with_headers(headers)
-        .with_status(status))
+    Ok(resp)
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +243,7 @@ pub async fn delete_task(req: Request, ctx: RouteContext<()>) -> Result<Response
         .await
         .map_err(Error::RustError)?;
 
-    Response::ok("deleted")
+    Response::empty().map(|r| r.with_status(204))
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +302,7 @@ pub async fn delete_state(req: Request, ctx: RouteContext<()>) -> Result<Respons
         .await
         .map_err(Error::RustError)?;
 
-    Response::ok("deleted")
+    Response::empty().map(|r| r.with_status(204))
 }
 
 // ---------------------------------------------------------------------------
