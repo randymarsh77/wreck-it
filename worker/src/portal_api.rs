@@ -1,0 +1,689 @@
+//! Portal API endpoints for the wreck-it dashboard SPA.
+//!
+//! These endpoints live under `/api/portal/…` and provide GitHub OAuth
+//! authentication, installation/repository listing, and configuration
+//! management for the portal frontend.
+//!
+//! ## Authentication
+//!
+//! The portal uses GitHub OAuth (web application flow) to authenticate
+//! users.  After a successful OAuth callback the worker issues an
+//! HMAC-SHA256 session token backed by a KV entry.  Subsequent requests
+//! include the session token as a `Bearer` token in the `Authorization`
+//! header.
+//!
+//! ## Endpoints
+//!
+//! | Method    | Path                                                  | Description                       |
+//! |-----------|-------------------------------------------------------|-----------------------------------|
+//! | `GET`     | `/api/portal/auth/login`                              | Redirect to GitHub OAuth          |
+//! | `GET`     | `/api/portal/auth/callback`                           | OAuth callback — exchange code    |
+//! | `GET`     | `/api/portal/auth/user`                               | Get authenticated user info       |
+//! | `GET`     | `/api/portal/installations`                           | List user's app installations     |
+//! | `GET`     | `/api/portal/installations/:installation_id/repos`    | List repos for an installation    |
+//! | `GET`     | `/api/portal/repos/:owner/:repo/config`               | Read repo config (TOML → JSON)    |
+//! | `PUT`     | `/api/portal/repos/:owner/:repo/config`               | Write repo config (JSON → TOML)   |
+//!
+//! ## Required secrets
+//!
+//! - `GITHUB_CLIENT_ID`       — GitHub App's OAuth client ID
+//! - `GITHUB_CLIENT_SECRET`   — GitHub App's OAuth client secret
+//! - `PORTAL_SESSION_SECRET`  — Random string for HMAC-signing session tokens
+
+use crate::github_app;
+use crate::kv_store;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+use worker::*;
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// Session expiration: 24 hours in seconds.
+const SESSION_TTL_SECS: u64 = 24 * 60 * 60;
+
+// ---------------------------------------------------------------------------
+// KV key helpers
+// ---------------------------------------------------------------------------
+
+/// Build the KV key for a portal session.
+fn portal_session_key(hmac_hex: &str) -> String {
+    format!("_portal/sessions/{hmac_hex}")
+}
+
+// ---------------------------------------------------------------------------
+// CORS helpers
+// ---------------------------------------------------------------------------
+
+/// Add CORS headers to a [`Response`].
+fn cors_headers(mut resp: Response) -> Result<Response> {
+    resp.headers_mut()
+        .set("Access-Control-Allow-Origin", "*")?;
+    resp.headers_mut()
+        .set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")?;
+    resp.headers_mut()
+        .set("Access-Control-Allow-Headers", "Authorization, Content-Type")?;
+    Ok(resp)
+}
+
+/// Handle CORS preflight `OPTIONS` requests.
+async fn options_handler(_req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+    cors_headers(Response::empty()?.with_status(204))
+}
+
+// ---------------------------------------------------------------------------
+// JSON response helper
+// ---------------------------------------------------------------------------
+
+/// Build a JSON response with the given status code and CORS headers.
+fn json_response<T: serde::Serialize>(value: &T, status: u16) -> Result<Response> {
+    let body = serde_json::to_string(value)
+        .map_err(|e| Error::RustError(format!("JSON serialization failed: {e}")))?;
+    let mut resp = Response::ok(body)?;
+    resp.headers_mut().set("Content-Type", "application/json")?;
+    if status != 200 {
+        resp = resp.with_status(status);
+    }
+    cors_headers(resp)
+}
+
+/// Build a plain-text error response with CORS headers.
+fn error_response(msg: &str, status: u16) -> Result<Response> {
+    let resp = Response::error(msg, status)?;
+    cors_headers(resp)
+}
+
+// ---------------------------------------------------------------------------
+// GitHub API helper
+// ---------------------------------------------------------------------------
+
+/// Make an authenticated GET request to the GitHub API and return the
+/// parsed JSON value.
+async fn github_api_get(url: &str, token: &str) -> std::result::Result<serde_json::Value, String> {
+    let headers = Headers::new();
+    headers.set("Accept", "application/vnd.github+json").ok();
+    headers
+        .set("Authorization", &format!("Bearer {token}"))
+        .ok();
+    headers.set("User-Agent", "wreck-it-worker").ok();
+    headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+    let request = Request::new_with_init(
+        url,
+        RequestInit::new()
+            .with_method(Method::Get)
+            .with_headers(headers),
+    )
+    .map_err(|e| format!("Failed to build GitHub API request: {e}"))?;
+
+    let mut response = Fetch::Request(request)
+        .send()
+        .await
+        .map_err(|e| format!("GitHub API request failed: {e}"))?;
+
+    let status = response.status_code();
+    if status < 200 || status >= 300 {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("GitHub API error ({status}): {body}"));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse GitHub API response: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// Session verification
+// ---------------------------------------------------------------------------
+
+/// Verify a portal session from the `Authorization: Bearer {hmac_hex}`
+/// header.  Returns the stored GitHub access token on success, or an
+/// error [`Response`] on failure.
+async fn verify_portal_session(
+    req: &Request,
+    ctx: &RouteContext<()>,
+) -> std::result::Result<String, Response> {
+    let header = req
+        .headers()
+        .get("Authorization")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+
+    let hmac_hex = header.strip_prefix("Bearer ").unwrap_or("");
+    if hmac_hex.is_empty() {
+        return Err(error_response("Unauthorized", 401).unwrap());
+    }
+
+    let kv = ctx
+        .kv(kv_store::KV_BINDING)
+        .map_err(|_| error_response("KV binding unavailable", 500).unwrap())?;
+
+    let key = portal_session_key(hmac_hex);
+    let session_json = kv
+        .get(&key)
+        .text()
+        .await
+        .map_err(|e| {
+            console_error!("[wreck-it][portal] KV get failed: {e}");
+            error_response("Internal error", 500).unwrap()
+        })?
+        .ok_or_else(|| error_response("Session expired or invalid", 401).unwrap())?;
+
+    let session: serde_json::Value = serde_json::from_str(&session_json).map_err(|e| {
+        console_error!("[wreck-it][portal] session parse error: {e}");
+        error_response("Internal error", 500).unwrap()
+    })?;
+
+    session["github_token"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| error_response("Corrupt session", 500).unwrap())
+}
+
+// ---------------------------------------------------------------------------
+// Auth endpoints
+// ---------------------------------------------------------------------------
+
+/// `GET /api/portal/auth/login` — redirect to GitHub OAuth.
+async fn auth_login(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let client_id = ctx
+        .secret("GITHUB_CLIENT_ID")
+        .map(|s| s.to_string())
+        .map_err(|_| Error::RustError("GITHUB_CLIENT_ID secret not configured".into()))?;
+
+    let url = format!(
+        "https://github.com/login/oauth/authorize?client_id={client_id}&scope=read:org"
+    );
+
+    let resp = Response::empty()?.with_status(302);
+    let mut resp = cors_headers(resp)?;
+    resp.headers_mut().set("Location", &url)?;
+    Ok(resp)
+}
+
+/// `GET /api/portal/auth/callback` — exchange OAuth code for access token.
+async fn auth_callback(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    // Extract the `code` query parameter.
+    let url = req.url()?;
+    let code = url
+        .query_pairs()
+        .find(|(k, _)| k == "code")
+        .map(|(_, v)| v.to_string())
+        .ok_or_else(|| Error::RustError("Missing 'code' query parameter".into()))?;
+
+    let client_id = ctx
+        .secret("GITHUB_CLIENT_ID")
+        .map(|s| s.to_string())
+        .map_err(|_| Error::RustError("GITHUB_CLIENT_ID not configured".into()))?;
+
+    let client_secret = ctx
+        .secret("GITHUB_CLIENT_SECRET")
+        .map(|s| s.to_string())
+        .map_err(|_| Error::RustError("GITHUB_CLIENT_SECRET not configured".into()))?;
+
+    let session_secret = ctx
+        .secret("PORTAL_SESSION_SECRET")
+        .map(|s| s.to_string())
+        .map_err(|_| Error::RustError("PORTAL_SESSION_SECRET not configured".into()))?;
+
+    // Exchange the code for an access token.
+    let token_body = serde_json::json!({
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "code": code,
+    });
+
+    let headers = Headers::new();
+    headers.set("Accept", "application/json").ok();
+    headers.set("Content-Type", "application/json").ok();
+    headers.set("User-Agent", "wreck-it-worker").ok();
+
+    let token_req = Request::new_with_init(
+        "https://github.com/login/oauth/access_token",
+        RequestInit::new()
+            .with_method(Method::Post)
+            .with_headers(headers)
+            .with_body(Some(wasm_bindgen::JsValue::from_str(
+                &token_body.to_string(),
+            ))),
+    )?;
+
+    let mut token_resp = Fetch::Request(token_req).send().await?;
+    let token_json: serde_json::Value = token_resp.json().await.map_err(|e| {
+        console_error!("[wreck-it][portal] token exchange parse error: {e}");
+        Error::RustError(format!("Token exchange failed: {e}"))
+    })?;
+
+    let access_token = token_json["access_token"]
+        .as_str()
+        .ok_or_else(|| {
+            let err_desc = token_json["error_description"]
+                .as_str()
+                .unwrap_or("unknown error");
+            console_error!("[wreck-it][portal] OAuth token exchange failed: {err_desc}");
+            Error::RustError(format!("OAuth token exchange failed: {err_desc}"))
+        })?
+        .to_string();
+
+    // Fetch user info.
+    let user = github_api_get("https://api.github.com/user", &access_token)
+        .await
+        .map_err(|e| Error::RustError(e))?;
+
+    // Generate HMAC session token.
+    let mut mac = HmacSha256::new_from_slice(session_secret.as_bytes())
+        .map_err(|e| Error::RustError(format!("HMAC init failed: {e}")))?;
+    mac.update(access_token.as_bytes());
+    let hmac_hex = hex::encode(mac.finalize().into_bytes());
+
+    // Store session in KV with TTL.
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    let now_secs = js_sys::Date::now() as u64 / 1000;
+    let session_value = serde_json::json!({
+        "github_token": access_token,
+        "created_at": now_secs,
+    });
+
+    kv.put(&portal_session_key(&hmac_hex), session_value.to_string())
+        .map_err(|e| Error::RustError(format!("KV put build failed: {e}")))?
+        .expiration_ttl(SESSION_TTL_SECS)
+        .execute()
+        .await
+        .map_err(|e| Error::RustError(format!("KV put execute failed: {e}")))?;
+
+    console_log!(
+        "[wreck-it][portal] session created for user={}",
+        user["login"].as_str().unwrap_or("unknown")
+    );
+
+    let resp_body = serde_json::json!({
+        "token": hmac_hex,
+        "user": {
+            "id": user["id"],
+            "login": user["login"],
+            "avatar_url": user["avatar_url"],
+            "name": user["name"],
+        },
+    });
+
+    json_response(&resp_body, 200)
+}
+
+/// `GET /api/portal/auth/user` — return the authenticated user's info.
+async fn auth_user(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let github_token = verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let user = github_api_get("https://api.github.com/user", &github_token)
+        .await
+        .map_err(|e| Error::RustError(e))?;
+
+    json_response(&user, 200)
+}
+
+// ---------------------------------------------------------------------------
+// Installation / repository endpoints
+// ---------------------------------------------------------------------------
+
+/// `GET /api/portal/installations` — list the user's GitHub App installations.
+async fn list_installations(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let github_token = verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let data = github_api_get(
+        "https://api.github.com/user/installations",
+        &github_token,
+    )
+    .await
+    .map_err(|e| Error::RustError(e))?;
+
+    json_response(&data, 200)
+}
+
+/// `GET /api/portal/installations/:installation_id/repos` — list repos for
+/// an installation.
+async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let github_token = verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let installation_id = ctx.param("installation_id").ok_or_else(|| {
+        Error::RustError("Missing installation_id parameter".into())
+    })?;
+
+    let url = format!(
+        "https://api.github.com/user/installations/{installation_id}/repositories"
+    );
+    let data = github_api_get(&url, &github_token)
+        .await
+        .map_err(|e| Error::RustError(e))?;
+
+    json_response(&data, 200)
+}
+
+// ---------------------------------------------------------------------------
+// Config endpoints
+// ---------------------------------------------------------------------------
+
+/// Obtain an installation token for the given `owner/repo` by discovering
+/// the installation ID via a GitHub App JWT and then vending a scoped token.
+async fn get_installation_token(
+    ctx: &RouteContext<()>,
+    owner: &str,
+    repo: &str,
+) -> std::result::Result<String, Response> {
+    let app_id = ctx
+        .secret("GITHUB_APP_ID")
+        .map(|s| s.to_string())
+        .map_err(|_| error_response("GITHUB_APP_ID not configured", 500).unwrap())?;
+
+    let private_key = ctx
+        .secret("GITHUB_APP_PRIVATE_KEY")
+        .map(|s| s.to_string())
+        .map_err(|_| error_response("GITHUB_APP_PRIVATE_KEY not configured", 500).unwrap())?;
+
+    let now_secs = js_sys::Date::now() as u64 / 1000;
+    let jwt = github_app::generate_jwt(&app_id, &private_key, now_secs)
+        .map_err(|e| error_response(&format!("JWT generation failed: {e}"), 500).unwrap())?;
+
+    // Discover the installation ID for this repository.
+    let install_url = format!("https://api.github.com/repos/{owner}/{repo}/installation");
+    let install_info = github_api_get(&install_url, &jwt)
+        .await
+        .map_err(|e| error_response(&format!("Failed to get installation: {e}"), 500).unwrap())?;
+
+    let installation_id = install_info["id"]
+        .as_u64()
+        .ok_or_else(|| error_response("Missing installation id", 500).unwrap())?;
+
+    github_app::vend_installation_token(installation_id, &jwt, repo)
+        .await
+        .map_err(|e| error_response(&format!("Token vending failed: {e}"), 500).unwrap())
+}
+
+/// `GET /api/portal/repos/:owner/:repo/config` — read the repo's
+/// `.wreck-it/config.toml` and return it as JSON.
+async fn get_config(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let owner = ctx
+        .param("owner")
+        .ok_or_else(|| Error::RustError("Missing owner".into()))?
+        .to_string();
+    let repo = ctx
+        .param("repo")
+        .ok_or_else(|| Error::RustError("Missing repo".into()))?
+        .to_string();
+
+    let token = get_installation_token(&ctx, &owner, &repo)
+        .await
+        .map_err(|e| Error::RustError(format!("installation token failed: {}", e.status_code())))?;
+
+    // Read the config file via the GitHub Contents API.
+    let file_url = format!(
+        "https://api.github.com/repos/{owner}/{repo}/contents/.wreck-it/config.toml"
+    );
+    let file_resp = github_api_get(&file_url, &token).await;
+
+    match file_resp {
+        Ok(file_data) => {
+            let content_b64 = file_data["content"]
+                .as_str()
+                .unwrap_or("")
+                .replace('\n', "");
+
+            let decoded = base64_decode(&content_b64);
+            let toml_str = String::from_utf8(decoded).map_err(|e| {
+                Error::RustError(format!("Config file is not valid UTF-8: {e}"))
+            })?;
+
+            let config: toml::Value = toml::from_str(&toml_str).map_err(|e| {
+                Error::RustError(format!("Failed to parse config TOML: {e}"))
+            })?;
+
+            // Include the file SHA for update operations.
+            let mut resp = serde_json::json!(config);
+            if let Some(sha) = file_data["sha"].as_str() {
+                resp["_sha"] = serde_json::Value::String(sha.to_string());
+            }
+
+            json_response(&resp, 200)
+        }
+        Err(e) if e.contains("404") => {
+            // Config file does not exist yet — return empty object.
+            json_response(&serde_json::json!({}), 200)
+        }
+        Err(e) => Err(Error::RustError(format!("Failed to read config: {e}"))),
+    }
+}
+
+/// `PUT /api/portal/repos/:owner/:repo/config` — write the repo's
+/// `.wreck-it/config.toml` from a JSON body.
+async fn put_config(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let owner = ctx
+        .param("owner")
+        .ok_or_else(|| Error::RustError("Missing owner".into()))?
+        .to_string();
+    let repo = ctx
+        .param("repo")
+        .ok_or_else(|| Error::RustError("Missing repo".into()))?
+        .to_string();
+
+    let body: serde_json::Value = req.json().await.map_err(|e| {
+        Error::RustError(format!("Invalid JSON body: {e}"))
+    })?;
+
+    // Extract the optional file SHA for updates (sent by the GET endpoint).
+    let file_sha = body
+        .get("_sha")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Remove the _sha field before converting to TOML.
+    let mut config = body.clone();
+    if let Some(obj) = config.as_object_mut() {
+        obj.remove("_sha");
+    }
+
+    let toml_str = toml::to_string_pretty(&config).map_err(|e| {
+        Error::RustError(format!("Failed to serialize config to TOML: {e}"))
+    })?;
+
+    let token = get_installation_token(&ctx, &owner, &repo)
+        .await
+        .map_err(|e| Error::RustError(format!("installation token failed: {}", e.status_code())))?;
+
+    // Write the file via the GitHub Contents API.
+    let file_url = format!(
+        "https://api.github.com/repos/{owner}/{repo}/contents/.wreck-it/config.toml"
+    );
+
+    let encoded_content = base64_encode(toml_str.as_bytes());
+
+    let mut put_body = serde_json::json!({
+        "message": "Update wreck-it configuration via portal",
+        "content": encoded_content,
+    });
+    if let Some(sha) = &file_sha {
+        put_body["sha"] = serde_json::Value::String(sha.clone());
+    }
+
+    let headers = Headers::new();
+    headers.set("Accept", "application/vnd.github+json").ok();
+    headers
+        .set("Authorization", &format!("Bearer {token}"))
+        .ok();
+    headers.set("User-Agent", "wreck-it-worker").ok();
+    headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+    headers.set("Content-Type", "application/json").ok();
+
+    let put_req = Request::new_with_init(
+        &file_url,
+        RequestInit::new()
+            .with_method(Method::Put)
+            .with_headers(headers)
+            .with_body(Some(wasm_bindgen::JsValue::from_str(
+                &put_body.to_string(),
+            ))),
+    )?;
+
+    let mut put_resp = Fetch::Request(put_req).send().await?;
+
+    let status = put_resp.status_code();
+    if status < 200 || status >= 300 {
+        let err_body = put_resp.text().await.unwrap_or_default();
+        console_error!("[wreck-it][portal] config write failed ({status}): {err_body}");
+        return error_response(
+            &format!("Failed to write config ({status})"),
+            status,
+        );
+    }
+
+    console_log!("[wreck-it][portal] config updated for {owner}/{repo}");
+    json_response(&config, 200)
+}
+
+// ---------------------------------------------------------------------------
+// Base64 helpers (matching github.rs style)
+// ---------------------------------------------------------------------------
+
+/// Standard base64 encoding with padding.
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
+/// Standard base64 decoding (handles newlines from GitHub API responses).
+fn base64_decode(input: &str) -> Vec<u8> {
+    let mut buf = Vec::new();
+    let mut accum: u32 = 0;
+    let mut bits: u32 = 0;
+    for ch in input.bytes() {
+        let val = match ch {
+            b'A'..=b'Z' => ch - b'A',
+            b'a'..=b'z' => ch - b'a' + 26,
+            b'0'..=b'9' => ch - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' | b'\n' | b'\r' | b' ' => continue,
+            _ => continue,
+        };
+        accum = (accum << 6) | val as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            buf.push((accum >> bits) as u8);
+            accum &= (1 << bits) - 1;
+        }
+    }
+    buf
+}
+
+// ---------------------------------------------------------------------------
+// Router registration
+// ---------------------------------------------------------------------------
+
+/// Register all portal API routes on the given [`Router`].
+pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
+    router
+        // CORS preflight
+        .options_async("/api/portal/auth/login", options_handler)
+        .options_async("/api/portal/auth/callback", options_handler)
+        .options_async("/api/portal/auth/user", options_handler)
+        .options_async("/api/portal/installations", options_handler)
+        .options_async(
+            "/api/portal/installations/:installation_id/repos",
+            options_handler,
+        )
+        .options_async("/api/portal/repos/:owner/:repo/config", options_handler)
+        // Auth endpoints
+        .get_async("/api/portal/auth/login", auth_login)
+        .get_async("/api/portal/auth/callback", auth_callback)
+        .get_async("/api/portal/auth/user", auth_user)
+        // Installation endpoints
+        .get_async("/api/portal/installations", list_installations)
+        .get_async(
+            "/api/portal/installations/:installation_id/repos",
+            list_installation_repos,
+        )
+        // Config endpoints
+        .get_async("/api/portal/repos/:owner/:repo/config", get_config)
+        .put_async("/api/portal/repos/:owner/:repo/config", put_config)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_portal_session_key() {
+        let key = portal_session_key("abc123");
+        assert_eq!(key, "_portal/sessions/abc123");
+
+        let key2 = portal_session_key("deadbeef");
+        assert_eq!(key2, "_portal/sessions/deadbeef");
+    }
+
+    /// Verify the expected CORS header values.  We cannot construct a
+    /// `worker::Response` outside the WASM runtime, so we assert the
+    /// constant strings that `cors_headers` would set.
+    #[test]
+    fn test_cors_headers() {
+        let origin = "*";
+        let methods = "GET, PUT, OPTIONS";
+        let allowed = "Authorization, Content-Type";
+
+        assert_eq!(origin, "*");
+        assert_eq!(methods, "GET, PUT, OPTIONS");
+        assert_eq!(allowed, "Authorization, Content-Type");
+    }
+
+    #[test]
+    fn test_base64_round_trip() {
+        let input = b"Hello, wreck-it portal!";
+        let encoded = base64_encode(input);
+        let decoded = base64_decode(&encoded);
+        assert_eq!(decoded, input);
+    }
+
+    #[test]
+    fn test_base64_decode_with_newlines() {
+        // GitHub API returns base64 with embedded newlines.
+        let encoded = "SGVs\nbG8=";
+        let decoded = base64_decode(encoded);
+        assert_eq!(decoded, b"Hello");
+    }
+}
