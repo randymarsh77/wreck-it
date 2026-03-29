@@ -22,3 +22,9 @@ id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
 [observability]
 enabled = true
+
+# Pulse trigger — cron schedule for injecting entropy.
+# Fires every 30 minutes to process registered repositories.
+# Tasks with expired cooldowns will be picked up even without webhook events.
+[triggers]
+crons = ["*/30 * * * *"]

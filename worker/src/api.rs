@@ -1,8 +1,8 @@
-//! REST API handlers for task management and state persistence.
+//! REST API handlers for task management, state persistence, and pulse
+//! registry.
 //!
-//! All endpoints live under `/api/repos/{owner}/{repo}/…` and use Cloudflare
-//! KV for storage.  An `API_TOKEN` secret (bearer token) is required for
-//! authentication.
+//! All endpoints live under `/api/…` and use Cloudflare KV for storage.
+//! An `API_TOKEN` secret (bearer token) is required for authentication.
 //!
 //! ## Endpoints
 //!
@@ -17,9 +17,12 @@
 //! | `GET`    | `/api/repos/{owner}/{repo}/state/{context}`        | Get headless state           |
 //! | `PUT`    | `/api/repos/{owner}/{repo}/state/{context}`        | Replace headless state       |
 //! | `DELETE` | `/api/repos/{owner}/{repo}/state/{context}`        | Delete headless state        |
+//! | `GET`    | `/api/pulse/registrations`                         | List pulse registrations     |
+//! | `PUT`    | `/api/pulse/registrations/{owner}/{repo}`          | Upsert a pulse registration  |
+//! | `DELETE` | `/api/pulse/registrations/{owner}/{repo}`          | Remove a pulse registration  |
 
 use crate::kv_store;
-use crate::types::{HeadlessState, Task, TaskStatus};
+use crate::types::{HeadlessState, PulseRegistration, Task, TaskStatus};
 use worker::*;
 
 // ---------------------------------------------------------------------------
@@ -306,6 +309,74 @@ pub async fn delete_state(req: Request, ctx: RouteContext<()>) -> Result<Respons
 }
 
 // ---------------------------------------------------------------------------
+// Pulse registry endpoints
+// ---------------------------------------------------------------------------
+
+/// `GET /api/pulse/registrations`
+pub async fn list_pulse_registrations(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(r) = verify_api_token(&req, &ctx) {
+        return Ok(r);
+    }
+    let kv = get_kv(&ctx)?;
+
+    match kv_store::load_pulse_registry(&kv).await {
+        Ok(regs) => json_response(&regs, 200),
+        Err(e) => Response::error(e, 500),
+    }
+}
+
+/// `PUT /api/pulse/registrations/:owner/:repo`
+pub async fn upsert_pulse_registration(
+    mut req: Request,
+    ctx: RouteContext<()>,
+) -> Result<Response> {
+    if let Err(r) = verify_api_token(&req, &ctx) {
+        return Ok(r);
+    }
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    let kv = get_kv(&ctx)?;
+
+    let reg: PulseRegistration = match req.json().await {
+        Ok(r) => r,
+        Err(e) => return Response::error(format!("Invalid registration JSON: {e}"), 400),
+    };
+
+    // Ensure path params match body.
+    if reg.owner != owner || reg.repo != repo {
+        return Response::error(
+            format!(
+                "owner/repo in body ('{}/{}') does not match URL ('{}/{}')",
+                reg.owner, reg.repo, owner, repo,
+            ),
+            400,
+        );
+    }
+
+    kv_store::upsert_pulse_registration(&kv, &reg)
+        .await
+        .map_err(Error::RustError)?;
+
+    json_response(&reg, 200)
+}
+
+/// `DELETE /api/pulse/registrations/:owner/:repo`
+pub async fn delete_pulse_registration(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(r) = verify_api_token(&req, &ctx) {
+        return Ok(r);
+    }
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    let kv = get_kv(&ctx)?;
+
+    match kv_store::remove_pulse_registration(&kv, &owner, &repo).await {
+        Ok(true) => Response::empty().map(|r| r.with_status(204)),
+        Ok(false) => Response::error("Registration not found", 404),
+        Err(e) => Response::error(e, 500),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Router registration
 // ---------------------------------------------------------------------------
 
@@ -313,42 +384,28 @@ pub async fn delete_state(req: Request, ctx: RouteContext<()>) -> Result<Respons
 pub fn register_routes(router: Router<'_, ()>) -> Router<'_, ()> {
     router
         // Task endpoints
-        .get_async(
-            "/api/repos/:owner/:repo/tasks",
-            list_tasks,
-        )
-        .get_async(
-            "/api/repos/:owner/:repo/tasks/:task_id",
-            get_task,
-        )
-        .post_async(
-            "/api/repos/:owner/:repo/tasks",
-            create_task,
-        )
-        .put_async(
-            "/api/repos/:owner/:repo/tasks/:task_id",
-            update_task,
-        )
+        .get_async("/api/repos/:owner/:repo/tasks", list_tasks)
+        .get_async("/api/repos/:owner/:repo/tasks/:task_id", get_task)
+        .post_async("/api/repos/:owner/:repo/tasks", create_task)
+        .put_async("/api/repos/:owner/:repo/tasks/:task_id", update_task)
         .patch_async(
             "/api/repos/:owner/:repo/tasks/:task_id/status",
             patch_task_status,
         )
-        .delete_async(
-            "/api/repos/:owner/:repo/tasks/:task_id",
-            delete_task,
-        )
+        .delete_async("/api/repos/:owner/:repo/tasks/:task_id", delete_task)
         // State endpoints
-        .get_async(
-            "/api/repos/:owner/:repo/state/:context",
-            get_state,
-        )
+        .get_async("/api/repos/:owner/:repo/state/:context", get_state)
+        .put_async("/api/repos/:owner/:repo/state/:context", put_state)
+        .delete_async("/api/repos/:owner/:repo/state/:context", delete_state)
+        // Pulse registry endpoints
+        .get_async("/api/pulse/registrations", list_pulse_registrations)
         .put_async(
-            "/api/repos/:owner/:repo/state/:context",
-            put_state,
+            "/api/pulse/registrations/:owner/:repo",
+            upsert_pulse_registration,
         )
         .delete_async(
-            "/api/repos/:owner/:repo/state/:context",
-            delete_state,
+            "/api/pulse/registrations/:owner/:repo",
+            delete_pulse_registration,
         )
 }
 

@@ -1,9 +1,14 @@
-//! Cloudflare Worker entry point for the wreck-it GitHub App webhook.
+//! Cloudflare Worker entry point for the wreck-it GitHub App webhook and
+//! pulse trigger system.
 //!
 //! This worker receives webhook deliveries from GitHub, verifies the
 //! payload signature, and triggers an iteration of the wreck-it processing
-//! loop.  The Rust code compiles to WASM via `wasm32-unknown-unknown` and
-//! runs on the Cloudflare Workers runtime.
+//! loop.  It also supports scheduled (cron) triggers that iterate over all
+//! registered repositories, injecting entropy so that tasks with expired
+//! cooldowns can be picked up.
+//!
+//! The Rust code compiles to WASM via `wasm32-unknown-unknown` and runs on
+//! the Cloudflare Workers runtime.
 //!
 //! # Authentication
 //!
@@ -16,6 +21,17 @@
 //! issues, assign agents, merge PRs, and manage the complete task
 //! lifecycle.
 //!
+//! # Pulse trigger (scheduled / cron)
+//!
+//! Some iterations need to happen without an incoming webhook event — for
+//! example, when a ralph has a cooldown that has expired.  The pulse system
+//! solves this by:
+//!
+//! 1. **Auto-registering** repositories in a KV-backed pulse registry
+//!    whenever a webhook event is processed.
+//! 2. **Iterating** over all registered repos when a Cloudflare cron
+//!    trigger fires, running `process_iteration` for each.
+//!
 //! # Required secrets (set via `wrangler secret put`):
 //!
 //! - `GITHUB_WEBHOOK_SECRET` — webhook secret for HMAC-SHA256 verification.
@@ -27,6 +43,7 @@ mod github;
 mod github_app;
 mod kv_store;
 mod processor;
+mod pulse;
 mod types;
 mod webhook;
 
@@ -96,6 +113,19 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         Err(e) => {
             console_error!("[wreck-it] ✗ unhandled error: {e}");
             Response::error(format!("Internal error: {e}"), 500)
+        }
+    }
+}
+
+#[event(scheduled)]
+async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    console_log!("[wreck-it][pulse] cron trigger fired");
+    match pulse::run_pulse(&env).await {
+        Ok(summary) => {
+            console_log!("[wreck-it][pulse] {}", summary);
+        }
+        Err(e) => {
+            console_error!("[wreck-it][pulse] ✗ pulse failed: {e}");
         }
     }
 }
@@ -193,7 +223,11 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
     console_log!("[wreck-it] resolving app token for {}/{}", owner, repo_name);
     let github_token = match resolve_github_token(&env, &payload, repo_name).await {
         Ok(t) => {
-            console_log!("[wreck-it] ✓ app token resolved for {}/{}", owner, repo_name);
+            console_log!(
+                "[wreck-it] ✓ app token resolved for {}/{}",
+                owner,
+                repo_name
+            );
             t
         }
         Err(e) => {
@@ -286,6 +320,23 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
     }
     console_log!("[wreck-it] event accepted — processing");
 
+    // Auto-register this repository in the pulse registry so that
+    // scheduled (cron) triggers can iterate it even when no webhook
+    // events arrive.
+    if let Some(installation) = &payload.installation {
+        if let Ok(kv) = env.kv(kv_store::KV_BINDING) {
+            let reg = types::PulseRegistration {
+                owner: owner.to_string(),
+                repo: repo_name.to_string(),
+                installation_id: installation.id,
+                default_branch: default_branch.to_string(),
+            };
+            if let Err(e) = kv_store::upsert_pulse_registration(&kv, &reg).await {
+                console_warn!("[wreck-it] pulse registration upsert failed: {e}");
+            }
+        }
+    }
+
     // Create GitHub client and run the iteration.
     let client = github::GitHubClient::new(owner, repo_name, &github_token);
 
@@ -296,7 +347,10 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
         .map_err(|e| Error::RustError(e))?;
 
     if config_file.is_none() {
-        console_log!("[wreck-it] no .wreck-it/config.toml found on {} — skipping", default_branch);
+        console_log!(
+            "[wreck-it] no .wreck-it/config.toml found on {} — skipping",
+            default_branch
+        );
         return Response::ok("no wreck-it configuration found; skipping");
     }
 
