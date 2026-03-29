@@ -510,6 +510,23 @@ fn task_to_json(task: &Task) -> Value {
     })
 }
 
+/// Truncate a task description to at most 42 characters for table display.
+///
+/// Uses char-boundary–safe iteration so that multi-byte Unicode characters are
+/// never split.  Descriptions longer than 42 chars are shortened and a
+/// horizontal-ellipsis (U+2026 '…') is appended.
+fn truncate_description(description: &str) -> String {
+    // 42 chars fits within the 44-wide DESCRIPTION column (42 chars + 1 ellipsis + 1 space).
+    const MAX_CHARS: usize = 42;
+    let mut chars = description.chars().peekable();
+    let prefix: String = chars.by_ref().take(MAX_CHARS).collect();
+    if chars.peek().is_some() {
+        format!("{prefix}…")
+    } else {
+        prefix
+    }
+}
+
 fn format_task_table(rows: &[Value]) -> String {
     if rows.is_empty() {
         return "No tasks found.".to_string();
@@ -517,28 +534,29 @@ fn format_task_table(rows: &[Value]) -> String {
 
     let mut lines = Vec::new();
     lines.push(format!(
-        "{:<32} {:<12} {:<14} {:<5} {:<8}  DEPENDS_ON",
-        "ID", "STATUS", "ROLE", "PHASE", "PRIORITY"
+        "{:<32} {:<12} {:<14} {:<44} DEPENDS_ON",
+        "ID", "STATUS", "ROLE", "DESCRIPTION"
     ));
-    lines.push("-".repeat(90));
+    // Separator width: 32 + 1 + 12 + 1 + 14 + 1 + 44 + 1 + "DEPENDS_ON" (10) = 116,
+    // but we use 110 to keep the line compact for typical terminal widths.
+    lines.push("-".repeat(110));
 
     for row in rows {
         let id = row["id"].as_str().unwrap_or("");
         let status = row["status"].as_str().unwrap_or("");
         let role = row["role"].as_str().unwrap_or("");
-        let phase = row["phase"].as_u64().unwrap_or(0);
-        let priority = row["priority"].as_u64().unwrap_or(0);
+        let description = row["description"].as_str().unwrap_or("");
+        let description_truncated = truncate_description(description);
         let deps: Vec<&str> = row["depends_on"]
             .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
             .unwrap_or_default();
         lines.push(format!(
-            "{:<32} {:<12} {:<14} {:<5} {:<8}  {}",
+            "{:<32} {:<12} {:<14} {:<44} {}",
             id,
             status,
             role,
-            phase,
-            priority,
+            description_truncated,
             deps.join(", ")
         ));
     }
@@ -706,6 +724,128 @@ mod tests {
         let v: Value = serde_json::from_str(&resp).unwrap();
         let text = v["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("t1"));
+        assert!(
+            text.contains("Do something"),
+            "description should appear in list output"
+        );
+    }
+
+    #[test]
+    fn list_tasks_description_truncated() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        // Use a 50-character ASCII description (exceeds 42-char limit).
+        let long_desc = "A".repeat(50);
+        let add_req = json!({
+            "jsonrpc": "2.0", "id": 60,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {"id": "long-desc-task", "description": long_desc}
+            }
+        })
+        .to_string();
+        process_message(&ctx, &add_req).unwrap();
+
+        let list_req = json!({
+            "jsonrpc": "2.0", "id": 61,
+            "method": "tools/call",
+            "params": {"name": "list_tasks", "arguments": {}}
+        })
+        .to_string();
+        let resp = process_message(&ctx, &list_req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        // The description should be truncated with an ellipsis.
+        assert!(
+            text.contains('…'),
+            "long description should be truncated with ellipsis: {text}"
+        );
+        // The full 50-char description should NOT appear verbatim.
+        assert!(
+            !text.contains(&"A".repeat(50)),
+            "full long description should be truncated: {text}"
+        );
+        // The truncated prefix should be exactly 42 characters.
+        assert!(
+            text.contains(&"A".repeat(42)),
+            "truncated description should be 42 chars: {text}"
+        );
+    }
+
+    #[test]
+    fn list_tasks_description_unicode_safe() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        // Use multi-byte Unicode characters to ensure truncation is char-safe.
+        let long_desc = "é".repeat(50); // 'é' is 2 bytes in UTF-8
+        let add_req = json!({
+            "jsonrpc": "2.0", "id": 62,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {"id": "unicode-task", "description": long_desc}
+            }
+        })
+        .to_string();
+        process_message(&ctx, &add_req).unwrap();
+
+        let list_req = json!({
+            "jsonrpc": "2.0", "id": 63,
+            "method": "tools/call",
+            "params": {"name": "list_tasks", "arguments": {}}
+        })
+        .to_string();
+        // Should not panic on multi-byte characters.
+        let resp = process_message(&ctx, &list_req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains('…'),
+            "unicode description should be truncated: {text}"
+        );
+    }
+
+    // ── truncate_description ─────────────────────────────────────────────────
+
+    #[test]
+    fn truncate_description_short() {
+        assert_eq!(truncate_description("hello"), "hello");
+    }
+
+    #[test]
+    fn truncate_description_exact_limit() {
+        let s = "A".repeat(42);
+        assert_eq!(
+            truncate_description(&s),
+            s,
+            "exactly 42 chars should not be truncated"
+        );
+    }
+
+    #[test]
+    fn truncate_description_over_limit() {
+        let s = "A".repeat(50);
+        let result = truncate_description(&s);
+        let prefix: String = result.chars().take_while(|&c| c == 'A').collect();
+        assert_eq!(
+            prefix.chars().count(),
+            42,
+            "prefix should be exactly 42 chars"
+        );
+        assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_description_unicode() {
+        // 'é' is 2 bytes in UTF-8; truncating by byte index would panic at odd positions.
+        let s = "é".repeat(50);
+        let result = truncate_description(&s);
+        let prefix: String = result.chars().take_while(|&c| c == 'é').collect();
+        assert_eq!(prefix.chars().count(), 42);
+        assert!(result.ends_with('…'));
     }
 
     // ── add_task ─────────────────────────────────────────────────────────────
