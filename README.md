@@ -232,7 +232,34 @@ wreck-it can act as a [Model Context Protocol](https://spec.modelcontextprotocol
 wreck-it mcp --task-file tasks.json --work-dir .
 ```
 
-Add to your Claude Desktop `claude_desktop_config.json`:
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "wreck-it": {
+      "command": "wreck-it",
+      "args": ["mcp", "--task-file", "/path/to/tasks.json", "--work-dir", "/path/to/project"]
+    }
+  }
+}
+```
+
+**VS Code Copilot Chat** (`.vscode/mcp.json` in your workspace, or `~/Library/Application Support/Code/User/mcp.json` globally):
+
+```json
+{
+  "servers": {
+    "wreck-it": {
+      "type": "stdio",
+      "command": "wreck-it",
+      "args": ["mcp", "--task-file", "/path/to/tasks.json", "--work-dir", "/path/to/project"]
+    }
+  }
+}
+```
+
+**Cursor** (`~/.cursor/mcp.json` globally, or `.cursor/mcp.json` per project):
 
 ```json
 {
