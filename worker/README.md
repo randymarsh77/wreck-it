@@ -50,6 +50,7 @@ GitHub Event (webhook)          Cron Trigger (pulse)
 | `issues` | `opened` / `labeled` | Triggers iteration when issue has `wreck-it` label |
 | `push` | any | Triggers iteration (external state updates) |
 | `pull_request` | `closed` (merged) | Marks task complete, updates state |
+| `pull_request` | `opened` / `ready_for_review` / `synchronize` | Approves pending workflow runs and enables auto-merge for trusted PRs |
 | `ping` | — | Responds with `pong` (app setup verification) |
 | `scheduled` | cron | Iterates all registered repos (pulse trigger) |
 
@@ -100,7 +101,22 @@ The pulse registry can also be managed via the REST API:
 rustup target add wasm32-unknown-unknown
 ```
 
-### 2. Configure secrets
+### 2. Create a KV namespace
+
+```sh
+cd worker
+wrangler kv namespace create WRECK_IT_STORE
+```
+
+Copy the `id` from the output and replace `REPLACE_WITH_KV_NAMESPACE_ID` in `wrangler.toml`:
+
+```toml
+[[kv_namespaces]]
+binding = "WRECK_IT_STORE"
+id = "<your-namespace-id>"
+```
+
+### 3. Configure secrets
 
 ```sh
 cd worker
@@ -109,16 +125,17 @@ cd worker
 wrangler secret put GITHUB_WEBHOOK_SECRET   # Webhook secret from GitHub App settings
 wrangler secret put GITHUB_APP_ID           # Numeric App ID
 wrangler secret put GITHUB_APP_PRIVATE_KEY  # PEM-encoded RSA private key
+wrangler secret put API_TOKEN               # Bearer token for the REST API endpoints
 ```
 
-### 3. Deploy
+### 4. Deploy
 
 ```sh
 cd worker
 wrangler deploy
 ```
 
-### 4. Configure the GitHub App
+### 5. Configure the GitHub App
 
 Point the GitHub App's webhook URL to your deployed worker URL (e.g. `https://wreck-it-worker.<your-subdomain>.workers.dev`).
 

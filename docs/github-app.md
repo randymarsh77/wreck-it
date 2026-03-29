@@ -43,6 +43,7 @@ The worker subscribes to three GitHub webhook event types. All other events are 
 | `issues` | `opened` or `labeled` | An issue is created or labeled **and** carries the `wreck-it` label |
 | `push` | *(any)* | A push to any branch (typically the state branch after a state commit) |
 | `pull_request` | `closed` with `merged: true` | A pull request is merged (signals task completion) |
+| `pull_request` | `opened`, `ready_for_review`, `synchronize` | Approves pending workflow runs and enables auto-merge for trusted PRs |
 | `ping` | — | GitHub's setup verification ping; the worker responds with `pong` |
 
 ### Issue events
@@ -61,6 +62,8 @@ Any push to the repository triggers an iteration. This is the primary mechanism 
 ### Pull request events
 
 Merged PRs trigger a dedicated handler that marks the corresponding task as complete, updates the state, and prepares the system to pick up the next task.
+
+Non-merged PR events (`opened`, `ready_for_review`, `synchronize`) from trusted authors trigger **workflow run approval**: the worker approves any pending workflow runs so required checks can execute, then enables auto-merge when the base branch has required status checks. This handles cases where workflow runs need explicit approval before they can run (e.g. first-time contributors, outside collaborators, or fork PRs).
 
 ## Agent Triggering
 
@@ -224,11 +227,25 @@ Generate a **private key** from the app settings page and note the **App ID**.
 # Install the WASM target
 rustup target add wasm32-unknown-unknown
 
-# Set secrets
+# Create the KV namespace
 cd worker
+wrangler kv namespace create WRECK_IT_STORE
+```
+
+Copy the `id` from the output and replace `REPLACE_WITH_KV_NAMESPACE_ID` in `wrangler.toml`:
+
+```toml
+[[kv_namespaces]]
+binding = "WRECK_IT_STORE"
+id = "<your-namespace-id>"
+```
+
+```sh
+# Set secrets
 wrangler secret put GITHUB_WEBHOOK_SECRET   # Webhook secret from GitHub App settings
 wrangler secret put GITHUB_APP_ID           # Numeric App ID from the GitHub App settings
 wrangler secret put GITHUB_APP_PRIVATE_KEY  # PEM-encoded private key (paste the full key)
+wrangler secret put API_TOKEN               # Bearer token for the REST API endpoints
 
 # Deploy
 wrangler deploy
@@ -241,6 +258,7 @@ wrangler deploy
 | `GITHUB_WEBHOOK_SECRET` | Yes | HMAC-SHA256 secret for verifying webhook payload signatures |
 | `GITHUB_APP_ID` | Yes | Numeric GitHub App ID |
 | `GITHUB_APP_PRIVATE_KEY` | Yes | PEM-encoded RSA private key from the GitHub App |
+| `API_TOKEN` | Yes | Bearer token for authenticating REST API requests |
 
 ## Source Code Reference
 
