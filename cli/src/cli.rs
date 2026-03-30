@@ -359,11 +359,13 @@ pub enum Commands {
     /// AI assistants that support MCP (Claude Desktop, VS Code Copilot Chat,
     /// Cursor, etc.) can connect to this server and call the following tools:
     ///
-    ///   • list_tasks        – list all tasks and their statuses
-    ///   • add_task          – append a new task to the task file
+    ///   • list_tasks         – list all tasks and their statuses
+    ///   • get_task           – get full details of a single task by id
+    ///   • add_task           – append a new task to the task file
     ///   • update_task_status – update the status of an existing task
-    ///   • read_artefact     – read an artefact by "task-id/artefact-name" key
-    ///   • trigger_iteration – obtain the CLI command that runs one loop step
+    ///   • read_artefact      – read an artefact by "task-id/artefact-name" key
+    ///   • list_artefacts     – list all artefact keys in the manifest
+    ///   • trigger_iteration  – obtain the CLI command that runs one loop step
     ///
     /// Example Claude Desktop config snippet (claude_desktop_config.json):
     ///   "wreck-it": {
