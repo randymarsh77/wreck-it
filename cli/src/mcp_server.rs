@@ -9,9 +9,11 @@
 //! | Tool                 | Description                                              |
 //! |----------------------|----------------------------------------------------------|
 //! | `list_tasks`         | List all tasks with id, status, role, and description    |
+//! | `get_task`           | Get full details of a single task by id                  |
 //! | `add_task`           | Append a new task to the task file                       |
 //! | `update_task_status` | Update the lifecycle status of an existing task          |
 //! | `read_artefact`      | Read an artefact by `"task-id/artefact-name"` key        |
+//! | `list_artefacts`     | List all artefact keys in the artefact manifest          |
 //! | `trigger_iteration`  | Return the CLI command that runs one loop iteration      |
 //!
 //! [Model Context Protocol]: https://spec.modelcontextprotocol.io/
@@ -157,6 +159,29 @@ fn tools_list() -> Value {
                         }
                     },
                     "required": ["key"]
+                }
+            },
+            {
+                "name": "get_task",
+                "description": "Get the full details of a single task by its ID.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "ID of the task to retrieve."
+                        }
+                    },
+                    "required": ["id"]
+                }
+            },
+            {
+                "name": "list_artefacts",
+                "description": "List all artefact keys stored in the artefact manifest.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
                 }
             },
             {
@@ -322,6 +347,40 @@ fn handle_trigger_iteration(ctx: &ServerContext, params: &Value) -> Result<Value
     )))
 }
 
+fn handle_get_task(ctx: &ServerContext, params: &Value) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing required parameter 'id'".to_string())?;
+
+    let tasks = task_manager::load_tasks(&ctx.task_file)
+        .map_err(|e| format!("Failed to load tasks: {e}"))?;
+
+    match tasks.iter().find(|t| t.id == id) {
+        Some(task) => {
+            let json = task_to_json(task);
+            Ok(mcp_text(
+                serde_json::to_string_pretty(&json).unwrap_or_default(),
+            ))
+        }
+        None => Err(format!("Task '{}' not found.", id)),
+    }
+}
+
+fn handle_list_artefacts(ctx: &ServerContext) -> Result<Value, String> {
+    let manifest_path = ctx.artefact_manifest_path();
+    let manifest = artefact_store::load_manifest(&manifest_path)
+        .map_err(|e| format!("Failed to load artefact manifest: {e}"))?;
+
+    if manifest.artefacts.is_empty() {
+        return Ok(mcp_text("No artefacts found."));
+    }
+
+    let mut keys: Vec<&str> = manifest.artefacts.keys().map(|s| s.as_str()).collect();
+    keys.sort_unstable();
+    Ok(mcp_text(keys.join("\n")))
+}
+
 // ── Request dispatcher ────────────────────────────────────────────────────────
 
 fn dispatch_tool_call(ctx: &ServerContext, params: &Value) -> (Value, Option<bool>) {
@@ -342,9 +401,11 @@ fn dispatch_tool_call(ctx: &ServerContext, params: &Value) -> (Value, Option<boo
 
     let result = match name {
         "list_tasks" => handle_list_tasks(ctx, args),
+        "get_task" => handle_get_task(ctx, args),
         "add_task" => handle_add_task(ctx, args),
         "update_task_status" => handle_update_task_status(ctx, args),
         "read_artefact" => handle_read_artefact(ctx, args),
+        "list_artefacts" => handle_list_artefacts(ctx),
         "trigger_iteration" => handle_trigger_iteration(ctx, args),
         unknown => Err(format!("Unknown tool '{unknown}'")),
     };
@@ -1255,5 +1316,185 @@ mod tests {
         assert!(!text.contains("\\\""), "unexpected escaped quotes: {text}");
         assert!(text.contains("wreck-it run"));
         assert!(!text.contains("--headless"));
+    }
+
+    // ── get_task ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn get_task_returns_full_details() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        // Add a task.
+        let add_req = json!({
+            "jsonrpc": "2.0", "id": 70,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {"id": "detail-task", "description": "A task with details"}
+            }
+        })
+        .to_string();
+        process_message(&ctx, &add_req).unwrap();
+
+        // Retrieve it via get_task.
+        let req = json!({
+            "jsonrpc": "2.0", "id": 71,
+            "method": "tools/call",
+            "params": {
+                "name": "get_task",
+                "arguments": {"id": "detail-task"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("detail-task"),
+            "id should appear in output: {text}"
+        );
+        assert!(
+            text.contains("A task with details"),
+            "full description should appear (no truncation): {text}"
+        );
+        assert!(!v["result"]["isError"].as_bool().unwrap_or(false));
+    }
+
+    #[test]
+    fn get_task_missing_id_returns_error() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 72,
+            "method": "tools/call",
+            "params": {
+                "name": "get_task",
+                "arguments": {}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert_eq!(v["result"]["isError"], true);
+    }
+
+    #[test]
+    fn get_task_not_found_returns_error() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 73,
+            "method": "tools/call",
+            "params": {
+                "name": "get_task",
+                "arguments": {"id": "ghost-task"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert_eq!(v["result"]["isError"], true);
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("ghost-task"),
+            "error should mention the missing id: {text}"
+        );
+    }
+
+    // ── list_artefacts ───────────────────────────────────────────────────────
+
+    #[test]
+    fn list_artefacts_empty() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 80,
+            "method": "tools/call",
+            "params": {"name": "list_artefacts", "arguments": {}}
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("No artefacts"),
+            "expected empty message: {text}"
+        );
+    }
+
+    #[test]
+    fn list_artefacts_returns_sorted_keys() {
+        use crate::artefact_store::{save_manifest, ArtefactEntry, ArtefactManifest};
+        use crate::types::ArtefactKind;
+
+        let (dir, task_file) = setup_task_file();
+        let manifest_path = dir.path().join(".wreck-it-artefacts.json");
+        let mut manifest = ArtefactManifest::default();
+        for key in &["z-task/output", "a-task/result", "m-task/data"] {
+            manifest.artefacts.insert(
+                key.to_string(),
+                ArtefactEntry {
+                    kind: ArtefactKind::File,
+                    name: "output".to_string(),
+                    path: "out.txt".to_string(),
+                    content: "content".to_string(),
+                },
+            );
+        }
+        save_manifest(&manifest_path, &manifest).unwrap();
+
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 81,
+            "method": "tools/call",
+            "params": {"name": "list_artefacts", "arguments": {}}
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        // All three keys should appear.
+        assert!(
+            text.contains("a-task/result"),
+            "missing a-task/result: {text}"
+        );
+        assert!(text.contains("m-task/data"), "missing m-task/data: {text}");
+        assert!(
+            text.contains("z-task/output"),
+            "missing z-task/output: {text}"
+        );
+        // They should be in sorted order.
+        let a_pos = text.find("a-task/result").unwrap();
+        let m_pos = text.find("m-task/data").unwrap();
+        let z_pos = text.find("z-task/output").unwrap();
+        assert!(
+            a_pos < m_pos && m_pos < z_pos,
+            "keys should be sorted: {text}"
+        );
+    }
+
+    // ── tools/list includes new tools ────────────────────────────────────────
+
+    #[test]
+    fn tools_list_contains_get_task_and_list_artefacts() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = r#"{"jsonrpc":"2.0","id":90,"method":"tools/list","params":{}}"#;
+        let resp = process_message(&ctx, req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+
+        let tools = v["result"]["tools"].as_array().unwrap();
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"get_task"), "missing get_task: {names:?}");
+        assert!(
+            names.contains(&"list_artefacts"),
+            "missing list_artefacts: {names:?}"
+        );
     }
 }
