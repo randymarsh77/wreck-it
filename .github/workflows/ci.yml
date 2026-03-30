@@ -137,6 +137,37 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+  portal-deploy:
+    name: Deploy Portal
+    runs-on: ubuntu-latest
+    needs: [build, test, clippy, fmt]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: site/portal
+        run: npm ci
+
+      - name: Build portal
+        working-directory: site/portal
+        run: npm run build
+
+      - name: Deploy portal
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: site/portal
+          command: pages deploy dist --project-name wreck-it-portal
+
   worker-deploy:
     name: Deploy Worker
     runs-on: ubuntu-latest
