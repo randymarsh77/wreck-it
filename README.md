@@ -272,7 +272,7 @@ wreck-it mcp --task-file tasks.json --work-dir .
 }
 ```
 
-Exposed tools: `list_tasks`, `add_task`, `update_task_status`, `read_artefact`, `trigger_iteration`.
+Exposed tools: `list_tasks`, `get_task`, `add_task`, `update_task_status`, `read_artefact`, `list_artefacts`, `trigger_iteration`.
 
 Options:
 - `-t, --task-file <PATH>`: Task file (default: `tasks.json`)
