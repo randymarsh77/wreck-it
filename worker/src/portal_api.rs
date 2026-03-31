@@ -369,7 +369,10 @@ async fn list_installations(req: Request, ctx: RouteContext<()>) -> Result<Respo
 }
 
 /// `GET /api/portal/installations/:installation_id/repos` — list repos for
-/// an installation.
+/// an installation.  Supports optional `page` and `per_page` query
+/// parameters that are forwarded to the GitHub API.  Returns
+/// `{ total_count, repositories }` so the frontend can render pagination
+/// controls.
 async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let github_token = verify_portal_session(&req, &ctx)
         .await
@@ -379,17 +382,30 @@ async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<
         Error::RustError("Missing installation_id parameter".into())
     })?;
 
+    // Extract optional pagination query parameters.
+    let req_url = req.url().map_err(|e| Error::RustError(format!("bad url: {e}")))?;
+    let page = req_url
+        .query_pairs()
+        .find(|(k, _)| k == "page")
+        .and_then(|(_, v)| v.parse::<u32>().ok())
+        .unwrap_or(1);
+    let per_page = req_url
+        .query_pairs()
+        .find(|(k, _)| k == "per_page")
+        .and_then(|(_, v)| v.parse::<u32>().ok())
+        .unwrap_or(30)
+        .min(100);
+
     let url = format!(
-        "https://api.github.com/user/installations/{installation_id}/repositories"
+        "https://api.github.com/user/installations/{installation_id}/repositories?page={page}&per_page={per_page}"
     );
     let data = github_api_get(&url, &github_token)
         .await
         .map_err(Error::RustError)?;
 
-    // GitHub returns { total_count, repositories: [...] } — unwrap to a
-    // plain array so the frontend can use it directly.
-    let repos = data.get("repositories").cloned().unwrap_or(data);
-    json_response(&repos, 200)
+    // GitHub returns { total_count, repositories: [...] } — forward the
+    // full object so the frontend can use total_count for pagination.
+    json_response(&data, 200)
 }
 
 // ---------------------------------------------------------------------------
