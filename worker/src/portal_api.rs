@@ -362,7 +362,10 @@ async fn list_installations(req: Request, ctx: RouteContext<()>) -> Result<Respo
     .await
     .map_err(Error::RustError)?;
 
-    json_response(&data, 200)
+    // GitHub returns { total_count, installations: [...] } — unwrap to a
+    // plain array so the frontend can use it directly.
+    let installations = data.get("installations").cloned().unwrap_or(data);
+    json_response(&installations, 200)
 }
 
 /// `GET /api/portal/installations/:installation_id/repos` — list repos for
@@ -383,7 +386,10 @@ async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<
         .await
         .map_err(Error::RustError)?;
 
-    json_response(&data, 200)
+    // GitHub returns { total_count, repositories: [...] } — unwrap to a
+    // plain array so the frontend can use it directly.
+    let repos = data.get("repositories").cloned().unwrap_or(data);
+    json_response(&repos, 200)
 }
 
 // ---------------------------------------------------------------------------
