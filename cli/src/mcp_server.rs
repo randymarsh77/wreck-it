@@ -723,6 +723,14 @@ mod tests {
         (dir, path)
     }
 
+    /// Return only the data rows from a `list_tasks` table response text,
+    /// skipping the header and separator lines.
+    fn data_rows(text: &str) -> Vec<&str> {
+        text.lines()
+            .filter(|l| !l.starts_with('-') && !l.starts_with("ID"))
+            .collect()
+    }
+
     // ── initialize ──────────────────────────────────────────────────────────
 
     #[test]
@@ -1363,11 +1371,181 @@ mod tests {
         assert!(text.contains("a"), "expected task 'a' in output: {text}");
         // Each row starts with the task ID left-padded; 'b' is only present as
         // a subtask that was never moved to completed so it should be absent.
-        let lines: Vec<&str> = text
-            .lines()
-            .filter(|l| !l.starts_with('-') && !l.starts_with("ID"))
-            .collect();
+        let lines = data_rows(text);
         assert_eq!(lines.len(), 1, "expected exactly one data row: {text}");
+    }
+
+    #[test]
+    fn list_tasks_in_progress_filter() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        // Add two tasks.
+        for id in &["task-x", "task-y"] {
+            let add_req = json!({
+                "jsonrpc": "2.0", "id": 53,
+                "method": "tools/call",
+                "params": {"name": "add_task", "arguments": {"id": id, "description": "work"}}
+            })
+            .to_string();
+            process_message(&ctx, &add_req).unwrap();
+        }
+        // Mark 'task-x' as in-progress.
+        let upd_req = json!({
+            "jsonrpc": "2.0", "id": 54,
+            "method": "tools/call",
+            "params": {
+                "name": "update_task_status",
+                "arguments": {"id": "task-x", "status": "in-progress"}
+            }
+        })
+        .to_string();
+        process_message(&ctx, &upd_req).unwrap();
+
+        // Filter for in-progress.
+        let list_req = json!({
+            "jsonrpc": "2.0", "id": 55,
+            "method": "tools/call",
+            "params": {
+                "name": "list_tasks",
+                "arguments": {"status": "in-progress"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &list_req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        // task-x (in-progress) should appear; task-y (pending) should not.
+        let data_lines = data_rows(text);
+        assert_eq!(data_lines.len(), 1, "expected exactly one in-progress row: {text}");
+        assert!(text.contains("task-x"), "expected task-x in output: {text}");
+        assert!(!text.contains("task-y"), "task-y should be filtered out: {text}");
+    }
+
+    #[test]
+    fn list_tasks_failed_filter() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        // Add two tasks.
+        for id in &["ok-task", "bad-task"] {
+            let add_req = json!({
+                "jsonrpc": "2.0", "id": 56,
+                "method": "tools/call",
+                "params": {"name": "add_task", "arguments": {"id": id, "description": "desc"}}
+            })
+            .to_string();
+            process_message(&ctx, &add_req).unwrap();
+        }
+        // Mark 'bad-task' as failed.
+        let upd_req = json!({
+            "jsonrpc": "2.0", "id": 57,
+            "method": "tools/call",
+            "params": {
+                "name": "update_task_status",
+                "arguments": {"id": "bad-task", "status": "failed"}
+            }
+        })
+        .to_string();
+        process_message(&ctx, &upd_req).unwrap();
+
+        // Filter for failed.
+        let list_req = json!({
+            "jsonrpc": "2.0", "id": 58,
+            "method": "tools/call",
+            "params": {
+                "name": "list_tasks",
+                "arguments": {"status": "failed"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &list_req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        let data_lines = data_rows(text);
+        assert_eq!(data_lines.len(), 1, "expected exactly one failed row: {text}");
+        assert!(text.contains("bad-task"), "expected bad-task in output: {text}");
+        assert!(!text.contains("ok-task"), "ok-task should be filtered out: {text}");
+    }
+
+    #[test]
+    fn list_tasks_in_progress_underscore_alias() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        let add_req = json!({
+            "jsonrpc": "2.0", "id": 59,
+            "method": "tools/call",
+            "params": {"name": "add_task", "arguments": {"id": "alias-task", "description": "test"}}
+        })
+        .to_string();
+        process_message(&ctx, &add_req).unwrap();
+
+        // Set status to in-progress using hyphen form.
+        let upd_req = json!({
+            "jsonrpc": "2.0", "id": 60,
+            "method": "tools/call",
+            "params": {
+                "name": "update_task_status",
+                "arguments": {"id": "alias-task", "status": "in-progress"}
+            }
+        })
+        .to_string();
+        process_message(&ctx, &upd_req).unwrap();
+
+        // Query using underscore alias (in_progress).
+        let list_req = json!({
+            "jsonrpc": "2.0", "id": 61,
+            "method": "tools/call",
+            "params": {
+                "name": "list_tasks",
+                "arguments": {"status": "in_progress"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &list_req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("alias-task"),
+            "in_progress alias should match in-progress tasks: {text}"
+        );
+    }
+
+    #[test]
+    fn add_task_duplicate_id_returns_error() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        // Add a task successfully.
+        let first = json!({
+            "jsonrpc": "2.0", "id": 62,
+            "method": "tools/call",
+            "params": {"name": "add_task", "arguments": {"id": "dup-task", "description": "first"}}
+        })
+        .to_string();
+        let resp = process_message(&ctx, &first).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert!(!v["result"]["isError"].as_bool().unwrap_or(false));
+
+        // Try to add a second task with the same ID.
+        let second = json!({
+            "jsonrpc": "2.0", "id": 63,
+            "method": "tools/call",
+            "params": {"name": "add_task", "arguments": {"id": "dup-task", "description": "duplicate"}}
+        })
+        .to_string();
+        let resp = process_message(&ctx, &second).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert!(
+            v["result"]["isError"].as_bool().unwrap_or(false),
+            "adding a duplicate task ID should return an error"
+        );
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("dup-task"),
+            "error message should mention the duplicate id: {text}"
+        );
     }
 
     // ── shell_quote ──────────────────────────────────────────────────────────
