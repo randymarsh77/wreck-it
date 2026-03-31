@@ -1,5 +1,5 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_trigger",
   "iteration": 80,
   "current_task_id": "mcp-server-integration",
   "issue_number": 916,
@@ -304,21 +304,22 @@
     "iteration 78: agent completed without PR for task Some(\"mcp-server-integration\")",
     "iteration 79: triggered cloud agent for task mcp-server-integration (issue #913)",
     "iteration 79: agent completed without PR for task Some(\"mcp-server-integration\")",
-    "iteration 80: triggered cloud agent for task mcp-server-integration (issue #916)"
+    "iteration 80: triggered cloud agent for task mcp-server-integration (issue #916)",
+    "iteration 80: agent completed without PR for task Some(\"mcp-server-integration\")"
   ],
   "task_statuses": {
-    "llm-cost-optimizer-routing": "inprogress",
-    "ideas-agent-output-caching": "inprogress",
     "ideas-task-lifecycle-hooks": "inprogress",
     "natural-language-task-query": "inprogress",
-    "ideas-html-report": "inprogress",
     "ideas-dependency-pruning": "inprogress",
     "ideas-error-classification": "inprogress",
-    "adaptive-prompt-optimizer": "inprogress",
+    "mcp-server-integration": "inprogress",
     "visual-workflow-exporter": "inprogress",
     "cross-platform-notification-hub": "inprogress",
+    "ideas-html-report": "inprogress",
+    "ideas-agent-output-caching": "inprogress",
     "ideas-cloudflare-log-source": "inprogress",
-    "mcp-server-integration": "inprogress",
-    "otel-metrics-export": "inprogress"
+    "otel-metrics-export": "inprogress",
+    "llm-cost-optimizer-routing": "inprogress",
+    "adaptive-prompt-optimizer": "inprogress"
   }
 }
