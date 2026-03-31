@@ -60,11 +60,7 @@ enum StepOutcome {
 /// When a `task_branch` is configured in the repo config, task files live on
 /// the main checkout (`work_dir`) alongside the code.  Otherwise, they are
 /// read from the state worktree (`state_dir`) for backward compatibility.
-fn resolve_task_dir(
-    repo_cfg: Option<&RepoConfig>,
-    work_dir: &Path,
-    state_dir: &Path,
-) -> PathBuf {
+fn resolve_task_dir(repo_cfg: Option<&RepoConfig>, work_dir: &Path, state_dir: &Path) -> PathBuf {
     if let Some(cfg) = repo_cfg {
         if cfg.task_branch.is_some() {
             return work_dir.to_path_buf();
@@ -1256,9 +1252,10 @@ async fn run_needs_trigger(
     ));
 
     // Mark task as InProgress in state map and task file.
-    state
-        .task_statuses
-        .insert(pending_task.id.clone(), crate::types::TaskStatus::InProgress);
+    state.task_statuses.insert(
+        pending_task.id.clone(),
+        crate::types::TaskStatus::InProgress,
+    );
     let mut updated_tasks = load_tasks(&task_file)?;
     if let Some(task) = updated_tasks.iter_mut().find(|t| t.id == pending_task.id) {
         task.status = crate::types::TaskStatus::InProgress;
@@ -2231,7 +2228,8 @@ mod tests {
         save_tasks(&task_file, &tasks).unwrap();
 
         // UNKNOWN_TASK_ID task IDs are skipped.
-        mark_task_complete_by_id(UNKNOWN_TASK_ID, &task_file, &mut HeadlessState::default()).unwrap();
+        mark_task_complete_by_id(UNKNOWN_TASK_ID, &task_file, &mut HeadlessState::default())
+            .unwrap();
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Pending);
@@ -2492,7 +2490,8 @@ mod tests {
         save_tasks(&task_file, &tasks).unwrap();
 
         // UNKNOWN_TASK_ID task IDs are skipped.
-        mark_task_pending_by_id(UNKNOWN_TASK_ID, &task_file, &mut HeadlessState::default()).unwrap();
+        mark_task_pending_by_id(UNKNOWN_TASK_ID, &task_file, &mut HeadlessState::default())
+            .unwrap();
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::InProgress);

@@ -1,0 +1,862 @@
+[
+  {
+    "id": "ideas-webhook-notifications",
+    "description": "Research and design a webhook notification system for wreck-it. The system should allow users to configure one or more webhook URLs (e.g. Slack, Discord, or generic HTTP endpoints) that receive JSON payloads whenever a task changes status (started, completed, failed). Review the existing Config and Task types in cli/src/types.rs and cli/src/ralph_loop.rs to design the integration points. Propose a Config field (e.g. notify_webhooks: Vec<String>), a minimal JSON payload schema, and identify exactly where in ralph_loop.rs the hook calls should be inserted (after status transitions). Document findings as inline comments in a new cli/src/notifier.rs stub file.",
+    "status": "completed",
+    "role": "ideas",
+    "priority": 3,
+    "complexity": 2,
+    "last_attempt_at": 1772857429
+  },
+  {
+    "id": "impl-webhook-notifications",
+    "description": "Implement the webhook notification system designed in ideas-webhook-notifications. Create cli/src/notifier.rs with an async `notify` function that sends an HTTP POST with a JSON payload (task id, status, timestamp, description) to each configured URL using reqwest. Add a `notify_webhooks: Vec<String>` field to Config in cli/src/types.rs (default empty, skip_serializing_if empty). Wire calls to `notify` in cli/src/ralph_loop.rs after task status transitions to InProgress, Completed, and Failed. Add `--notify-webhook <URL>` (multi-value) CLI flag in cli/src/cli.rs that appends to the config's webhook list. Ensure failures to reach a webhook are logged as warnings but do not abort the loop.",
+    "status": "completed",
+    "phase": 2,
+    "depends_on": [
+      "ideas-webhook-notifications"
+    ],
+    "priority": 3,
+    "complexity": 4,
+    "last_attempt_at": 1772859148
+  },
+  {
+    "id": "test-webhook-notifications",
+    "description": "Add unit and integration tests for the webhook notification system. In cli/src/notifier.rs or a separate test module, use a mock HTTP server (wiremock or httpmock crate, or a simple tokio TCP listener) to verify: (1) a POST request is sent to each configured URL on task status change, (2) the JSON payload contains the correct task id, status, and timestamp fields, (3) a webhook failure (connection refused) logs a warning but does not propagate an error. Run `cargo test` to confirm all tests pass.",
+    "status": "completed",
+    "phase": 3,
+    "depends_on": [
+      "impl-webhook-notifications"
+    ],
+    "priority": 3,
+    "complexity": 3,
+    "last_attempt_at": 1772860747
+  },
+  {
+    "id": "eval-webhook-notifications",
+    "description": "Evaluate the completed webhook notification implementation. Review cli/src/notifier.rs, the Config changes in cli/src/types.rs, the call sites in cli/src/ralph_loop.rs, and the CLI flag in cli/src/cli.rs. Verify: (1) the code compiles with no warnings (`cargo clippy -- -D warnings`), (2) the JSON payload schema is documented clearly, (3) errors are handled gracefully without aborting the loop, (4) the feature is reflected in README.md Features list. Fix any issues found and mark this task complete.",
+    "status": "completed",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-webhook-notifications"
+    ],
+    "priority": 3,
+    "complexity": 2,
+    "last_attempt_at": 1772861853
+  },
+  {
+    "id": "ideas-task-timeout-retry",
+    "description": "Research and design per-task timeout and auto-retry support for wreck-it. Review the Task struct in core/src/types.rs (or cli/src/types.rs) and the agent execution flow in cli/src/ralph_loop.rs and cli/src/agent.rs. Propose: (1) new optional Task fields `timeout_seconds: Option<u64>` and `max_retries: Option<u32>`, (2) how tokio::time::timeout wraps the agent call, (3) how the retry counter is tracked in task state without requiring a new state file (reuse or extend the existing failed_attempts field if present). Document the design with inline notes in a scratch section of this task's description or as comments in a new branch of the relevant source files.",
+    "status": "completed",
+    "role": "ideas",
+    "priority": 4,
+    "complexity": 2,
+    "last_attempt_at": 1772862919
+  },
+  {
+    "id": "impl-task-timeout-retry",
+    "description": "Implement per-task timeout and auto-retry. Add optional fields `timeout_seconds: Option<u64>` and `max_retries: Option<u32>` to the Task struct in core/src/types.rs (with serde defaults of None). In cli/src/ralph_loop.rs, wrap the agent execution call with `tokio::time::timeout` when `timeout_seconds` is set, treating a timeout as a task failure with a clear error message. Add retry logic: if a task fails and its `failed_attempts` count is below `max_retries`, reset its status back to Pending (instead of Failed) so the scheduler picks it up again on the next iteration. Ensure retry counts are persisted to the task file.",
+    "status": "completed",
+    "phase": 2,
+    "depends_on": [
+      "ideas-task-timeout-retry"
+    ],
+    "priority": 4,
+    "complexity": 5,
+    "last_attempt_at": 1772872387
+  },
+  {
+    "id": "test-task-timeout-retry",
+    "description": "Add tests for the per-task timeout and auto-retry feature. In core/src/ or cli/src/, add unit tests that verify: (1) a task with `timeout_seconds: 1` that takes longer than 1 second is marked as failed with a timeout error message, (2) a task with `max_retries: 2` that fails is reset to Pending status and only marked Failed after exceeding the retry limit, (3) a task with no timeout_seconds or max_retries behaves exactly as before. Run `cargo test` to confirm all tests pass.",
+    "status": "completed",
+    "phase": 3,
+    "depends_on": [
+      "impl-task-timeout-retry"
+    ],
+    "priority": 4,
+    "complexity": 3,
+    "last_attempt_at": 1772873450
+  },
+  {
+    "id": "eval-task-timeout-retry",
+    "description": "Evaluate the timeout and auto-retry implementation. Review the Task struct changes, ralph_loop.rs modifications, and new tests. Verify: (1) `cargo clippy -- -D warnings` passes cleanly, (2) the task file format documentation in README.md is updated to document the new `timeout_seconds` and `max_retries` fields in the task format table, (3) retry semantics do not conflict with the existing adaptive re-planning feature (replan threshold). Fix any issues found.",
+    "status": "completed",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-task-timeout-retry"
+    ],
+    "priority": 4,
+    "complexity": 2,
+    "last_attempt_at": 1772874154
+  },
+  {
+    "id": "ideas-task-graph-export",
+    "description": "Research and design a `wreck-it graph` sub-command that reads a task file and exports the dependency graph in Mermaid flowchart and/or GraphViz DOT format. Review the existing CLI structure in cli/src/cli.rs (clap commands) and the Task type. Design: (1) a new `graph` subcommand with flags `--task-file`, `--format <mermaid|dot>`, and `--output <file>` (default stdout), (2) the Mermaid flowchart syntax for representing task nodes (id + role) and directed edges (depends_on relationships), coloured by status (pending=gray, completed=green, failed=red). No new dependencies should be needed since graph generation is pure string formatting.",
+    "status": "completed",
+    "role": "ideas",
+    "priority": 2,
+    "complexity": 2,
+    "last_attempt_at": 1772875204
+  },
+  {
+    "id": "impl-task-graph-export",
+    "description": "Implement the `wreck-it graph` sub-command. Add a `Graph` variant to the Commands enum in cli/src/cli.rs with args `--task-file`, `--format` (mermaid or dot, default mermaid), and `--output`. Create cli/src/graph.rs with a `generate_mermaid` and `generate_dot` function that reads the task list and emits the graph text: nodes labelled with task id and role, edges from each task to its dependents, node style reflecting status (pending/completed/failed/inprogress). Wire the command in cli/src/main.rs. No extra crate dependencies are needed.",
+    "status": "completed",
+    "phase": 2,
+    "depends_on": [
+      "ideas-task-graph-export"
+    ],
+    "priority": 2,
+    "complexity": 3,
+    "last_attempt_at": 1772876274
+  },
+  {
+    "id": "test-task-graph-export",
+    "description": "Add tests for the graph export feature. In cli/src/graph.rs or a test module, add unit tests that: (1) verify `generate_mermaid` produces valid Mermaid syntax for a simple 3-task chain (A \u2192 B \u2192 C), including the correct flowchart header and arrow syntax, (2) verify `generate_dot` produces valid DOT syntax with digraph header, node definitions, and edge declarations, (3) verify tasks with no dependencies appear as isolated nodes. Run `cargo test` to confirm all tests pass.",
+    "status": "completed",
+    "phase": 3,
+    "depends_on": [
+      "impl-task-graph-export"
+    ],
+    "priority": 2,
+    "complexity": 2,
+    "last_attempt_at": 1772877071
+  },
+  {
+    "id": "eval-task-graph-export",
+    "description": "Evaluate the graph export implementation. Review cli/src/graph.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the `wreck-it graph` command is documented in README.md under Usage, (3) the Mermaid output renders correctly when pasted into mermaid.live, (4) edge cases are handled (tasks with no depends_on, circular deps emitting a warning). Fix any issues found.",
+    "status": "completed",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-task-graph-export"
+    ],
+    "priority": 2,
+    "complexity": 2,
+    "last_attempt_at": 1772878034
+  },
+  {
+    "id": "ideas-github-issues-integration",
+    "description": "Research and design GitHub Issues integration for wreck-it. The feature should optionally create a GitHub Issue when a task starts (InProgress) and close it when the task completes or fails. Review the existing CLI config (cli/src/types.rs Config struct), the project_api.rs and agent_memory.rs files, and the GitHub REST API for issue creation/closure. Design: (1) new Config fields `github_issues_enabled: bool`, `github_repo: Option<String>` (owner/repo), `github_token: Option<String>` (falls back to GITHUB_TOKEN env var), (2) a minimal GitHub API client in cli/src/github_client.rs using reqwest, (3) the label strategy (add a `wreck-it` label, use task id as issue title prefix). Document the design.",
+    "status": "completed",
+    "role": "ideas",
+    "priority": 5,
+    "complexity": 3,
+    "last_attempt_at": 1772878828
+  },
+  {
+    "id": "impl-github-issues-integration",
+    "description": "Implement GitHub Issues integration. Create cli/src/github_client.rs with async functions `create_issue(token, repo, title, body) -> Result<u64>` and `close_issue(token, repo, issue_number) -> Result<()>` using reqwest and the GitHub REST API (POST /repos/{owner}/{repo}/issues, PATCH to close). Add Config fields `github_issues_enabled`, `github_repo`, `github_token`. Add CLI flags `--github-issues`, `--github-repo <owner/repo>`, `--github-token <TOKEN>`. Wire into ralph_loop.rs: call create_issue when a task moves to InProgress (store issue number in task metadata or a side-channel map), call close_issue with the appropriate state when it reaches Completed or Failed. Failures should log warnings but not abort the loop.",
+    "status": "completed",
+    "phase": 2,
+    "depends_on": [
+      "ideas-github-issues-integration"
+    ],
+    "priority": 5,
+    "complexity": 6,
+    "last_attempt_at": 1773038495
+  },
+  {
+    "id": "test-github-issues-integration",
+    "description": "Add tests for the GitHub Issues integration. Mock the GitHub REST API (using httpmock or wiremock, or a simple tokio TCP server) to verify: (1) a POST to /repos/{owner}/{repo}/issues is made when a task transitions to InProgress, (2) a PATCH request to close the issue is made when the task reaches Completed or Failed, (3) when github_issues_enabled is false, no HTTP calls are made, (4) a GitHub API error (e.g. 401 Unauthorized) logs a warning and does not abort the loop. Run `cargo test` to confirm all tests pass.",
+    "status": "completed",
+    "phase": 3,
+    "depends_on": [
+      "impl-github-issues-integration"
+    ],
+    "priority": 5,
+    "complexity": 4,
+    "last_attempt_at": 1773040514
+  },
+  {
+    "id": "eval-github-issues-integration",
+    "description": "Evaluate the GitHub Issues integration. Review cli/src/github_client.rs, Config changes, CLI flags, and ralph_loop.rs call sites. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the feature is opt-in (no behavior change when github_issues_enabled is false or absent), (3) GITHUB_TOKEN environment variable fallback works correctly, (4) the feature is documented in README.md with a short description and the new CLI flags, (5) no sensitive tokens are logged at any level. Fix any issues found and mark the task complete.",
+    "status": "completed",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-github-issues-integration"
+    ],
+    "priority": 5,
+    "complexity": 2,
+    "last_attempt_at": 1773042012
+  },
+  {
+    "id": "ideas-api-cost-tracking",
+    "description": "Research and design an API token cost-tracking and budget-control system for wreck-it. Review the agent execution flow in cli/src/agent.rs and cli/src/ralph_loop.rs to identify where token usage can be captured from LLM API responses (usage field in OpenAI-compatible responses). Design: (1) a CostTracker struct that accumulates prompt_tokens, completion_tokens, and estimated_cost_usd per task and for the whole run, (2) a new Config field `max_cost_usd: Option<f64>` that aborts the loop when the cumulative estimated cost exceeds the threshold, (3) a cost summary line printed at the end of each iteration in both headless and TUI modes, (4) per-model pricing constants for common GitHub Models / OpenAI models. Document the design as inline comments in a new cli/src/cost_tracker.rs stub file.",
+    "status": "completed",
+    "role": "ideas",
+    "priority": 4,
+    "complexity": 2,
+    "last_attempt_at": 1773043184
+  },
+  {
+    "id": "impl-api-cost-tracking",
+    "description": "Implement the API token cost-tracking system designed in ideas-api-cost-tracking. Create cli/src/cost_tracker.rs with a CostTracker struct holding per-task and cumulative token counts and a method to compute estimated_cost_usd given a model name. Extend the agent response handling in cli/src/agent.rs to capture the usage object from OpenAI-compatible API responses and update the tracker. Add `max_cost_usd: Option<f64>` to Config in cli/src/types.rs (default None, skip_serializing_if None). In cli/src/ralph_loop.rs, check the cumulative cost after each task and abort the loop with a clear message if max_cost_usd is exceeded. Add a `--max-cost <USD>` CLI flag in cli/src/cli.rs. Print a cost summary (total tokens + estimated USD) at the end of each iteration and at run completion.",
+    "status": "completed",
+    "phase": 2,
+    "depends_on": [
+      "ideas-api-cost-tracking"
+    ],
+    "priority": 4,
+    "complexity": 4,
+    "last_attempt_at": 1773044681
+  },
+  {
+    "id": "test-api-cost-tracking",
+    "description": "Add unit and integration tests for the API cost-tracking feature. In cli/src/cost_tracker.rs or a test module, verify: (1) CostTracker accumulates token counts correctly across multiple tasks, (2) estimated_cost_usd is computed correctly for at least two known models with fixed per-token rates, (3) when max_cost_usd is set and the cumulative cost exceeds it, the loop-abort condition is triggered correctly, (4) when max_cost_usd is None, no budget check occurs. Run `cargo test` to confirm all tests pass.",
+    "status": "completed",
+    "phase": 3,
+    "depends_on": [
+      "impl-api-cost-tracking"
+    ],
+    "priority": 4,
+    "complexity": 3,
+    "last_attempt_at": 1773046082
+  },
+  {
+    "id": "eval-api-cost-tracking",
+    "description": "Evaluate the API cost-tracking implementation. Review cli/src/cost_tracker.rs, Config changes, CLI flag, and ralph_loop.rs call sites. Verify: (1) `cargo clippy -- -D warnings` passes cleanly, (2) the cost summary output is human-readable and informative (tokens used, estimated USD), (3) the budget-abort message is clear and includes the current cost vs. limit, (4) the `max_cost_usd` Config field and `--max-cost` CLI flag are documented in README.md, (5) when the usage field is absent from an API response the tracker degrades gracefully (logs a warning, does not panic). Fix any issues found and mark the task complete.",
+    "status": "completed",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-api-cost-tracking"
+    ],
+    "priority": 4,
+    "complexity": 2,
+    "last_attempt_at": 1773047226
+  },
+  {
+    "id": "ideas-task-cli-management",
+    "description": "Research and design a `wreck-it tasks` sub-command family for managing task files interactively from the CLI without editing JSON by hand. Review the existing CLI structure in cli/src/cli.rs (clap commands) and the Task type in cli/src/types.rs. Design sub-commands: (1) `wreck-it tasks list [--task-file] [--status pending|inprogress|completed|failed]` \u2014 tabular output of all tasks with their status and role, (2) `wreck-it tasks add --id <id> --description <desc> [--role ideas|implementer|evaluator] [--phase N] [--priority N] [--depends-on id1,id2]` \u2014 appends a new task to the file, (3) `wreck-it tasks set-status --id <id> --status <status>` \u2014 updates the status of a task in place, (4) `wreck-it tasks validate [--task-file]` \u2014 checks for missing required fields, duplicate IDs, and unresolved depends_on references. Document design as inline comments in cli/src/cli.rs.",
+    "status": "completed",
+    "role": "ideas",
+    "priority": 3,
+    "complexity": 2,
+    "last_attempt_at": 1773048649
+  },
+  {
+    "id": "impl-task-cli-management",
+    "description": "Implement the `wreck-it tasks` sub-command family designed in ideas-task-cli-management. Add a `Tasks` variant to the Commands enum in cli/src/cli.rs with `list`, `add`, `set-status`, and `validate` sub-commands and their respective argument structs. Create cli/src/task_cli.rs implementing each sub-command: list prints a formatted table (id, role, phase, status, depends_on count), add reads the task file, appends the new task, and writes it back, set-status mutates the matching task's status field in place, validate checks for duplicate IDs and unresolved depends_on chains and reports errors. Wire the `Tasks` command in cli/src/main.rs. No new crate dependencies beyond what is already available (use the existing serde_json and tabular-style formatting with plain std string formatting).",
+    "status": "completed",
+    "phase": 2,
+    "depends_on": [
+      "ideas-task-cli-management"
+    ],
+    "priority": 3,
+    "complexity": 4,
+    "last_attempt_at": 1773050115
+  },
+  {
+    "id": "test-task-cli-management",
+    "description": "Add tests for the `wreck-it tasks` sub-commands. In cli/src/task_cli.rs or a test module, write unit tests that: (1) verify `list` correctly filters by status and formats task rows, (2) verify `add` appends a valid new task to a JSON file and that the resulting file parses correctly, (3) verify `set-status` updates the correct task and leaves all other tasks unchanged, (4) verify `validate` detects and reports duplicate IDs and a depends_on reference to a nonexistent task, (5) verify `validate` returns a clean result for a well-formed task file. Run `cargo test` to confirm all tests pass.",
+    "status": "completed",
+    "phase": 3,
+    "depends_on": [
+      "impl-task-cli-management"
+    ],
+    "priority": 3,
+    "complexity": 3,
+    "last_attempt_at": 1773051636
+  },
+  {
+    "id": "eval-task-cli-management",
+    "description": "Evaluate the `wreck-it tasks` CLI implementation. Review cli/src/task_cli.rs and cli/src/cli.rs changes. Verify: (1) `cargo clippy -- -D warnings` passes, (2) each sub-command is documented in README.md under Usage, (3) error messages for invalid input (unknown task id, invalid status value) are user-friendly, (4) the `add` command validates that the provided id does not already exist and reports an error if it does, (5) the `validate` sub-command is suitable for use in CI scripts (exits non-zero on errors). Fix any issues found and mark the task complete.",
+    "status": "completed",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-task-cli-management"
+    ],
+    "priority": 3,
+    "complexity": 2,
+    "last_attempt_at": 1773052876
+  },
+  {
+    "id": "ideas-multi-repo-orchestration",
+    "description": "Research and design multi-repository orchestration for wreck-it. The feature should allow a single `wreck-it run` invocation to coordinate tasks that span multiple local git repositories (e.g., a monorepo split into separate repos, or a frontend + backend pair). Review the Config and RalphConfig types in cli/src/types.rs and cli/src/repo_config.rs, the agent execution in cli/src/agent.rs, and the git integration in cli/src/state_worktree.rs. Design: (1) a new optional `work_dirs: HashMap<String, String>` Config field mapping task roles or ids to repo paths, (2) how the agent context (file listing, git diff) is assembled when a task's work_dir differs from the root, (3) how test-runner detection (cargo/npm/pytest) works per-repo, (4) how commits are made to the correct repo. Document the design in a new docs/multi-repo.md stub.",
+    "status": "completed",
+    "role": "ideas",
+    "priority": 2,
+    "complexity": 3,
+    "last_attempt_at": 1773054438
+  },
+  {
+    "id": "impl-multi-repo-orchestration",
+    "description": "Implement the multi-repository orchestration feature designed in ideas-multi-repo-orchestration. Add `work_dirs: HashMap<String, String>` to Config in cli/src/types.rs (maps task-id prefix or role to a local path; absent means use the default work_dir). In cli/src/ralph_loop.rs, resolve the effective work_dir for each task before dispatching it to the agent. In cli/src/agent.rs, accept a per-call work_dir override so that file context, test running, and git commits all use the resolved path. Add a `--work-dir-map <ROLE_OR_ID>=<PATH>` CLI flag (multi-value) in cli/src/cli.rs that populates the config map. Create the docs/multi-repo.md documentation file explaining the feature and providing an example config.",
+    "status": "completed",
+    "phase": 2,
+    "depends_on": [
+      "ideas-multi-repo-orchestration"
+    ],
+    "priority": 2,
+    "complexity": 5,
+    "last_attempt_at": 1773055547
+  },
+  {
+    "id": "test-multi-repo-orchestration",
+    "description": "Add tests for the multi-repository orchestration feature. In cli/src/ or a test module, write tests using temporary directories to verify: (1) when `work_dirs` maps a task id to a secondary path, the agent receives the correct work_dir for that task while other tasks use the default, (2) git commits are made to the correct repository (not the default one) when a task is mapped to a different path, (3) when `work_dirs` is empty or absent, behavior is identical to the current single-repo behavior. Run `cargo test` to confirm all tests pass.",
+    "status": "completed",
+    "phase": 3,
+    "depends_on": [
+      "impl-multi-repo-orchestration"
+    ],
+    "priority": 2,
+    "complexity": 4,
+    "last_attempt_at": 1773056692
+  },
+  {
+    "id": "eval-multi-repo-orchestration",
+    "description": "Evaluate the multi-repository orchestration implementation. Review the Config changes, ralph_loop.rs modifications, agent.rs work_dir override, and docs/multi-repo.md. Verify: (1) `cargo clippy -- -D warnings` passes, (2) the feature is fully backward-compatible when `work_dirs` is absent, (3) docs/multi-repo.md contains a clear example showing a two-repo setup, (4) the `--work-dir-map` CLI flag is documented in README.md under Usage, (5) path validation (work_dir must be an existing directory and a git repo) produces a clear error message. Fix any issues found and mark the task complete.",
+    "status": "completed",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-multi-repo-orchestration"
+    ],
+    "priority": 2,
+    "complexity": 2,
+    "last_attempt_at": 1773057614
+  },
+  {
+    "id": "ideas-prompt-customization",
+    "description": "Research and design a dynamic prompt customization system for wreck-it. The system should allow users to place per-role system prompt templates in a `.wreck-it/prompts/` directory (e.g. `ideas.md`, `implementer.md`, `evaluator.md`, plus per-task overrides like `impl-my-task.md`). Review the existing agent invocation path in `cli/src/agent.rs` and `cli/src/cloud_agent.rs` to identify where system prompts are constructed and how they could be replaced or augmented with user-supplied content. Also review `core/src/types.rs` (Task and Config structs) to identify any new fields needed (e.g. `prompt_dir: Option<String>` on Config, `system_prompt_override: Option<String>` on Task). Document a design that supports: (1) global role-based prompt templates, (2) per-task prompt overrides, (3) variable interpolation (e.g. `{{task_id}}`, `{{repo}}`). Write a design document as inline comments in a new stub file `cli/src/prompt_loader.rs`.",
+    "status": "completed",
+    "role": "ideas",
+    "priority": 4,
+    "complexity": 2,
+    "last_attempt_at": 1773122315
+  },
+  {
+    "id": "impl-prompt-customization",
+    "description": "Implement the dynamic prompt customization system designed in `ideas-prompt-customization`. Create `cli/src/prompt_loader.rs` with a `PromptLoader` struct that: (1) reads `.wreck-it/prompts/<role>.md` for global role overrides, (2) reads `.wreck-it/prompts/<task_id>.md` for per-task overrides (per-task takes precedence), (3) performs variable substitution for `{{task_id}}`, `{{repo}}`, `{{description}}` placeholders, and (4) falls back to the built-in default prompts when no file is found. Add a `prompt_dir: Option<String>` field to `Config` in `core/src/types.rs` (defaulting to `.wreck-it/prompts`). Wire `PromptLoader::load()` into `cli/src/agent.rs` and `cli/src/cloud_agent.rs` at the system prompt construction point so that custom prompts replace the default role prompt. Add a `--prompt-dir <PATH>` CLI flag in `cli/src/cli.rs` that overrides the config value.",
+    "status": "completed",
+    "phase": 2,
+    "depends_on": [
+      "ideas-prompt-customization"
+    ],
+    "priority": 4,
+    "complexity": 4,
+    "last_attempt_at": 1773168049
+  },
+  {
+    "id": "test-prompt-customization",
+    "description": "Write unit and integration tests for the prompt customization feature implemented in `impl-prompt-customization`. In `cli/src/prompt_loader.rs` add a `#[cfg(test)]` module covering: (1) loading a role-based prompt file and verifying it overrides the default, (2) loading a per-task prompt file and verifying it takes precedence over the role file, (3) variable interpolation of `{{task_id}}`, `{{repo}}`, and `{{description}}` placeholders, (4) graceful fallback to built-in defaults when no prompt files exist. Use `tempfile::tempdir()` to create isolated test directories. Also add a test that verifies the `--prompt-dir` CLI flag is parsed correctly and populates `Config.prompt_dir`. Ensure all tests pass with `cargo test --lib`.",
+    "status": "completed",
+    "phase": 3,
+    "depends_on": [
+      "impl-prompt-customization"
+    ],
+    "priority": 4,
+    "complexity": 3,
+    "last_attempt_at": 1773178362
+  },
+  {
+    "id": "eval-prompt-customization",
+    "description": "Evaluate the prompt customization feature end-to-end. Create a minimal `.wreck-it/prompts/ideas.md` file containing a custom role prompt in this repository, run a dry-run or unit-level test to confirm `PromptLoader` picks it up and substitutes variables correctly. Verify that the fallback path works when the file is absent. Review the implementation in `cli/src/prompt_loader.rs` for correctness of variable substitution logic and confirm no regressions in existing agent behaviour by running `cargo test --lib`. Write a brief evaluation summary as a comment block at the top of `cli/src/prompt_loader.rs` noting test results, edge cases handled, and any follow-up improvements.",
+    "status": "completed",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-prompt-customization"
+    ],
+    "priority": 4,
+    "complexity": 2,
+    "last_attempt_at": 1773179369
+  },
+  {
+    "id": "ideas-semantic-evaluation",
+    "description": "Research and design a semantic evaluation mode for wreck-it tasks. Currently evaluation is done via shell command exit codes (`command` evaluation) or agent-created marker files (`agent-file` evaluation). Design a new `semantic` evaluation mode where the agent is prompted to read the original task description alongside the git diff produced by the implementation and returns a structured verdict (`{ passed: bool, score: u8, rationale: String }`). Review `cli/src/agent.rs` and `core/src/types.rs` (the `EvaluationMode` enum and `Task.evaluation` field) to understand how to add the new variant. Consider: what context to include in the evaluation prompt (task description, acceptance criteria, diff summary), how to parse the structured JSON verdict, how to surface the rationale in TUI and logs, and what fallback behaviour applies if the agent returns malformed output. Document the design in inline comments in a new stub file `cli/src/semantic_eval.rs`.",
+    "status": "completed",
+    "role": "ideas",
+    "priority": 5,
+    "complexity": 2,
+    "last_attempt_at": 1773180830
+  },
+  {
+    "id": "impl-semantic-evaluation",
+    "description": "Implement the semantic evaluation mode designed in `ideas-semantic-evaluation`. Create `cli/src/semantic_eval.rs` with an async `evaluate_semantically(task, diff, agent_client) -> SemanticVerdict` function where `SemanticVerdict = { passed: bool, score: u8, rationale: String }`. The function should construct a prompt that includes the task description, any acceptance criteria from `task.acceptance_criteria`, the git diff, and instructions to return a JSON verdict. Parse the agent response with lenient JSON extraction (scan for the first `{` block). Add `Semantic` variant to `EvaluationMode` in `core/src/types.rs`. Wire the new mode into the evaluation dispatch in `cli/src/agent.rs` (or wherever EvaluationMode is dispatched). Expose it via `evaluation: { mode: \"semantic\" }` in task JSON. Log the rationale at INFO level and surface the score in TUI task detail view.",
+    "status": "completed",
+    "phase": 2,
+    "depends_on": [
+      "ideas-semantic-evaluation"
+    ],
+    "priority": 5,
+    "complexity": 5,
+    "last_attempt_at": 1774670973
+  },
+  {
+    "id": "test-semantic-evaluation",
+    "description": "Write unit tests for the semantic evaluation feature implemented in `impl-semantic-evaluation`. In `cli/src/semantic_eval.rs` add a `#[cfg(test)]` module covering: (1) successful parsing of a well-formed JSON verdict `{ passed: true, score: 9, rationale: \"...\" }`, (2) lenient extraction when the agent wraps JSON in markdown code fences, (3) fallback to `passed: false, score: 0` when the response is unparseable, (4) that `evaluate_semantically` returns `SemanticVerdict` with expected fields when given a mock agent response. Use a mock or stub for the agent client to avoid real API calls. Also verify that setting `evaluation: { mode: \"semantic\" }` on a task triggers `evaluate_semantically` in the dispatch path. Run `cargo test --lib` to confirm all tests pass.",
+    "status": "completed",
+    "phase": 3,
+    "depends_on": [
+      "impl-semantic-evaluation"
+    ],
+    "priority": 5,
+    "complexity": 3,
+    "last_attempt_at": 1774673592
+  },
+  {
+    "id": "eval-semantic-evaluation",
+    "description": "Evaluate the semantic evaluation feature end-to-end. Create a minimal task with `evaluation: { mode: \"semantic\" }` and a known git diff fixture, then run the unit-level evaluation function with a stubbed agent to verify verdict parsing and fallback logic. Confirm no regressions by running `cargo test --lib`. Review `cli/src/semantic_eval.rs` for prompt quality: does it provide enough context (diff, task description, criteria)? Does the verdict rationale get logged and displayed correctly? Write a brief evaluation summary as a comment block at the top of `cli/src/semantic_eval.rs` noting results, limitations (e.g. large diffs exceeding context window), and recommended follow-up work.",
+    "status": "inprogress",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-semantic-evaluation"
+    ],
+    "priority": 5,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-html-report",
+    "description": "Research and design an HTML report generator for wreck-it run summaries. The report should capture: overall run statistics (total tasks, completed/failed/pending counts, total cost, total tokens, elapsed time), a per-task timeline table (id, role, status, duration, cost, retries), a dependency graph rendered inline as an SVG or Mermaid diagram, and a section for failed tasks showing error output excerpts. Review existing data sources: `cli/src/cost_tracker.rs` (cost and token data), `cli/src/openclaw.rs` (provenance events), `cli/src/graph.rs` (dependency graph Mermaid output), and `core/src/task_manager.rs` (task state). Design a `ReportData` struct that aggregates all necessary data, a Handlebars or simple string-template approach for HTML generation, and a `wreck-it report --output report.html` CLI sub-command. Document the design as inline comments in a new stub file `cli/src/report.rs`.",
+    "status": "inprogress",
+    "role": "ideas",
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "impl-html-report",
+    "description": "Implement the HTML report generator designed in `ideas-html-report`. Create `cli/src/report.rs` with: (1) a `ReportData` struct that aggregates task statuses from the task manager, cost/token data from `CostTracker`, and provenance events from openclaw if available; (2) a `generate_html(data: &ReportData) -> String` function that produces a self-contained HTML file using inline CSS and optional Mermaid JS (loaded from CDN) for the dependency graph section; (3) a `write_report(path: &Path, data: &ReportData)` helper that serialises the HTML to disk. Add a `report` sub-command to `cli/src/cli.rs` with `--output <PATH>` (default `wreck-it-report.html`) and `--task-file <PATH>` flags. Wire the sub-command in `cli/src/main.rs`. The HTML output must be self-contained (inline styles, no external dependencies except optional Mermaid CDN) and render correctly in modern browsers.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "ideas-html-report"
+    ],
+    "priority": 3,
+    "complexity": 5
+  },
+  {
+    "id": "test-html-report",
+    "description": "Write unit tests for the HTML report generator implemented in `impl-html-report`. In `cli/src/report.rs` add a `#[cfg(test)]` module covering: (1) `generate_html` produces a non-empty string containing `<html>`, `<table>`, and at least one task row when given a `ReportData` with one completed task; (2) cost and token totals appear correctly in the summary section; (3) the Mermaid graph section is included only when the dependency graph is non-empty; (4) `write_report` creates the file at the specified path and its contents match `generate_html` output. Use `tempfile::tempdir()` for file-system tests. Also verify that the `report` CLI sub-command is registered and parses `--output` correctly. Run `cargo test --lib` to confirm all tests pass.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "impl-html-report"
+    ],
+    "priority": 3,
+    "complexity": 3
+  },
+  {
+    "id": "eval-html-report",
+    "description": "Evaluate the HTML report generator end-to-end. Run `wreck-it report --output /tmp/test-report.html --task-file <fixture-tasks.json>` (or invoke the function directly in a test) and confirm the generated file is valid HTML with correct task counts, cost summaries, and a Mermaid diagram block. Open or parse the HTML to verify it contains the expected sections. Check edge cases: empty task list, all-failed tasks, tasks with zero cost. Run `cargo test --lib` to confirm no regressions. Write a brief evaluation summary as a comment block at the top of `cli/src/report.rs` noting browser compatibility, file size for large task lists, and recommended enhancements (e.g. dark mode, exportable CSV).",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-html-report"
+    ],
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-error-classification",
+    "description": "Research and design an error classification and smart recovery system for wreck-it. Currently all task failures are treated identically: retried up to `max_retries` times and then re-planned after `replan_threshold` consecutive failures. Design a system that classifies errors into categories: `Transient` (e.g. rate-limit HTTP 429, network timeout), `Permanent` (e.g. compile error, test failure), `NeedsReplan` (e.g. task description ambiguous, wrong file targeted), and `ContextOverflow` (e.g. agent returned truncated output). Review `cli/src/headless.rs`, `cli/src/agent.rs`, and `cli/src/ralph_loop.rs` to identify where error handling occurs. For each error category, propose a recovery strategy: `Transient` \u2192 exponential backoff retry; `Permanent` \u2192 invoke critic with error output injected; `NeedsReplan` \u2192 immediate re-plan trigger; `ContextOverflow` \u2192 task splitting. Document the design as inline comments in a new stub file `cli/src/error_classifier.rs`.",
+    "status": "inprogress",
+    "role": "ideas",
+    "priority": 4,
+    "complexity": 3
+  },
+  {
+    "id": "impl-error-classification",
+    "description": "Implement the error classification and smart recovery system designed in `ideas-error-classification`. Create `cli/src/error_classifier.rs` with: (1) an `ErrorCategory` enum (`Transient`, `Permanent`, `NeedsReplan`, `ContextOverflow`); (2) a `classify_error(output: &str, exit_code: Option<i32>, http_status: Option<u16>) -> ErrorCategory` function using pattern matching on keywords (\"rate limit\", \"429\", \"timeout\" \u2192 Transient; \"error[E\", \"FAILED\" \u2192 Permanent; \"context length\", \"max_tokens\" \u2192 ContextOverflow; otherwise NeedsReplan); (3) a `RecoveryAction` enum with backoff delay for Transient, critic injection for Permanent, immediate replan for NeedsReplan, and task-split hint for ContextOverflow. Wire `classify_error` into the failure handling path in `cli/src/headless.rs` so that Transient errors trigger a configurable backoff (default 30s) before retry, and NeedsReplan errors bypass the `replan_threshold` counter to immediately invoke the re-planner.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "ideas-error-classification"
+    ],
+    "priority": 4,
+    "complexity": 5
+  },
+  {
+    "id": "test-error-classification",
+    "description": "Write unit tests for the error classification system implemented in `impl-error-classification`. In `cli/src/error_classifier.rs` add a `#[cfg(test)]` module covering: (1) HTTP 429 response body maps to `Transient`; (2) Rust compile error output containing `error[E` maps to `Permanent`; (3) output mentioning \"context length exceeded\" maps to `ContextOverflow`; (4) an exit code of 0 with ambiguous output defaults to `NeedsReplan`; (5) multiple keyword signals in one output resolve to the highest-priority category. Also test the `RecoveryAction` produced for each category and verify that the backoff retry path in `headless.rs` is exercised when `Transient` is returned. Run `cargo test --lib` to confirm all tests pass.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "impl-error-classification"
+    ],
+    "priority": 4,
+    "complexity": 3
+  },
+  {
+    "id": "eval-error-classification",
+    "description": "Evaluate the error classification and smart recovery system end-to-end. Review `cli/src/error_classifier.rs` to ensure the keyword patterns cover the most common real-world failure modes seen in wreck-it CI runs. Check that the Transient backoff path in `headless.rs` correctly delays and retries without incrementing the replan counter. Verify NeedsReplan immediately triggers the re-planner. Run `cargo test --lib` to confirm no regressions. Write a brief evaluation summary as a comment block at the top of `cli/src/error_classifier.rs` describing classification accuracy trade-offs, false positive/negative risks for each category, and recommended follow-up work (e.g. ML-based classifier, user-configurable keyword patterns).",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-error-classification"
+    ],
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "mcp-server-integration",
+    "description": "Implement an MCP (Model Context Protocol) server mode for wreck-it so that AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can directly query and manage the task pipeline via the standard MCP protocol. Expose MCP tools for: listing tasks and their statuses, adding new tasks, updating task status, reading artefacts, and triggering a loop iteration. This bridges wreck-it's structured task graph with the rapidly emerging MCP ecosystem, enabling humans to supervise autonomous loops through their preferred AI assistant interface rather than the CLI or TUI.",
+    "status": "completed",
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "otel-metrics-export",
+    "description": "Add OpenTelemetry (OTEL) trace and metrics export to wreck-it's execution engine. Instrument task lifecycle events (start, complete, fail, retry) as OTEL spans with attributes for model name, token counts, task role, phase, and complexity. Export to configurable OTLP endpoints (Jaeger, Honeycomb, Grafana). This uniquely leverages wreck-it's existing cost tracking and provenance audit trail to provide deep observability into autonomous agent workflows \u2014 a capability no other agent framework offers out of the box.",
+    "status": "pending",
+    "priority": 8,
+    "complexity": 6
+  },
+  {
+    "id": "security-gate-checks",
+    "description": "Add a built-in security gate task kind that runs CodeQL, cargo-audit, or npm audit as a mandatory completion gate before any implementation task PR can be merged. Integrate into the task phase system so security scans run in a post-implementation phase automatically. Surface findings back to the implementing agent via the artefact system so it can self-remediate. This combines wreck-it's phase-based scheduling, artefact chaining, and retry loop into a first-class security posture \u2014 addressing the growing trend of shift-left security in AI-native development.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "mcp-server-integration"
+    ],
+    "priority": 9,
+    "complexity": 6
+  },
+  {
+    "id": "test-coverage-enforcer",
+    "description": "Implement a test coverage enforcer as a built-in evaluator-role task that automatically runs after each implementation task completes. The enforcer reads the coverage report artefact produced by the implementation phase, verifies that coverage did not regress, and either approves the task or triggers a retry with a coverage-improvement prompt. Use wreck-it's `inputs` artefact system to pass coverage data between phases. This creates a unique test-driven autonomous development loop where the AI is held accountable to coverage thresholds without human intervention.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "otel-metrics-export"
+    ],
+    "priority": 8,
+    "complexity": 5
+  },
+  {
+    "id": "adaptive-prompt-optimizer",
+    "description": "Build an adaptive prompt optimization system that tracks which task description patterns correlate with successful first-attempt completions vs. repeated failures. After each failed attempt, analyze the task description and failure log using an ideas-role agent to suggest a rewritten task description. Store the rewrite in per-task agent memory and apply it on next retry. Surface aggregated pattern insights as a periodic report artefact. This uniquely leverages wreck-it's existing retry tracking, agent memory system, and artefact chaining to create a self-improving task specification loop.",
+    "status": "pending",
+    "priority": 7,
+    "complexity": 7
+  },
+  {
+    "id": "kanban-bidirectional-sync",
+    "description": "Implement bidirectional sync between wreck-it tasks and external kanban systems (Linear, JIRA, Trello). When new tickets are created in the external system with a configurable label/tag, automatically generate wreck-it task objects and append them to the appropriate task file. When wreck-it tasks complete, update the corresponding external ticket status and attach the git diff URL as a comment. Build on the existing KanbanClient enum dispatch and KanbanProvider trait in cli/src/kanban/. This closes the loop between human planning tools and autonomous execution, enabling teams to manage AI workloads from their existing project management tools.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "adaptive-prompt-optimizer"
+    ],
+    "priority": 7,
+    "complexity": 6
+  },
+  {
+    "id": "budget-aware-prioritization",
+    "description": "Implement dynamic budget-aware task prioritization that adjusts task execution order based on remaining cost budget, current complexity estimates, and historical cost-per-complexity ratios. Add a `--budget-strategy` CLI flag with options: `greedy` (maximize completed tasks), `critical-path` (prioritize highest-priority tasks first), and `conservative` (prefer low-complexity tasks when budget is below a threshold). Integrate with the existing `--max-cost` budget tracking to automatically pause the loop when projected remaining cost would exceed budget. This extends wreck-it's existing cost tracking into a planning optimization feature unique in the agent orchestration space.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "otel-metrics-export"
+    ],
+    "priority": 6,
+    "complexity": 5
+  },
+  {
+    "id": "semantic-changelog-generator",
+    "description": "Add an automated semantic changelog generator that runs as a recurring evaluator-role task. At the end of each iteration, it reads the provenance audit trail and completed task artefacts, groups changes by category (features, fixes, refactors, security), and generates a human-readable CHANGELOG.md entry. Use conventional-commit conventions to classify changes. Output the changelog entry as an artefact that can be consumed by release automation. This uniquely combines wreck-it's provenance audit trail, artefact system, and recurring task cooldown to create fully automated release notes with zero human effort.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "test-coverage-enforcer",
+      "security-gate-checks"
+    ],
+    "priority": 6,
+    "complexity": 4
+  },
+  {
+    "id": "multi-repo-change-orchestrator",
+    "description": "Build a multi-repo change orchestration feature that detects when a completed task modifies a public API or exported interface, then automatically creates follow-up tasks in dependent repositories using the existing `--work-dir-map` multi-repo support. Implement interface change detection by comparing type signatures and exported symbols before/after the git diff. When a breaking change is detected, generate adaptation tasks in consumer repos and inject them into their respective task files. This combines wreck-it's multi-repo support and artefact system into an intelligent cross-repo dependency management capability.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "kanban-bidirectional-sync"
+    ],
+    "priority": 5,
+    "complexity": 9
+  },
+  {
+    "id": "parallel-subtask-fan-out",
+    "description": "Implement a fan-out/fan-in execution pattern allowing a single ideas-role task to dynamically decompose work into parallel implementer sub-tasks at runtime, then collect and synthesize their results via a fan-in aggregator task. Extend the existing `parent_id` and phase system: when an ideas task outputs a sub-task manifest artefact, the runner spawns those tasks in the next phase with the parent's context injected. The fan-in task waits for all siblings to complete and synthesizes a consolidated result. This addresses the growing trend of multi-agent coordination and enables wreck-it to tackle problems too large for a single context window.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "budget-aware-prioritization",
+      "adaptive-prompt-optimizer"
+    ],
+    "priority": 9,
+    "complexity": 9
+  },
+  {
+    "id": "visual-workflow-exporter",
+    "description": "Implement a `wreck-it export-graph` command that serialises the current task dependency graph as a Mermaid flowchart or Graphviz DOT file, showing task phases, dependency edges, status colours (pending/inprogress/completed/failed), artefact flows, and fan-out sub-task clusters. Auto-embed the generated diagram into a `WORKFLOW.md` file that is updated at the end of each loop iteration via a recurring evaluator-role task. This transforms wreck-it's internal DAG representation into living documentation that stakeholders can read without CLI access, directly leveraging the existing phase/depends_on/parent_id data model.",
+    "status": "pending",
+    "priority": 8,
+    "complexity": 4
+  },
+  {
+    "id": "llm-cost-optimizer-routing",
+    "description": "Build an intelligent model-routing layer that assigns the cheapest LLM tier capable of completing a task based on its complexity score, role, and historical success rates. Low-complexity (1\u20133) tasks are routed to fast/cheap models (e.g., gpt-4o-mini, claude-haiku); medium-complexity (4\u20136) tasks to mid-tier; high-complexity (7\u201310) tasks to flagship models. After a model fails, automatically escalate to the next tier and record the escalation in per-task agent memory for future routing decisions. Expose a `--model-routing` flag and a `[model_routing]` config section. This directly builds on the existing complexity field, cost_tracker, and multi-provider model support to cut average run costs by routing simple tasks cheaply.",
+    "status": "pending",
+    "priority": 9,
+    "complexity": 6
+  },
+  {
+    "id": "adversarial-debate-review",
+    "description": "Implement an adversarial debate review pattern for high-complexity tasks: before committing, spawn a second 'devil's advocate' agent that receives the git diff and critiques the implementation from an opposing perspective (security risks, alternative approaches, edge cases). The original implementer agent then rebuts the critique. A judge-role agent scores both arguments and decides whether to commit or retry with the combined feedback. Integrate as an optional task-level field `debate: true` that triggers this three-way exchange in the reflection loop. This extends the existing critic-actor reflection loop with a structured multi-agent debate pattern inspired by debate-as-alignment research.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "visual-workflow-exporter"
+    ],
+    "priority": 7,
+    "complexity": 8
+  },
+  {
+    "id": "natural-language-task-query",
+    "description": "Add a `wreck-it query '<question>'` sub-command that translates a natural-language question into a structured query over the task graph, artefact store, provenance audit trail, and agent memory files. Examples: 'which tasks failed more than twice?', 'what code did the auth task modify?', 'how much did last week's run cost?'. The command sends the question plus a schema description of the available data to the LLM, receives a JSON filter/aggregation plan, executes it locally, and prints a human-readable result. This surfaces wreck-it's rich structured data to users who prefer prose over CLI flags, uniquely combining the provenance trail and artefact system with LLM-powered query translation.",
+    "status": "pending",
+    "priority": 7,
+    "complexity": 5
+  },
+  {
+    "id": "ephemeral-sandbox-execution",
+    "description": "Add an optional sandbox execution mode where each agent task runs inside an ephemeral Docker container (or a Firecracker microVM via a configurable backend). The container is seeded with a snapshot of the work directory, runs the agent's code edits and tests in isolation, and only merges changes back to the host workspace if tests pass. Configure via `sandbox = 'docker'` in config. This addresses the growing concern about autonomous agents making irreversible changes to a live codebase, and aligns with the 'minimal footprint' principle emerging in agentic safety research. Integrates with the existing test runner and commit pipeline.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "llm-cost-optimizer-routing"
+    ],
+    "priority": 8,
+    "complexity": 8
+  },
+  {
+    "id": "architecture-drift-detector",
+    "description": "Implement a recurring `architecture_drift` evaluator-role task that reads a declarative architecture manifest (`.wreck-it/architecture.md` or `.wreck-it/architecture.toml`) describing intended module boundaries, dependency rules, and naming conventions. Each iteration, it runs static analysis on the actual codebase (using treesitter or regex-based heuristics) to detect violations \u2014 e.g., a module importing from a layer it should not, or a file placed in the wrong directory. Detected violations are written as artefacts and trigger automatically generated remediation tasks. This uniquely combines wreck-it's recurring task cooldown, artefact chaining, and dynamic task generation into an automated architectural governance loop.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "natural-language-task-query"
+    ],
+    "priority": 6,
+    "complexity": 7
+  },
+  {
+    "id": "cross-platform-notification-hub",
+    "description": "Extend wreck-it's existing webhook notification system into a first-class multi-channel notification hub supporting Slack (Block Kit messages), Discord (embeds), Microsoft Teams (Adaptive Cards), and email (SMTP). Notifications include task status transitions, loop completion summaries, budget threshold warnings, and failure reports with git diff links. Each channel is configured independently under `[[notifiers]]` in config.toml with per-channel event filters. This builds on the existing `--notify-webhook` infrastructure and replaces it with a typed, pluggable notifier trait, making wreck-it composable with the communication stacks teams already use.",
+    "status": "pending",
+    "priority": 7,
+    "complexity": 5
+  },
+  {
+    "id": "task-effort-estimator",
+    "description": "Build a task effort estimation subsystem that, before each task execution, predicts its likely token cost, wall-clock duration, and probability of first-attempt success using a local regression model trained on historical execution data stored in the provenance trail. Predictions are surfaced in the TUI (as a 'forecast' column) and used by the scheduler to reorder the queue when budget is constrained. After each task completes, actual vs. predicted values are logged back into a rolling training dataset. The local model starts with a simple linear regressor over complexity/role/model features and can be upgraded to a neural model as data accumulates. This uniquely leverages wreck-it's provenance audit trail as a training dataset for meta-learning about agent behaviour.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "llm-cost-optimizer-routing"
+    ],
+    "priority": 6,
+    "complexity": 7
+  },
+  {
+    "id": "time-travel-task-debugger",
+    "description": "Implement a `wreck-it replay <task-id>` command that reconstructs and re-runs a previously executed task in a read-only trace mode: it replays the exact prompt, codebase snapshot (via git at the commit before the task ran), and recorded LLM responses from the provenance audit trail \u2014 without consuming new LLM tokens or making new changes. The replay produces a structured diff between the original agent output and an optional new run (with a `--live` flag for fresh execution) to compare behaviour. This transforms the provenance audit trail from a passive log into an interactive debugging tool, enabling developers to diagnose why an agent produced unexpected output and iterate on prompt improvements offline.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "natural-language-task-query"
+    ],
+    "priority": 6,
+    "complexity": 6
+  },
+  {
+    "id": "community-template-registry",
+    "description": "Build a community template registry that allows users to publish, discover, and install wreck-it task template collections from a central index (hosted at wreckit.app or a GitHub-backed registry). Extend the existing `wreck-it template list/apply` commands with `template publish` (packages and uploads a local template set) and `template search <query>` (queries the registry). Templates are versioned, signed, and include metadata (domain, language, author, download count). Locally installed templates are cached in `~/.wreck-it/templates/`. This leverages the existing template system and extends the wreck-it ecosystem via a community flywheel \u2014 similar to how Helm charts or Terraform modules accelerated adoption of their respective tools.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "architecture-drift-detector",
+      "adversarial-debate-review"
+    ],
+    "priority": 5,
+    "complexity": 7
+  },
+  {
+    "id": "ideas-cloudflare-log-source",
+    "description": "Research and design a Cloudflare Workers log source backend for wreck-it. The existing log source integration (cli/src/log_source/) only supports Seq. Design a new CloudflareProvider that queries the Cloudflare Workers Tail API (POST /accounts/{account_id}/workers/scripts/{script_name}/tails) to stream live invocation logs. Review cli/src/log_source/mod.rs (LogSourceProvider trait, LogSourceClient enum, LogSourceConfig, LogSourceBackend) and cli/src/log_source/seq.rs (SeqProvider) to understand the conventions to follow. Document the new backend in a stub cli/src/log_source/cloudflare.rs, including: (1) authentication via Cloudflare API token, (2) relevant config fields (account_id, script_name, filter expression defaulting to outcome = exception), (3) mapping of Cloudflare invocation log objects to LogEntry, and (4) how to add Cloudflare to LogSourceBackend and LogSourceClient. Write the design as inline comments in the stub file.",
+    "status": "pending",
+    "role": "ideas",
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "impl-cloudflare-log-source",
+    "description": "Implement the Cloudflare Workers log source backend designed in ideas-cloudflare-log-source. Create cli/src/log_source/cloudflare.rs with a CloudflareProvider struct implementing the LogSourceProvider trait. The provider should: (1) POST to https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/{script_name}/tails to start a tail session, then poll for log events; (2) filter events using the configured filter expression (default outcome = exception); (3) map each invocation log to LogEntry with id (event timestamp as string), level (Error for exceptions, Info otherwise), message (the log line), and timestamp. Add Cloudflare variant to LogSourceBackend and LogSourceClient in cli/src/log_source/mod.rs. Add account_id: Option<String> and script_name: Option<String> fields to LogSourceConfig. Wire the new variant into provider_from_config. Use reqwest for HTTP calls (already in Cargo.toml).",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "ideas-cloudflare-log-source"
+    ],
+    "priority": 3,
+    "complexity": 4
+  },
+  {
+    "id": "test-cloudflare-log-source",
+    "description": "Write unit tests for the Cloudflare Workers log source backend implemented in impl-cloudflare-log-source. In cli/src/log_source/cloudflare.rs add a #[cfg(test)] module covering: (1) LogSourceConfig with provider = Cloudflare, account_id, and script_name deserialises correctly; (2) LogSourceBackend::Cloudflare serialises to cloudflare and round-trips via serde; (3) provider_from_config returns Some(LogSourceClient::Cloudflare(...)) when account_id and script_name are set; (4) provider_from_config returns None and emits a warning when account_id or script_name is missing. Also test that LogEntry mapping from a sample Cloudflare event JSON sets level = Error when the outcome is exception and level = Info otherwise. Run cargo test --lib to confirm all tests pass.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "impl-cloudflare-log-source"
+    ],
+    "priority": 3,
+    "complexity": 3
+  },
+  {
+    "id": "eval-cloudflare-log-source",
+    "description": "Evaluate the Cloudflare Workers log source backend end-to-end. Review cli/src/log_source/cloudflare.rs to verify the tail API integration design is correct (correct endpoint, auth header, filter expression syntax). Confirm that the Cloudflare variant is wired into LogSourceClient, LogSourceBackend, and provider_from_config correctly. Run cargo test --lib to confirm no regressions in the existing Seq tests. Write a brief evaluation summary as a comment block at the top of cli/src/log_source/cloudflare.rs describing: authentication approach, filter expression limitations, recommended follow-up (e.g. support for Workers Logpush as an alternative ingest path, retry/backoff on tail session expiry).",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-cloudflare-log-source"
+    ],
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-dependency-pruning",
+    "description": "Research and design an automatic dependency graph pruning feature for wreck-it. Currently, when a task fails permanently (exhausting all retries), its dependent tasks remain pending indefinitely and block phases. Design a system that, after a task is marked Failed, walks the task dependency graph in cli/src/graph.rs to identify all transitively-dependent tasks, then marks them Skipped (a new TaskStatus variant) with a reason string. Review core/src/types.rs (Task, TaskStatus), cli/src/task_manager.rs (load/save tasks), and cli/src/ralph_loop.rs (scheduling loop) to identify where pruning should be triggered and how Skipped tasks should be treated by the scheduler. Document the design as inline comments in a new stub file cli/src/dependency_pruner.rs.",
+    "status": "pending",
+    "role": "ideas",
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "impl-dependency-pruning",
+    "description": "Implement the dependency graph pruning feature designed in ideas-dependency-pruning. Add a Skipped variant to TaskStatus in core/src/types.rs (serialising as skipped). Create cli/src/dependency_pruner.rs with: (1) a prune_dependents(tasks: &mut Vec<Task>, failed_id: &str) function that finds all tasks whose transitive depends_on chain includes failed_id and marks them Skipped; (2) a skip_reason field update on each skipped task (add skip_reason: Option<String> to Task in core/src/types.rs). Wire prune_dependents into the ralph loop in cli/src/ralph_loop.rs whenever a task transitions to Failed and its failed_attempts >= max_retries. Update the TUI status rendering in cli/src/tui.rs to display Skipped tasks with a distinctive colour (e.g. dim yellow). Ensure Skipped tasks are excluded from the scheduler runnable set.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "ideas-dependency-pruning"
+    ],
+    "priority": 4,
+    "complexity": 5
+  },
+  {
+    "id": "test-dependency-pruning",
+    "description": "Write unit tests for the dependency pruning feature implemented in impl-dependency-pruning. In cli/src/dependency_pruner.rs add a #[cfg(test)] module covering: (1) a chain A->B->C where A fails verifies B and C are marked Skipped; (2) a diamond A->B, A->C, B->D, C->D where A fails verifies B, C, and D are all skipped; (3) a task with no dependents that fails verifies only that task is marked Failed and no others are skipped; (4) a task whose dependency failed but is in another phase that completes successfully verifies the downstream task still runs. Also verify that TaskStatus::Skipped serialises to skipped and round-trips. Run cargo test --lib to confirm all tests pass.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "impl-dependency-pruning"
+    ],
+    "priority": 4,
+    "complexity": 3
+  },
+  {
+    "id": "eval-dependency-pruning",
+    "description": "Evaluate the dependency pruning feature end-to-end. Create a fixture task list with a multi-level dependency chain and simulate a root task failure to verify that prune_dependents marks all downstream tasks as Skipped. Check that the scheduler in ralph_loop.rs correctly excludes Skipped tasks from the runnable set and that the loop terminates cleanly when only Skipped and Failed tasks remain. Run cargo test --lib to confirm no regressions. Write a brief evaluation summary as a comment block at the top of cli/src/dependency_pruner.rs describing pruning correctness, edge cases (circular dependencies, partial failures), and recommended follow-up work (e.g. user-configurable prune behaviour: fail-fast vs. continue-on-failure mode).",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-dependency-pruning"
+    ],
+    "priority": 4,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-task-lifecycle-hooks",
+    "description": "Research and design a configurable pre/post task lifecycle hooks system for wreck-it. The system should allow users to define shell commands that run before and after each task. Review cli/src/ralph_loop.rs (task execution dispatch) and core/src/types.rs (Task, Config) to identify where hooks should be invoked. Design: (1) global hooks defined in config.toml under a [hooks] section (pre_task, post_task_success, post_task_failure); (2) per-task hook overrides in the task JSON (hooks.pre, hooks.post_success, hooks.post_failure); (3) hook commands receive environment variables: WRECK_IT_TASK_ID, WRECK_IT_TASK_ROLE, WRECK_IT_STATUS, WRECK_IT_WORK_DIR; (4) hook failures emit a warning but never abort the main loop. Document the design as inline comments in a new stub file cli/src/task_hooks.rs.",
+    "status": "pending",
+    "role": "ideas",
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "impl-task-lifecycle-hooks",
+    "description": "Implement the configurable task lifecycle hooks system designed in ideas-task-lifecycle-hooks. Create cli/src/task_hooks.rs with: (1) a HooksConfig struct (pre_task: Option<String>, post_task_success: Option<String>, post_task_failure: Option<String>) added to Config in core/src/types.rs; (2) a TaskHooks struct (per-task override, same three fields) added to Task; (3) an async run_hook(cmd: &str, env_vars: &[(&str, &str)]) -> Result<()> function that spawns the command via tokio::process::Command, sets the wreck-it environment variables, and returns Ok(()) on exit code 0; (4) non-zero exit codes log a warning but return Ok(()) to avoid aborting the loop. Wire pre-task hooks before agent dispatch and post-task hooks after status update in cli/src/ralph_loop.rs. Resolve effective hook by merging per-task overrides over global config.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "ideas-task-lifecycle-hooks"
+    ],
+    "priority": 3,
+    "complexity": 4
+  },
+  {
+    "id": "test-task-lifecycle-hooks",
+    "description": "Write unit and integration tests for the task lifecycle hooks system implemented in impl-task-lifecycle-hooks. In cli/src/task_hooks.rs add a #[cfg(test)] module covering: (1) run_hook with a simple echo command succeeds and returns Ok(()); (2) run_hook with a non-existent command returns Ok(()) but logs a warning (not an error); (3) run_hook receives the expected environment variables by checking env output; (4) per-task hook override takes precedence over global config hook; (5) absent hooks (None) are a no-op. Also verify that HooksConfig and TaskHooks deserialise correctly from TOML/JSON. Run cargo test --lib to confirm all tests pass.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "impl-task-lifecycle-hooks"
+    ],
+    "priority": 3,
+    "complexity": 3
+  },
+  {
+    "id": "eval-task-lifecycle-hooks",
+    "description": "Evaluate the task lifecycle hooks system end-to-end. Configure a simple pre_task hook (e.g. echo starting task $WRECK_IT_TASK_ID) in .wreck-it/config.toml and verify it runs before task dispatch with the correct environment variables. Verify that a failing hook (exit 1) does not abort the loop. Review cli/src/task_hooks.rs for correct precedence of per-task vs. global hooks and confirm the hook receives all documented environment variables. Run cargo test --lib to confirm no regressions. Write a brief evaluation summary as a comment block at the top of cli/src/task_hooks.rs noting use cases (e.g. environment provisioning, Slack notifications), security considerations (shell injection risk if task IDs are user-controlled), and recommended follow-up work.",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-task-lifecycle-hooks"
+    ],
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "ideas-agent-output-caching",
+    "description": "Research and design an agent output caching system for wreck-it to reduce redundant API calls and cost on re-runs. When the same task is executed multiple times without underlying codebase changes, the agent response should be served from a local cache rather than calling the LLM. Review cli/src/agent.rs and cli/src/cloud_agent.rs (agent invocation paths) and cli/src/cost_tracker.rs to understand where caching would be most impactful. Design: (1) a cache key derived from sha256(task_id + system_prompt + user_prompt + git_HEAD_sha); (2) a cache store in .wreck-it-cache/ as JSON files keyed by hash; (3) a TTL (default 24h) after which cached entries are invalidated; (4) a --no-cache CLI flag to bypass caching. Document edge cases: cache invalidation on codebase changes (git HEAD change), cache miss on first run, and cache hit logging. Write the design as inline comments in a new stub file cli/src/agent_cache.rs.",
+    "status": "pending",
+    "role": "ideas",
+    "priority": 3,
+    "complexity": 2
+  },
+  {
+    "id": "impl-agent-output-caching",
+    "description": "Implement the agent output caching system designed in ideas-agent-output-caching. Create cli/src/agent_cache.rs with: (1) an AgentCache struct backed by a .wreck-it-cache/ directory; (2) a compute_key(task_id: &str, system_prompt: &str, user_prompt: &str, git_head: &str) -> String function using SHA-256 (via the sha2 crate or an existing hash utility); (3) get(key: &str) -> Option<String> that loads a cached response if the entry exists and is within TTL; (4) put(key: &str, response: &str) that writes the response to disk with a timestamp; (5) invalidate_all() and invalidate_expired(ttl_secs: u64) for cache management. Add a cache_ttl_seconds: Option<u64> field to Config (default 86400). Wire AgentCache into cli/src/agent.rs and cli/src/cloud_agent.rs as an optional layer: check cache before calling the LLM, store the response after a cache miss. Add --no-cache flag to CLI.",
+    "status": "pending",
+    "phase": 2,
+    "depends_on": [
+      "ideas-agent-output-caching"
+    ],
+    "priority": 3,
+    "complexity": 4
+  },
+  {
+    "id": "test-agent-output-caching",
+    "description": "Write unit tests for the agent output caching system implemented in impl-agent-output-caching. In cli/src/agent_cache.rs add a #[cfg(test)] module covering: (1) put then get within TTL returns the cached response; (2) get after TTL has elapsed returns None; (3) different (task_id, prompt) combinations produce different cache keys; (4) identical inputs with different git_head values produce different keys (cache invalidation on codebase change); (5) invalidate_expired removes only expired entries; (6) get on a non-existent key returns None without panicking. Use tempfile::tempdir() for isolated cache directories and manually set timestamps to test TTL expiry. Run cargo test --lib to confirm all tests pass.",
+    "status": "pending",
+    "phase": 3,
+    "depends_on": [
+      "impl-agent-output-caching"
+    ],
+    "priority": 3,
+    "complexity": 3
+  },
+  {
+    "id": "eval-agent-output-caching",
+    "description": "Evaluate the agent output caching system end-to-end. Run a task twice with identical inputs and verify that the second run is served from cache (check cost tracker shows zero cost for the second run). Verify that changing git_head (simulating a codebase change) invalidates the cache and triggers a real agent call. Check that --no-cache bypasses the cache correctly. Review cli/src/agent_cache.rs for correctness of the SHA-256 key derivation, TTL logic, and disk layout. Run cargo test --lib to confirm no regressions. Write a brief evaluation summary as a comment block at the top of cli/src/agent_cache.rs noting observed cost savings, cache hit rate in typical wreck-it runs, and recommended follow-up work (e.g. remote shared cache for team environments, smarter invalidation based on file-level git diff).",
+    "status": "pending",
+    "role": "evaluator",
+    "phase": 4,
+    "depends_on": [
+      "test-agent-output-caching"
+    ],
+    "priority": 3,
+    "complexity": 2
+  }
+]

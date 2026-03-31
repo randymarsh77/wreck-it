@@ -1,4 +1,5 @@
 state_branch = "wreck-it-state"
+task_branch = "master"
 state_root = ".wreck-it"
 
 [[ralphs]]
