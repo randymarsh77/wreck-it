@@ -57,6 +57,7 @@ export default function Installations() {
       return
     }
     setExpanded(id)
+    setFilter('')
     if (!repoState[id]) {
       fetchRepos(id, 1)
     }
@@ -90,7 +91,7 @@ export default function Installations() {
         <ul className="install-list">
           {installations.map((inst) => {
             const state = repoState[inst.id]
-            const totalPages = state ? Math.ceil(state.totalCount / REPOS_PER_PAGE) : 0
+            const totalPages = state && REPOS_PER_PAGE > 0 ? Math.ceil(state.totalCount / REPOS_PER_PAGE) : 0
             return (
               <li key={inst.id} className="card install-card">
                 <button className="install-header" onClick={() => toggleExpand(inst.id)}>
