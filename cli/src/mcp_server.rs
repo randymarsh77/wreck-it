@@ -1417,9 +1417,16 @@ mod tests {
         let text = v["result"]["content"][0]["text"].as_str().unwrap();
         // task-x (in-progress) should appear; task-y (pending) should not.
         let data_lines = data_rows(text);
-        assert_eq!(data_lines.len(), 1, "expected exactly one in-progress row: {text}");
+        assert_eq!(
+            data_lines.len(),
+            1,
+            "expected exactly one in-progress row: {text}"
+        );
         assert!(text.contains("task-x"), "expected task-x in output: {text}");
-        assert!(!text.contains("task-y"), "task-y should be filtered out: {text}");
+        assert!(
+            !text.contains("task-y"),
+            "task-y should be filtered out: {text}"
+        );
     }
 
     #[test]
@@ -1463,9 +1470,19 @@ mod tests {
         let v: Value = serde_json::from_str(&resp).unwrap();
         let text = v["result"]["content"][0]["text"].as_str().unwrap();
         let data_lines = data_rows(text);
-        assert_eq!(data_lines.len(), 1, "expected exactly one failed row: {text}");
-        assert!(text.contains("bad-task"), "expected bad-task in output: {text}");
-        assert!(!text.contains("ok-task"), "ok-task should be filtered out: {text}");
+        assert_eq!(
+            data_lines.len(),
+            1,
+            "expected exactly one failed row: {text}"
+        );
+        assert!(
+            text.contains("bad-task"),
+            "expected bad-task in output: {text}"
+        );
+        assert!(
+            !text.contains("ok-task"),
+            "ok-task should be filtered out: {text}"
+        );
     }
 
     #[test]
