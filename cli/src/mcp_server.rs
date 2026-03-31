@@ -627,6 +627,7 @@ fn task_to_json(task: &Task) -> Value {
         "priority": task.priority,
         "depends_on": task.depends_on,
         "labels": task.labels,
+        "acceptance_criteria": task.acceptance_criteria,
     })
 }
 
@@ -1888,6 +1889,46 @@ mod tests {
         assert!(
             text.contains("ghost-task"),
             "error should mention the missing id: {text}"
+        );
+    }
+
+    #[test]
+    fn get_task_includes_acceptance_criteria() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        // Add a task with acceptance_criteria.
+        let add_req = json!({
+            "jsonrpc": "2.0", "id": 74,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {
+                    "id": "ac-task",
+                    "description": "Task with criteria",
+                    "acceptance_criteria": "All tests pass and docs are updated"
+                }
+            }
+        })
+        .to_string();
+        process_message(&ctx, &add_req).unwrap();
+
+        // Retrieve it via get_task and verify acceptance_criteria is present.
+        let req = json!({
+            "jsonrpc": "2.0", "id": 75,
+            "method": "tools/call",
+            "params": {
+                "name": "get_task",
+                "arguments": {"id": "ac-task"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("All tests pass and docs are updated"),
+            "acceptance_criteria should appear in get_task output: {text}"
         );
     }
 
