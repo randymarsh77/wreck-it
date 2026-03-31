@@ -128,6 +128,14 @@ fn tools_list() -> Value {
                             "type": "array",
                             "items": { "type": "string" },
                             "description": "Optional list of task IDs this task depends on."
+                        },
+                        "priority": {
+                            "type": "integer",
+                            "description": "Optional task priority (higher number = higher priority). Defaults to 0."
+                        },
+                        "acceptance_criteria": {
+                            "type": "string",
+                            "description": "Optional acceptance criteria describing what constitutes successful completion of this task."
                         }
                     },
                     "required": ["id", "description"]
@@ -262,6 +270,17 @@ fn handle_add_task(ctx: &ServerContext, params: &Value) -> Result<Value, String>
         })
         .unwrap_or_default();
 
+    let priority: u32 = params
+        .get("priority")
+        .and_then(|v| v.as_u64())
+        .map(|p| p as u32)
+        .unwrap_or(0);
+
+    let acceptance_criteria: Option<String> = params
+        .get("acceptance_criteria")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
     let task = Task {
         id: id.to_string(),
         description: description.to_string(),
@@ -271,7 +290,7 @@ fn handle_add_task(ctx: &ServerContext, params: &Value) -> Result<Value, String>
         cooldown_seconds: None,
         phase: 1,
         depends_on,
-        priority: 0,
+        priority,
         complexity: 1,
         timeout_seconds: None,
         max_retries: None,
@@ -284,7 +303,7 @@ fn handle_add_task(ctx: &ServerContext, params: &Value) -> Result<Value, String>
         parent_id: None,
         labels: vec![],
         system_prompt_override: None,
-        acceptance_criteria: None,
+        acceptance_criteria,
         evaluation: None,
     };
 
@@ -1173,7 +1192,101 @@ mod tests {
         assert!(text.contains("bogus_role"));
     }
 
-    // ── update_task_status ───────────────────────────────────────────────────
+    #[test]
+    fn add_task_with_priority() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {"id": "high-prio", "description": "Critical fix", "priority": 10}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert!(!v["result"]["isError"].as_bool().unwrap_or(false));
+
+        let tasks = task_manager::load_tasks(&task_file).unwrap();
+        assert_eq!(tasks[0].priority, 10);
+    }
+
+    #[test]
+    fn add_task_with_acceptance_criteria() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {
+                    "id": "impl-feature",
+                    "description": "Implement the feature",
+                    "acceptance_criteria": "All unit tests pass and the feature is documented"
+                }
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert!(!v["result"]["isError"].as_bool().unwrap_or(false));
+
+        let tasks = task_manager::load_tasks(&task_file).unwrap();
+        assert_eq!(
+            tasks[0].acceptance_criteria.as_deref(),
+            Some("All unit tests pass and the feature is documented")
+        );
+    }
+
+    #[test]
+    fn add_task_default_priority_is_zero() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {"id": "normal-task", "description": "Normal task"}
+            }
+        })
+        .to_string();
+        process_message(&ctx, &req).unwrap();
+
+        let tasks = task_manager::load_tasks(&task_file).unwrap();
+        assert_eq!(tasks[0].priority, 0);
+        assert!(tasks[0].acceptance_criteria.is_none());
+    }
+
+    #[test]
+    fn add_task_schema_includes_priority_and_acceptance_criteria() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = r#"{"jsonrpc":"2.0","id":14,"method":"tools/list","params":{}}"#;
+        let resp = process_message(&ctx, req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+
+        let add_task_tool = v["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "add_task")
+            .expect("add_task tool must exist");
+
+        let props = &add_task_tool["inputSchema"]["properties"];
+        assert!(props["priority"].is_object(), "priority property missing");
+        assert!(
+            props["acceptance_criteria"].is_object(),
+            "acceptance_criteria property missing"
+        );
+    }
 
     #[test]
     fn update_task_status_success() {
