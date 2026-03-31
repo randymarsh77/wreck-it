@@ -1,8 +1,8 @@
 {
   "phase": "agent_working",
-  "iteration": 71,
+  "iteration": 72,
   "current_task_id": "mcp-server-integration",
-  "issue_number": 897,
+  "issue_number": 899,
   "last_prompt": "Implement an MCP (Model Context Protocol) server mode for wreck-it so that AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can directly query and manage the task pipeline via the standard MCP protocol. Expose MCP tools for: listing tasks and their statuses, adding new tasks, updating task status, reading artefacts, and triggering a loop iteration. This bridges wreck-it's structured task graph with the rapidly emerging MCP ecosystem, enabling humans to supervise autonomous loops through their preferred AI assistant interface rather than the CLI or TUI.",
   "memory": [
     "iteration 1: triggered cloud agent for task ideas-webhook-notifications (issue #131)",
@@ -286,21 +286,23 @@
     "iteration 69: agent completed without PR for task Some(\"mcp-server-integration\")",
     "iteration 70: triggered cloud agent for task mcp-server-integration (issue #895)",
     "iteration 70: agent completed without PR for task Some(\"mcp-server-integration\")",
-    "iteration 71: triggered cloud agent for task mcp-server-integration (issue #897)"
+    "iteration 71: triggered cloud agent for task mcp-server-integration (issue #897)",
+    "iteration 71: agent completed without PR for task Some(\"mcp-server-integration\")",
+    "iteration 72: triggered cloud agent for task mcp-server-integration (issue #899)"
   ],
   "task_statuses": {
-    "llm-cost-optimizer-routing": "inprogress",
-    "ideas-dependency-pruning": "inprogress",
-    "visual-workflow-exporter": "inprogress",
-    "cross-platform-notification-hub": "inprogress",
-    "adaptive-prompt-optimizer": "inprogress",
-    "ideas-html-report": "inprogress",
-    "ideas-cloudflare-log-source": "inprogress",
-    "ideas-task-lifecycle-hooks": "inprogress",
-    "ideas-agent-output-caching": "inprogress",
     "mcp-server-integration": "inprogress",
-    "ideas-error-classification": "inprogress",
+    "visual-workflow-exporter": "inprogress",
+    "llm-cost-optimizer-routing": "inprogress",
+    "ideas-cloudflare-log-source": "inprogress",
     "natural-language-task-query": "inprogress",
-    "otel-metrics-export": "inprogress"
+    "ideas-error-classification": "inprogress",
+    "otel-metrics-export": "inprogress",
+    "ideas-html-report": "inprogress",
+    "cross-platform-notification-hub": "inprogress",
+    "ideas-agent-output-caching": "inprogress",
+    "ideas-dependency-pruning": "inprogress",
+    "adaptive-prompt-optimizer": "inprogress",
+    "ideas-task-lifecycle-hooks": "inprogress"
   }
 }
