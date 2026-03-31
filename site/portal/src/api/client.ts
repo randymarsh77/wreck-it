@@ -106,17 +106,17 @@ export async function getInstallations(): Promise<Installation[]> {
   return request<Installation[]>('/api/portal/installations')
 }
 
-export interface ReposPage {
-  repositories: Repository[]
+export interface PaginatedRepos {
   total_count: number
+  repositories: Repository[]
 }
 
 export async function getInstallationRepos(
   installationId: number,
   page = 1,
   perPage = 30,
-): Promise<ReposPage> {
-  return request<ReposPage>(
+): Promise<PaginatedRepos> {
+  return request<PaginatedRepos>(
     `/api/portal/installations/${installationId}/repos?page=${page}&per_page=${perPage}`,
   )
 }

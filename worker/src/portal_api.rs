@@ -370,9 +370,9 @@ async fn list_installations(req: Request, ctx: RouteContext<()>) -> Result<Respo
 
 /// `GET /api/portal/installations/:installation_id/repos` — list repos for
 /// an installation.  Supports optional `page` and `per_page` query
-/// parameters (forwarded to the GitHub API).  Returns
-/// `{ repositories: [...], total_count: N }` so the frontend can
-/// paginate.
+/// parameters that are forwarded to the GitHub API.  Returns
+/// `{ total_count, repositories }` so the frontend can render pagination
+/// controls.
 async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let github_token = verify_portal_session(&req, &ctx)
         .await
@@ -382,8 +382,8 @@ async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<
         Error::RustError("Missing installation_id parameter".into())
     })?;
 
-    // Parse optional pagination query parameters from the incoming request.
-    let req_url = req.url().map_err(|e| Error::RustError(format!("bad URL: {e}")))?;
+    // Extract optional pagination query parameters.
+    let req_url = req.url().map_err(|e| Error::RustError(format!("bad url: {e}")))?;
     let page = req_url
         .query_pairs()
         .find(|(k, _)| k == "page")
@@ -403,19 +403,9 @@ async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<
         .await
         .map_err(Error::RustError)?;
 
-    // GitHub returns { total_count, repositories: [...] }.  Forward both
-    // fields so the frontend can build pagination controls.
-    let total_count = data
-        .get("total_count")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let repos = data.get("repositories").cloned().unwrap_or(serde_json::Value::Array(vec![]));
-
-    let result = serde_json::json!({
-        "repositories": repos,
-        "total_count": total_count,
-    });
-    json_response(&result, 200)
+    // GitHub returns { total_count, repositories: [...] } — forward the
+    // full object so the frontend can use total_count for pagination.
+    json_response(&data, 200)
 }
 
 // ---------------------------------------------------------------------------
