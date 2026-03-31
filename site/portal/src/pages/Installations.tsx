@@ -46,6 +46,7 @@ export default function Installations() {
       return
     }
     setExpanded(id)
+    setFilter('')
     if (!repos[id]) {
       fetchRepos(id, 1)
     }
@@ -111,7 +112,9 @@ export default function Installations() {
                             onChange={(e) => setFilter(e.target.value)}
                           />
                           <span className="muted repo-count">
-                            {filteredRepos.length} of {totalCount} repos
+                            {lowerFilter
+                              ? `${filteredRepos.length} matching on page`
+                              : `${instRepos.length} of ${totalCount} repos`}
                           </span>
                         </div>
 
