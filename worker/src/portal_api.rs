@@ -186,15 +186,27 @@ async fn verify_portal_session(
 // ---------------------------------------------------------------------------
 
 /// `GET /api/portal/auth/login` — redirect to GitHub OAuth.
-async fn auth_login(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+async fn auth_login(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let client_id = ctx
         .secret("GITHUB_CLIENT_ID")
         .map(|s| s.to_string())
         .map_err(|_| Error::RustError("GITHUB_CLIENT_ID secret not configured".into()))?;
 
-    let url = format!(
+    let parsed_url = req.url()?;
+    let redirect_uri = parsed_url
+        .query_pairs()
+        .find(|(k, _)| k == "redirect_uri")
+        .map(|(_, v)| v.to_string());
+
+    let mut url = format!(
         "https://github.com/login/oauth/authorize?client_id={client_id}&scope=read:org"
     );
+    if let Some(ru) = &redirect_uri {
+        url.push_str(&format!(
+            "&redirect_uri={}",
+            urlencoding::encode(ru)
+        ));
+    }
 
     let resp = Response::empty()?.with_status(302);
     let mut resp = cors_headers(resp)?;
@@ -204,13 +216,18 @@ async fn auth_login(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
 
 /// `GET /api/portal/auth/callback` — exchange OAuth code for access token.
 async fn auth_callback(req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    // Extract the `code` query parameter.
+    // Extract the `code` and optional `redirect_uri` query parameters.
     let url = req.url()?;
     let code = url
         .query_pairs()
         .find(|(k, _)| k == "code")
         .map(|(_, v)| v.to_string())
         .ok_or_else(|| Error::RustError("Missing 'code' query parameter".into()))?;
+
+    let redirect_uri = url
+        .query_pairs()
+        .find(|(k, _)| k == "redirect_uri")
+        .map(|(_, v)| v.to_string());
 
     let client_id = ctx
         .secret("GITHUB_CLIENT_ID")
@@ -228,11 +245,16 @@ async fn auth_callback(req: Request, ctx: RouteContext<()>) -> Result<Response> 
         .map_err(|_| Error::RustError("PORTAL_SESSION_SECRET not configured".into()))?;
 
     // Exchange the code for an access token.
-    let token_body = serde_json::json!({
+    // If redirect_uri was provided during the auth step, GitHub requires it
+    // here as well for verification.
+    let mut token_body = serde_json::json!({
         "client_id": client_id,
         "client_secret": client_secret,
         "code": code,
     });
+    if let Some(ru) = redirect_uri {
+        token_body["redirect_uri"] = serde_json::Value::String(ru);
+    }
 
     let headers = Headers::new();
     headers.set("Accept", "application/json").ok();
@@ -340,11 +362,17 @@ async fn list_installations(req: Request, ctx: RouteContext<()>) -> Result<Respo
     .await
     .map_err(Error::RustError)?;
 
-    json_response(&data, 200)
+    // GitHub returns { total_count, installations: [...] } — unwrap to a
+    // plain array so the frontend can use it directly.
+    let installations = data.get("installations").cloned().unwrap_or(data);
+    json_response(&installations, 200)
 }
 
 /// `GET /api/portal/installations/:installation_id/repos` — list repos for
-/// an installation.
+/// an installation.  Supports optional `page` and `per_page` query
+/// parameters that are forwarded to the GitHub API.  Returns
+/// `{ total_count, repositories }` so the frontend can render pagination
+/// controls.
 async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let github_token = verify_portal_session(&req, &ctx)
         .await
@@ -354,13 +382,29 @@ async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<
         Error::RustError("Missing installation_id parameter".into())
     })?;
 
+    // Extract optional pagination query parameters.
+    let req_url = req.url().map_err(|e| Error::RustError(format!("bad url: {e}")))?;
+    let page = req_url
+        .query_pairs()
+        .find(|(k, _)| k == "page")
+        .and_then(|(_, v)| v.parse::<u32>().ok())
+        .unwrap_or(1);
+    let per_page = req_url
+        .query_pairs()
+        .find(|(k, _)| k == "per_page")
+        .and_then(|(_, v)| v.parse::<u32>().ok())
+        .unwrap_or(30)
+        .min(100);
+
     let url = format!(
-        "https://api.github.com/user/installations/{installation_id}/repositories"
+        "https://api.github.com/user/installations/{installation_id}/repositories?page={page}&per_page={per_page}"
     );
     let data = github_api_get(&url, &github_token)
         .await
         .map_err(Error::RustError)?;
 
+    // GitHub returns { total_count, repositories: [...] } — forward the
+    // full object so the frontend can use total_count for pagination.
     json_response(&data, 200)
 }
 

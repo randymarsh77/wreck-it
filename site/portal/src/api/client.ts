@@ -85,12 +85,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export function login(): void {
-  window.location.href = `${API_BASE}/api/portal/auth/login`
+  const redirectUri = `${window.location.origin}/auth/callback`
+  window.location.href = `${API_BASE}/api/portal/auth/login?redirect_uri=${encodeURIComponent(redirectUri)}`
 }
 
 export async function handleCallback(code: string): Promise<AuthCallbackResponse> {
+  const redirectUri = `${window.location.origin}/auth/callback`
   const data = await request<AuthCallbackResponse>(
-    `/api/portal/auth/callback?code=${encodeURIComponent(code)}`,
+    `/api/portal/auth/callback?code=${encodeURIComponent(code)}&redirect_uri=${encodeURIComponent(redirectUri)}`,
   )
   setToken(data.token)
   return data
@@ -104,8 +106,19 @@ export async function getInstallations(): Promise<Installation[]> {
   return request<Installation[]>('/api/portal/installations')
 }
 
-export async function getInstallationRepos(installationId: number): Promise<Repository[]> {
-  return request<Repository[]>(`/api/portal/installations/${installationId}/repos`)
+export interface PaginatedRepos {
+  total_count: number
+  repositories: Repository[]
+}
+
+export async function getInstallationRepos(
+  installationId: number,
+  page = 1,
+  perPage = 30,
+): Promise<PaginatedRepos> {
+  return request<PaginatedRepos>(
+    `/api/portal/installations/${installationId}/repos?page=${page}&per_page=${perPage}`,
+  )
 }
 
 export async function getRepoConfig(owner: string, repo: string): Promise<RalphConfig> {

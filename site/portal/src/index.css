@@ -308,6 +308,42 @@ ul {
   font-size: 0.85rem;
 }
 
+/* ── Repo filter ──────────────────────────────────────── */
+.repo-filter {
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 0.875rem;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.repo-filter:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+.repo-filter::placeholder {
+  color: var(--text-muted);
+}
+
+/* ── Pagination ──────────────────────────────────────── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.pagination-info {
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
 /* ── Repo config ──────────────────────────────────────── */
 .repo-config h1 {
   font-size: 1.3rem;
@@ -341,6 +377,56 @@ ul {
   border-color: var(--primary);
 }
 
+/* ── Hamburger menu toggle (hidden on desktop) ───────── */
+.menu-toggle {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+}
+
+.hamburger {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--text);
+  position: relative;
+  transition: background 0.2s;
+}
+.hamburger::before,
+.hamburger::after {
+  content: '';
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--text);
+  position: absolute;
+  left: 0;
+  transition: transform 0.2s;
+}
+.hamburger::before {
+  top: -6px;
+}
+.hamburger::after {
+  top: 6px;
+}
+.hamburger.open {
+  background: transparent;
+}
+.hamburger.open::before {
+  top: 0;
+  transform: rotate(45deg);
+}
+.hamburger.open::after {
+  top: 0;
+  transform: rotate(-45deg);
+}
+
 /* ── Utilities ────────────────────────────────────────── */
 .muted {
   color: var(--text-muted);
@@ -364,10 +450,44 @@ ul {
 @media (max-width: 640px) {
   .topbar {
     padding: 0 12px;
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 56px;
   }
 
   .topbar-left {
     gap: 12px;
+    width: 100%;
+    justify-content: space-between;
+    min-height: 56px;
+    align-items: center;
+  }
+
+  .menu-toggle {
+    display: flex;
+  }
+
+  .nav-links {
+    display: none;
+    flex-direction: column;
+    width: 100%;
+    gap: 0;
+    order: 3;
+    padding-bottom: 8px;
+  }
+
+  .nav-links.nav-open {
+    display: flex;
+  }
+
+  .nav-links a {
+    padding: 10px 0;
+    font-size: 1rem;
+    border-bottom: none;
+  }
+
+  .topbar-right {
+    display: none;
   }
 
   .welcome {
@@ -377,5 +497,56 @@ ul {
 
   .content {
     padding: 20px 12px;
+  }
+
+  .avatar-lg {
+    width: 48px;
+    height: 48px;
+  }
+
+  .welcome h1 {
+    font-size: 1.2rem;
+  }
+
+  .installations h1 {
+    font-size: 1.3rem;
+  }
+
+  .install-header {
+    padding: 12px 14px;
+  }
+
+  .install-repos {
+    padding: 12px 14px;
+  }
+
+  .card {
+    padding: 16px;
+  }
+
+  .config-editor {
+    min-height: 200px;
+    font-size: 0.8rem;
+  }
+
+  .repo-config h1 {
+    font-size: 1.1rem;
+    word-break: break-all;
+  }
+
+  .btn-lg {
+    width: 100%;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pagination {
+    gap: 8px;
+  }
+
+  .pagination-info {
+    font-size: 0.8rem;
   }
 }
