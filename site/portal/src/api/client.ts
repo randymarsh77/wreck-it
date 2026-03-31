@@ -85,12 +85,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export function login(): void {
-  window.location.href = `${API_BASE}/api/portal/auth/login`
+  const redirectUri = `${window.location.origin}/auth/callback`
+  window.location.href = `${API_BASE}/api/portal/auth/login?redirect_uri=${encodeURIComponent(redirectUri)}`
 }
 
 export async function handleCallback(code: string): Promise<AuthCallbackResponse> {
+  const redirectUri = `${window.location.origin}/auth/callback`
   const data = await request<AuthCallbackResponse>(
-    `/api/portal/auth/callback?code=${encodeURIComponent(code)}`,
+    `/api/portal/auth/callback?code=${encodeURIComponent(code)}&redirect_uri=${encodeURIComponent(redirectUri)}`,
   )
   setToken(data.token)
   return data
