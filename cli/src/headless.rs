@@ -6,15 +6,16 @@ use crate::headless_state::{
 };
 use crate::plan_migration::migrate_pending_plans;
 use crate::prompt_loader;
-use crate::repo_config::{load_repo_config, RalphConfig};
+use crate::repo_config::{load_repo_config, RalphConfig, RepoConfig};
 use crate::state_worktree::{commit_and_push_state, ensure_feature_branch, ensure_state_worktree};
 use crate::task_manager::{load_tasks, reset_recurring_tasks, save_tasks};
 use crate::types::Config;
 use anyhow::{Context, Result};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use wreck_it_core::iteration::effective_status;
 
 /// Default name for the repo-committed config file.
 const DEFAULT_CONFIG_FILE: &str = ".wreck-it.toml";
@@ -52,6 +53,24 @@ enum StepOutcome {
     /// An async/external operation was performed or there is nothing more to
     /// do; save state and return.
     Yield,
+}
+
+/// Resolve the directory from which task definition files should be read.
+///
+/// When a `task_branch` is configured in the repo config, task files live on
+/// the main checkout (`work_dir`) alongside the code.  Otherwise, they are
+/// read from the state worktree (`state_dir`) for backward compatibility.
+fn resolve_task_dir(
+    repo_cfg: Option<&RepoConfig>,
+    work_dir: &Path,
+    state_dir: &Path,
+) -> PathBuf {
+    if let Some(cfg) = repo_cfg {
+        if cfg.task_branch.is_some() {
+            return work_dir.to_path_buf();
+        }
+    }
+    state_dir.to_path_buf()
 }
 
 /// Run wreck-it in headless mode.
@@ -125,6 +144,12 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
     let ralph_name = ralph.map(|r| r.name.as_str()).unwrap_or("default");
     let ralph_branch = ralph.and_then(|r| r.branch.as_deref());
 
+    // Determine the directory to read task files from.  When `task_branch` is
+    // configured (e.g. set to "master"), task definitions live alongside the
+    // code on the main checkout.  Otherwise, they live on the state branch
+    // worktree for backward compatibility.
+    let task_dir = resolve_task_dir(repo_cfg.as_ref(), &work_dir, &state_dir);
+
     let state_path = state_dir.join(&headless_cfg.state_file);
     let mut state = load_headless_state(&state_path).context("Failed to load headless state")?;
 
@@ -162,6 +187,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
             &mut state,
             &work_dir,
             &state_dir,
+            &task_dir,
         )
         .await
         {
@@ -193,7 +219,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
                         ralph,
                         &mut state,
                         &work_dir,
-                        &state_dir,
+                        &task_dir,
                     )
                     .await?
                 }
@@ -207,7 +233,7 @@ pub async fn run_headless(config: Config, ralph: Option<&RalphConfig>) -> Result
                         ralph,
                         &mut state,
                         &work_dir,
-                        &state_dir,
+                        &task_dir,
                     )
                     .await?
                 }
@@ -341,7 +367,8 @@ pub(crate) async fn advance_tracked_prs(
     ralph: Option<&RalphConfig>,
     state: &mut HeadlessState,
     work_dir: &Path,
-    state_dir: &Path,
+    _state_dir: &Path,
+    task_dir: &Path,
 ) -> Result<bool> {
     let github_token = config
         .api_token
@@ -381,7 +408,7 @@ pub(crate) async fn advance_tracked_prs(
     );
 
     let mut made_progress = false;
-    let task_file = state_dir.join(&headless_cfg.task_file);
+    let task_file = task_dir.join(&headless_cfg.task_file);
 
     // Process each tracked PR.  Collect PR numbers that have been merged or
     // closed (to remove from the tracked list after the loop).
@@ -554,7 +581,7 @@ pub(crate) async fn advance_tracked_prs(
                                     state
                                         .memory
                                         .push(format!("advance: merged PR #{}", pr_number));
-                                    mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                                    mark_task_complete_by_id(&tracked.task_id, &task_file, state)?;
                                     if state.pr_number == Some(pr_number) {
                                         state.phase = AgentPhase::Completed;
                                     }
@@ -657,7 +684,7 @@ pub(crate) async fn advance_tracked_prs(
                                  PR #{} (task {}), resetting task to pending",
                                 pr_number, tracked.task_id,
                             );
-                            mark_task_pending_by_id(&tracked.task_id, &task_file)?;
+                            mark_task_pending_by_id(&tracked.task_id, &task_file, state)?;
                             resolved_pr_numbers.push(pr_number);
                             if state.pr_number == Some(pr_number) {
                                 state.phase = AgentPhase::NeedsTrigger;
@@ -732,7 +759,7 @@ pub(crate) async fn advance_tracked_prs(
                             state
                                 .memory
                                 .push(format!("advance: merged PR #{}", pr_number));
-                            mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                            mark_task_complete_by_id(&tracked.task_id, &task_file, state)?;
                             if state.pr_number == Some(pr_number) {
                                 state.phase = AgentPhase::Completed;
                             }
@@ -808,7 +835,7 @@ pub(crate) async fn advance_tracked_prs(
                                 state
                                     .memory
                                     .push(format!("advance: merged PR #{}", pr_number));
-                                mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                                mark_task_complete_by_id(&tracked.task_id, &task_file, state)?;
                                 if state.pr_number == Some(pr_number) {
                                     state.phase = AgentPhase::Completed;
                                 }
@@ -830,7 +857,7 @@ pub(crate) async fn advance_tracked_prs(
                     "[wreck-it] advance: PR #{} (task {}) already merged",
                     pr_number, tracked.task_id
                 );
-                mark_task_complete_by_id(&tracked.task_id, &task_file)?;
+                mark_task_complete_by_id(&tracked.task_id, &task_file, state)?;
                 if state.pr_number == Some(pr_number) {
                     state.phase = AgentPhase::Completed;
                 }
@@ -843,7 +870,7 @@ pub(crate) async fn advance_tracked_prs(
                      resetting task to pending",
                     pr_number, tracked.task_id
                 );
-                mark_task_pending_by_id(&tracked.task_id, &task_file)?;
+                mark_task_pending_by_id(&tracked.task_id, &task_file, state)?;
                 if state.pr_number == Some(pr_number) {
                     state.phase = AgentPhase::NeedsTrigger;
                     state.current_task_id = None;
@@ -1027,11 +1054,20 @@ fn truncate_output(s: &str, max_len: usize) -> String {
     result
 }
 
-/// Mark a task as completed by its ID in the task file.
-fn mark_task_complete_by_id(task_id: &str, task_file: &Path) -> Result<()> {
+/// Mark a task as completed by its ID in both the state map and the task file.
+fn mark_task_complete_by_id(
+    task_id: &str,
+    task_file: &Path,
+    state: &mut HeadlessState,
+) -> Result<()> {
     if task_id == UNKNOWN_TASK_ID {
         return Ok(());
     }
+    // Update the authoritative status map.
+    state
+        .task_statuses
+        .insert(task_id.to_string(), crate::types::TaskStatus::Completed);
+    // Also update the task file for backward compatibility.
     let mut tasks = load_tasks(task_file)?;
     if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
         if task.status != crate::types::TaskStatus::Completed {
@@ -1048,14 +1084,23 @@ fn mark_task_complete_by_id(task_id: &str, task_file: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Reset a task back to pending by its ID in the task file.
+/// Reset a task back to pending by its ID in both the state map and the task file.
 ///
 /// Used when a PR is closed without being merged so the task can be
 /// retried on the next iteration.
-fn mark_task_pending_by_id(task_id: &str, task_file: &Path) -> Result<()> {
+fn mark_task_pending_by_id(
+    task_id: &str,
+    task_file: &Path,
+    state: &mut HeadlessState,
+) -> Result<()> {
     if task_id == UNKNOWN_TASK_ID {
         return Ok(());
     }
+    // Update the authoritative status map.
+    state
+        .task_statuses
+        .insert(task_id.to_string(), crate::types::TaskStatus::Pending);
+    // Also update the task file for backward compatibility.
     let mut tasks = load_tasks(task_file)?;
     if let Some(task) = tasks.iter_mut().find(|t| t.id == task_id) {
         if task.status != crate::types::TaskStatus::Pending {
@@ -1083,9 +1128,9 @@ async fn run_needs_trigger(
     ralph: Option<&RalphConfig>,
     state: &mut HeadlessState,
     work_dir: &Path,
-    state_dir: &Path,
+    task_dir: &Path,
 ) -> Result<StepOutcome> {
-    let task_file = state_dir.join(&headless_cfg.task_file);
+    let task_file = task_dir.join(&headless_cfg.task_file);
     let mut tasks = load_tasks(&task_file)?;
 
     // Reset any recurring tasks whose cooldown has elapsed.
@@ -1103,15 +1148,17 @@ async fn run_needs_trigger(
     }
 
     // Build the set of completed task IDs for dependency checking.
+    // Use effective_status() so the state map takes precedence over the
+    // task file's embedded status.
     let completed_ids: HashSet<&str> = tasks
         .iter()
-        .filter(|t| t.status == crate::types::TaskStatus::Completed)
+        .filter(|t| effective_status(t, state) == crate::types::TaskStatus::Completed)
         .map(|t| t.id.as_str())
         .collect();
 
     // Find the first pending task whose dependencies are all satisfied.
     let pending = tasks.iter().find(|t| {
-        t.status == crate::types::TaskStatus::Pending
+        effective_status(t, state) == crate::types::TaskStatus::Pending
             && t.depends_on
                 .iter()
                 .all(|dep| completed_ids.contains(dep.as_str()))
@@ -1208,7 +1255,10 @@ async fn run_needs_trigger(
         state.iteration, pending_task.id, result.issue_number,
     ));
 
-    // Mark task as InProgress and save.
+    // Mark task as InProgress in state map and task file.
+    state
+        .task_statuses
+        .insert(pending_task.id.clone(), crate::types::TaskStatus::InProgress);
     let mut updated_tasks = load_tasks(&task_file)?;
     if let Some(task) = updated_tasks.iter_mut().find(|t| t.id == pending_task.id) {
         task.status = crate::types::TaskStatus::InProgress;
@@ -1350,7 +1400,7 @@ async fn run_needs_verification(
     ralph: Option<&RalphConfig>,
     state: &mut HeadlessState,
     work_dir: &Path,
-    state_dir: &Path,
+    task_dir: &Path,
 ) -> Result<StepOutcome> {
     let pr_number = match state.pr_number {
         Some(n) => n,
@@ -1512,9 +1562,9 @@ async fn run_needs_verification(
                                     "iteration {}: merged PR #{} for task {:?} (brute mode)",
                                     state.iteration, pr_number, state.current_task_id,
                                 ));
-                                let task_file = state_dir.join(&headless_cfg.task_file);
-                                if let Some(task_id) = &state.current_task_id {
-                                    mark_task_complete_by_id(task_id, &task_file)?;
+                                let task_file = task_dir.join(&headless_cfg.task_file);
+                                if let Some(task_id) = state.current_task_id.clone() {
+                                    mark_task_complete_by_id(&task_id, &task_file, state)?;
                                 }
                                 state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
                                 return Ok(StepOutcome::Continue);
@@ -1573,9 +1623,9 @@ async fn run_needs_verification(
             ));
 
             // Mark task as completed.
-            let task_file = state_dir.join(&headless_cfg.task_file);
-            if let Some(task_id) = &state.current_task_id {
-                mark_task_complete_by_id(task_id, &task_file)?;
+            let task_file = task_dir.join(&headless_cfg.task_file);
+            if let Some(task_id) = state.current_task_id.clone() {
+                mark_task_complete_by_id(&task_id, &task_file, state)?;
             }
             // Remove from tracked list.
             state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
@@ -1593,9 +1643,9 @@ async fn run_needs_verification(
             ));
 
             // Reset task back to pending so it will be retried.
-            let task_file = state_dir.join(&headless_cfg.task_file);
-            if let Some(task_id) = &state.current_task_id {
-                mark_task_pending_by_id(task_id, &task_file)?;
+            let task_file = task_dir.join(&headless_cfg.task_file);
+            if let Some(task_id) = state.current_task_id.clone() {
+                mark_task_pending_by_id(&task_id, &task_file, state)?;
             }
             // Remove from tracked list and reset state.
             state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
@@ -1671,9 +1721,9 @@ async fn run_needs_verification(
                      resetting task to pending immediately",
                     pr_number, state.current_task_id,
                 );
-                let task_file = state_dir.join(&headless_cfg.task_file);
-                if let Some(task_id) = &state.current_task_id {
-                    mark_task_pending_by_id(task_id, &task_file)?;
+                let task_file = task_dir.join(&headless_cfg.task_file);
+                if let Some(task_id) = state.current_task_id.clone() {
+                    mark_task_pending_by_id(&task_id, &task_file, state)?;
                 }
                 state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
                 state.memory.push(format!(
@@ -1753,9 +1803,9 @@ async fn run_needs_verification(
                     "iteration {}: merged PR #{} for task {:?} (brute mode)",
                     state.iteration, pr_number, state.current_task_id,
                 ));
-                let task_file = state_dir.join(&headless_cfg.task_file);
-                if let Some(task_id) = &state.current_task_id {
-                    mark_task_complete_by_id(task_id, &task_file)?;
+                let task_file = task_dir.join(&headless_cfg.task_file);
+                if let Some(task_id) = state.current_task_id.clone() {
+                    mark_task_complete_by_id(&task_id, &task_file, state)?;
                 }
                 state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
                 return Ok(StepOutcome::Continue);
@@ -1850,9 +1900,9 @@ async fn run_needs_verification(
             ));
 
             // Mark task as completed.
-            let task_file = state_dir.join(&headless_cfg.task_file);
-            if let Some(task_id) = &state.current_task_id {
-                mark_task_complete_by_id(task_id, &task_file)?;
+            let task_file = task_dir.join(&headless_cfg.task_file);
+            if let Some(task_id) = state.current_task_id.clone() {
+                mark_task_complete_by_id(&task_id, &task_file, state)?;
             }
             // Remove from tracked list.
             state.tracked_prs.retain(|tp| tp.pr_number != pr_number);
@@ -2142,7 +2192,7 @@ mod tests {
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
-        mark_task_complete_by_id("t1", &task_file).unwrap();
+        mark_task_complete_by_id("t1", &task_file, &mut HeadlessState::default()).unwrap();
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
@@ -2181,7 +2231,7 @@ mod tests {
         save_tasks(&task_file, &tasks).unwrap();
 
         // UNKNOWN_TASK_ID task IDs are skipped.
-        mark_task_complete_by_id(UNKNOWN_TASK_ID, &task_file).unwrap();
+        mark_task_complete_by_id(UNKNOWN_TASK_ID, &task_file, &mut HeadlessState::default()).unwrap();
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Pending);
@@ -2219,7 +2269,7 @@ mod tests {
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
-        mark_task_complete_by_id("rec-1", &task_file).unwrap();
+        mark_task_complete_by_id("rec-1", &task_file, &mut HeadlessState::default()).unwrap();
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
@@ -2262,7 +2312,7 @@ mod tests {
         save_tasks(&task_file, &tasks).unwrap();
 
         // Complete the task (sets last_attempt_at to now).
-        mark_task_complete_by_id("rec-1", &task_file).unwrap();
+        mark_task_complete_by_id("rec-1", &task_file, &mut HeadlessState::default()).unwrap();
 
         // Reload and immediately try to reset recurring tasks.
         let mut reloaded = load_tasks(&task_file).unwrap();
@@ -2403,7 +2453,7 @@ mod tests {
         }];
         save_tasks(&task_file, &tasks).unwrap();
 
-        mark_task_pending_by_id("t1", &task_file).unwrap();
+        mark_task_pending_by_id("t1", &task_file, &mut HeadlessState::default()).unwrap();
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Pending);
@@ -2442,7 +2492,7 @@ mod tests {
         save_tasks(&task_file, &tasks).unwrap();
 
         // UNKNOWN_TASK_ID task IDs are skipped.
-        mark_task_pending_by_id(UNKNOWN_TASK_ID, &task_file).unwrap();
+        mark_task_pending_by_id(UNKNOWN_TASK_ID, &task_file, &mut HeadlessState::default()).unwrap();
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::InProgress);
@@ -2481,10 +2531,120 @@ mod tests {
         save_tasks(&task_file, &tasks).unwrap();
 
         // Already pending — should be a no-op.
-        mark_task_pending_by_id("t1", &task_file).unwrap();
+        mark_task_pending_by_id("t1", &task_file, &mut HeadlessState::default()).unwrap();
 
         let reloaded = load_tasks(&task_file).unwrap();
         assert_eq!(reloaded[0].status, crate::types::TaskStatus::Pending);
+    }
+
+    // ── resolve_task_dir tests ───────────────────────────────────────
+
+    #[test]
+    fn resolve_task_dir_falls_back_to_state_dir() {
+        let work = PathBuf::from("/work");
+        let state = PathBuf::from("/state");
+        // No repo config → use state_dir.
+        assert_eq!(resolve_task_dir(None, &work, &state), state);
+    }
+
+    #[test]
+    fn resolve_task_dir_falls_back_when_task_branch_none() {
+        let work = PathBuf::from("/work");
+        let state = PathBuf::from("/state");
+        let cfg = RepoConfig::default();
+        assert!(cfg.task_branch.is_none());
+        assert_eq!(resolve_task_dir(Some(&cfg), &work, &state), state);
+    }
+
+    #[test]
+    fn resolve_task_dir_uses_work_dir_when_task_branch_set() {
+        let work = PathBuf::from("/work");
+        let state = PathBuf::from("/state");
+        let cfg = RepoConfig {
+            task_branch: Some("master".to_string()),
+            ..RepoConfig::default()
+        };
+        assert_eq!(resolve_task_dir(Some(&cfg), &work, &state), work);
+    }
+
+    #[test]
+    fn mark_task_complete_updates_state_map() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+        let tasks = vec![crate::types::Task {
+            id: "t1".to_string(),
+            description: "task one".to_string(),
+            status: crate::types::TaskStatus::InProgress,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            timeout_seconds: None,
+            max_retries: None,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
+            system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
+        }];
+        save_tasks(&task_file, &tasks).unwrap();
+        let mut state = HeadlessState::default();
+        mark_task_complete_by_id("t1", &task_file, &mut state).unwrap();
+        // State map should be updated.
+        assert_eq!(
+            state.task_statuses.get("t1").copied(),
+            Some(crate::types::TaskStatus::Completed),
+        );
+        // File should also be updated.
+        let reloaded = load_tasks(&task_file).unwrap();
+        assert_eq!(reloaded[0].status, crate::types::TaskStatus::Completed);
+    }
+
+    #[test]
+    fn mark_task_pending_updates_state_map() {
+        let dir = tempfile::tempdir().unwrap();
+        let task_file = dir.path().join("tasks.json");
+        let tasks = vec![crate::types::Task {
+            id: "t1".to_string(),
+            description: "task one".to_string(),
+            status: crate::types::TaskStatus::InProgress,
+            role: crate::types::AgentRole::default(),
+            kind: crate::types::TaskKind::default(),
+            cooldown_seconds: None,
+            phase: 1,
+            depends_on: vec![],
+            priority: 0,
+            complexity: 1,
+            timeout_seconds: None,
+            max_retries: None,
+            failed_attempts: 0,
+            last_attempt_at: None,
+            inputs: vec![],
+            outputs: vec![],
+            runtime: crate::types::TaskRuntime::default(),
+            precondition_prompt: None,
+            parent_id: None,
+            labels: vec![],
+            system_prompt_override: None,
+            acceptance_criteria: None,
+            evaluation: None,
+        }];
+        save_tasks(&task_file, &tasks).unwrap();
+        let mut state = HeadlessState::default();
+        mark_task_pending_by_id("t1", &task_file, &mut state).unwrap();
+        assert_eq!(
+            state.task_statuses.get("t1").copied(),
+            Some(crate::types::TaskStatus::Pending),
+        );
     }
 
     // ── Validation command tests ─────────────────────────────────────
