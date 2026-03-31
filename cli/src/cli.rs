@@ -364,7 +364,7 @@ pub enum Commands {
     ///   • add_task           – append a new task to the task file
     ///   • update_task_status – update the status of an existing task
     ///   • read_artefact      – read an artefact by "task-id/artefact-name" key
-    ///   • list_artefacts     – list all artefact keys in the manifest
+    ///   • list_artefacts     – list artefact keys (optional task_id filter)
     ///   • trigger_iteration  – obtain the CLI command that runs one loop step
     ///
     /// Example Claude Desktop config snippet (claude_desktop_config.json):
