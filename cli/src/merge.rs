@@ -215,6 +215,20 @@ pub async fn run_merge(
             merge_headless_cfg.state_file = state_file_name.clone().into();
         }
 
+        // Resolve the task directory: when tasks_dir is configured, append it
+        // to the base directory (state_dir or work_dir depending on task_branch).
+        let task_dir = {
+            let base = if repo_cfg.as_ref().is_some_and(|c| c.task_branch.is_some()) {
+                work_dir.to_path_buf()
+            } else {
+                sd.to_path_buf()
+            };
+            match repo_cfg.as_ref().and_then(|c| c.tasks_dir.as_deref()) {
+                Some(dir) if !dir.is_empty() => base.join(dir),
+                _ => base,
+            }
+        };
+
         if let Err(e) = headless::advance_tracked_prs(
             config,
             &merge_headless_cfg,
@@ -222,7 +236,7 @@ pub async fn run_merge(
             &mut state,
             work_dir,
             sd,
-            sd,
+            &task_dir,
         )
         .await
         {
