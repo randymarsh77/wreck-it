@@ -1530,6 +1530,83 @@ mod tests {
         assert_eq!(v["error"]["code"], PARSE_ERROR);
     }
 
+    #[test]
+    fn parse_error_response_has_null_id() {
+        // Per JSON-RPC 2.0 spec, when a request cannot be parsed the response
+        // id MUST be null.
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let resp = process_message(&ctx, "{invalid json}").unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert_eq!(v["error"]["code"], PARSE_ERROR);
+        assert!(v["id"].is_null(), "parse error response id should be null");
+    }
+
+    // ── unknown tool name ────────────────────────────────────────────────────
+
+    #[test]
+    fn tools_call_unknown_tool_returns_error() {
+        // Calling tools/call with a valid method but an unrecognised tool name
+        // should return a successful JSON-RPC response whose result indicates
+        // an error (isError: true) rather than a METHOD_NOT_FOUND at the
+        // JSON-RPC level.
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 100,
+            "method": "tools/call",
+            "params": {
+                "name": "nonexistent_tool",
+                "arguments": {}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+
+        // The JSON-RPC envelope should be a success (no top-level `error`).
+        assert!(v["error"].is_null(), "should not be a JSON-RPC error: {v}");
+        // The tool result itself must signal an error via `isError`.
+        assert_eq!(
+            v["result"]["isError"], true,
+            "unknown tool should set isError: true: {v}"
+        );
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("nonexistent_tool"),
+            "error message should mention the unknown tool name: {text}"
+        );
+    }
+
+    #[test]
+    fn tools_call_missing_tool_name_returns_error() {
+        // Calling tools/call without a `name` field in params should produce
+        // a tool-level error (isError: true), not a JSON-RPC protocol error.
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 101,
+            "method": "tools/call",
+            "params": {
+                "arguments": {}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+
+        assert!(v["error"].is_null(), "should not be a JSON-RPC error: {v}");
+        assert_eq!(
+            v["result"]["isError"], true,
+            "missing tool name should set isError: true: {v}"
+        );
+    }
+
     // ── notification (no response) ───────────────────────────────────────────
 
     #[test]
