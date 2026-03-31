@@ -13,7 +13,7 @@
 //! | `add_task`           | Append a new task to the task file                       |
 //! | `update_task_status` | Update the lifecycle status of an existing task          |
 //! | `read_artefact`      | Read an artefact by `"task-id/artefact-name"` key        |
-//! | `list_artefacts`     | List all artefact keys in the artefact manifest          |
+//! | `list_artefacts`     | List artefact keys; optional `task_id` filter        |
 //! | `trigger_iteration`  | Return the CLI command that runs one loop iteration      |
 //!
 //! [Model Context Protocol]: https://spec.modelcontextprotocol.io/
@@ -190,10 +190,15 @@ fn tools_list() -> Value {
             },
             {
                 "name": "list_artefacts",
-                "description": "List all artefact keys stored in the artefact manifest.",
+                "description": "List all artefact keys stored in the artefact manifest. Optionally filter by task ID.",
                 "inputSchema": {
                     "type": "object",
-                    "properties": {},
+                    "properties": {
+                        "task_id": {
+                            "type": "string",
+                            "description": "Optional task ID to filter artefacts. If provided, only artefacts whose key starts with 'task_id/' are returned."
+                        }
+                    },
                     "required": []
                 }
             },
@@ -405,16 +410,33 @@ fn handle_get_task(ctx: &ServerContext, params: &Value) -> Result<Value, String>
     }
 }
 
-fn handle_list_artefacts(ctx: &ServerContext) -> Result<Value, String> {
+fn handle_list_artefacts(ctx: &ServerContext, params: &Value) -> Result<Value, String> {
     let manifest_path = ctx.artefact_manifest_path();
     let manifest = artefact_store::load_manifest(&manifest_path)
         .map_err(|e| format!("Failed to load artefact manifest: {e}"))?;
 
-    if manifest.artefacts.is_empty() {
-        return Ok(mcp_text("No artefacts found."));
+    let task_id_filter: Option<&str> = params.get("task_id").and_then(|v| v.as_str());
+
+    // Build the prefix string once (outside the filter) to avoid repeated allocations.
+    let prefix_owned: Option<String> = task_id_filter.map(|id| format!("{id}/"));
+
+    let mut keys: Vec<&str> = manifest
+        .artefacts
+        .keys()
+        .map(|s| s.as_str())
+        .filter(|k| match &prefix_owned {
+            Some(prefix) => k.starts_with(prefix.as_str()),
+            None => true,
+        })
+        .collect();
+
+    if keys.is_empty() {
+        return Ok(match task_id_filter {
+            Some(id) => mcp_text(format!("No artefacts found for task '{id}'.")),
+            None => mcp_text("No artefacts found."),
+        });
     }
 
-    let mut keys: Vec<&str> = manifest.artefacts.keys().map(|s| s.as_str()).collect();
     keys.sort_unstable();
     Ok(mcp_text(keys.join("\n")))
 }
@@ -443,7 +465,7 @@ fn dispatch_tool_call(ctx: &ServerContext, params: &Value) -> (Value, Option<boo
         "add_task" => handle_add_task(ctx, args),
         "update_task_status" => handle_update_task_status(ctx, args),
         "read_artefact" => handle_read_artefact(ctx, args),
-        "list_artefacts" => handle_list_artefacts(ctx),
+        "list_artefacts" => handle_list_artefacts(ctx, args),
         "trigger_iteration" => handle_trigger_iteration(ctx, args),
         unknown => Err(format!("Unknown tool '{unknown}'")),
     };
@@ -682,6 +704,23 @@ fn format_task_table(rows: &[Value]) -> String {
         ));
     }
 
+    // Summary counts for quick pipeline status overview.
+    let total = rows.len();
+    let count = |s: &str| {
+        rows.iter()
+            .filter(|r| r["status"].as_str() == Some(s))
+            .count()
+    };
+    lines.push(String::new());
+    lines.push(format!(
+        "Total: {} | pending: {} | in-progress: {} | completed: {} | failed: {}",
+        total,
+        count("pending"),
+        count("in-progress"),
+        count("completed"),
+        count("failed"),
+    ));
+
     lines.join("\n")
 }
 
@@ -756,7 +795,12 @@ mod tests {
     /// skipping the header and separator lines.
     fn data_rows(text: &str) -> Vec<&str> {
         text.lines()
-            .filter(|l| !l.starts_with('-') && !l.starts_with("ID"))
+            .filter(|l| {
+                !l.is_empty()
+                    && !l.starts_with('-')
+                    && !l.starts_with("ID")
+                    && !l.starts_with("Total:")
+            })
             .collect()
     }
 
@@ -2006,7 +2050,154 @@ mod tests {
         );
     }
 
-    // ── tools/list includes new tools ────────────────────────────────────────
+    // ── list_tasks summary line ──────────────────────────────────────────────
+
+    #[test]
+    fn list_tasks_shows_summary_counts() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        // Add three tasks and advance two of their statuses.
+        for (id, desc) in &[("t1", "First"), ("t2", "Second"), ("t3", "Third")] {
+            let add_req = json!({
+                "jsonrpc": "2.0", "id": 1,
+                "method": "tools/call",
+                "params": {"name": "add_task", "arguments": {"id": id, "description": desc}}
+            })
+            .to_string();
+            process_message(&ctx, &add_req).unwrap();
+        }
+        // Mark t2 as in-progress, t3 as completed.
+        for (id, status) in &[("t2", "in-progress"), ("t3", "completed")] {
+            let upd_req = json!({
+                "jsonrpc": "2.0", "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "update_task_status",
+                    "arguments": {"id": id, "status": status}
+                }
+            })
+            .to_string();
+            process_message(&ctx, &upd_req).unwrap();
+        }
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 3,
+            "method": "tools/call",
+            "params": {"name": "list_tasks", "arguments": {}}
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+
+        // Summary line should appear and contain correct counts.
+        assert!(
+            text.contains("Total: 3"),
+            "summary should show Total: 3: {text}"
+        );
+        assert!(
+            text.contains("pending: 1"),
+            "summary should show pending: 1: {text}"
+        );
+        assert!(
+            text.contains("in-progress: 1"),
+            "summary should show in-progress: 1: {text}"
+        );
+        assert!(
+            text.contains("completed: 1"),
+            "summary should show completed: 1: {text}"
+        );
+        assert!(
+            text.contains("failed: 0"),
+            "summary should show failed: 0: {text}"
+        );
+    }
+
+    // ── list_artefacts with task_id filter ───────────────────────────────────
+
+    #[test]
+    fn list_artefacts_filtered_by_task_id() {
+        use crate::artefact_store::{save_manifest, ArtefactEntry, ArtefactManifest};
+        use crate::types::ArtefactKind;
+
+        let (dir, task_file) = setup_task_file();
+        let manifest_path = dir.path().join(".wreck-it-artefacts.json");
+        let mut manifest = ArtefactManifest::default();
+        for key in &["task-a/output", "task-a/report", "task-b/result"] {
+            manifest.artefacts.insert(
+                key.to_string(),
+                ArtefactEntry {
+                    kind: ArtefactKind::File,
+                    name: "output".to_string(),
+                    path: "out.txt".to_string(),
+                    content: "content".to_string(),
+                },
+            );
+        }
+        save_manifest(&manifest_path, &manifest).unwrap();
+
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        // Filter to task-a only.
+        let req = json!({
+            "jsonrpc": "2.0", "id": 82,
+            "method": "tools/call",
+            "params": {"name": "list_artefacts", "arguments": {"task_id": "task-a"}}
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("task-a/output"),
+            "task-a/output should be listed: {text}"
+        );
+        assert!(
+            text.contains("task-a/report"),
+            "task-a/report should be listed: {text}"
+        );
+        assert!(
+            !text.contains("task-b/result"),
+            "task-b/result should be excluded: {text}"
+        );
+    }
+
+    #[test]
+    fn list_artefacts_filter_no_match_returns_empty_message() {
+        use crate::artefact_store::{save_manifest, ArtefactEntry, ArtefactManifest};
+        use crate::types::ArtefactKind;
+
+        let (dir, task_file) = setup_task_file();
+        let manifest_path = dir.path().join(".wreck-it-artefacts.json");
+        let mut manifest = ArtefactManifest::default();
+        manifest.artefacts.insert(
+            "task-a/output".to_string(),
+            ArtefactEntry {
+                kind: ArtefactKind::File,
+                name: "output".to_string(),
+                path: "out.txt".to_string(),
+                content: "content".to_string(),
+            },
+        );
+        save_manifest(&manifest_path, &manifest).unwrap();
+
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 83,
+            "method": "tools/call",
+            "params": {"name": "list_artefacts", "arguments": {"task_id": "nonexistent-task"}}
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("No artefacts found for task 'nonexistent-task'"),
+            "expected empty-filtered message: {text}"
+        );
+    }
 
     #[test]
     fn tools_list_contains_get_task_and_list_artefacts() {
