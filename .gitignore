@@ -27,7 +27,6 @@ result-*
 .secrets
 
 # Task files
-tasks/
 *.task.json
 
 # Test artifacts

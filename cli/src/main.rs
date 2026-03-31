@@ -594,6 +594,7 @@ async fn main() -> Result<()> {
                         RepoConfig {
                             state_branch: branch,
                             task_branch: None,
+                            tasks_dir: None,
                             state_root: root,
                             ralphs: vec![],
                         }

@@ -42,6 +42,16 @@ pub struct RepoConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_branch: Option<String>,
 
+    /// Directory containing task definition files, relative to the repository
+    /// root (when `task_branch` is set) or the state worktree root.
+    ///
+    /// Each ralph's `task_file` is resolved relative to this directory.
+    /// When omitted (or empty), task files are looked up from the root.
+    ///
+    /// Example: `"tasks"` → task files live in `tasks/docs-tasks.json`, etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tasks_dir: Option<String>,
+
     /// Root directory for state files (inside the state worktree).
     #[serde(default = "default_state_root")]
     pub state_root: String,
@@ -200,6 +210,7 @@ impl Default for RepoConfig {
         Self {
             state_branch: default_state_branch(),
             task_branch: None,
+            tasks_dir: None,
             state_root: default_state_root(),
             ralphs: Vec::new(),
         }
@@ -213,6 +224,18 @@ impl RepoConfig {
     /// the `state_branch` for backward compatibility.
     pub fn effective_task_branch(&self) -> &str {
         self.task_branch.as_deref().unwrap_or(&self.state_branch)
+    }
+
+    /// Resolve the full path for a ralph's `task_file` by prepending the
+    /// configured `tasks_dir` (if any).
+    ///
+    /// When `tasks_dir` is set (e.g. `"tasks"`), returns `"tasks/<task_file>"`.
+    /// Otherwise, returns the `task_file` unchanged.
+    pub fn resolve_task_path(&self, task_file: &str) -> String {
+        match self.tasks_dir.as_deref() {
+            Some(dir) if !dir.is_empty() => format!("{}/{}", dir, task_file),
+            _ => task_file.to_string(),
+        }
     }
 }
 
@@ -276,6 +299,52 @@ state_branch = "my-state"
         let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
         assert!(cfg.task_branch.is_none());
         assert_eq!(cfg.effective_task_branch(), "my-state");
+    }
+
+    #[test]
+    fn tasks_dir_roundtrips_via_toml() {
+        let toml_str = r#"
+tasks_dir = "tasks"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.tasks_dir.as_deref(), Some("tasks"));
+    }
+
+    #[test]
+    fn tasks_dir_omitted_from_toml_when_none() {
+        let cfg = RepoConfig::default();
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            !toml_str.contains("tasks_dir"),
+            "tasks_dir should be absent: {toml_str}"
+        );
+    }
+
+    #[test]
+    fn resolve_task_path_without_tasks_dir() {
+        let cfg = RepoConfig::default();
+        assert_eq!(cfg.resolve_task_path("docs-tasks.json"), "docs-tasks.json");
+    }
+
+    #[test]
+    fn resolve_task_path_with_tasks_dir() {
+        let cfg = RepoConfig {
+            tasks_dir: Some("tasks".to_string()),
+            ..RepoConfig::default()
+        };
+        assert_eq!(
+            cfg.resolve_task_path("docs-tasks.json"),
+            "tasks/docs-tasks.json"
+        );
+    }
+
+    #[test]
+    fn resolve_task_path_with_empty_tasks_dir() {
+        let cfg = RepoConfig {
+            tasks_dir: Some("".to_string()),
+            ..RepoConfig::default()
+        };
+        assert_eq!(cfg.resolve_task_path("docs-tasks.json"), "docs-tasks.json");
     }
 
     #[test]

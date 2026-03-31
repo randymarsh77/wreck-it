@@ -98,6 +98,7 @@ mod tests {
         let cfg = RepoConfig {
             state_branch: "my-state".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".my-state-dir".to_string(),
             ralphs: vec![],
         };
@@ -112,6 +113,7 @@ mod tests {
         let cfg = RepoConfig {
             state_branch: "custom-branch".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".custom-root".to_string(),
             ralphs: vec![],
         };
@@ -175,6 +177,7 @@ mod tests {
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![
                 RalphConfig {
@@ -293,6 +296,7 @@ name = "docs"
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
@@ -335,6 +339,7 @@ state_file = ".docs-state.json"
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "feature-work".to_string(),
@@ -366,6 +371,7 @@ state_file = ".docs-state.json"
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
@@ -442,6 +448,7 @@ reviewers = ["alice", "bob"]
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "feature-work".to_string(),
@@ -471,6 +478,7 @@ reviewers = ["alice", "bob"]
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
@@ -525,6 +533,7 @@ command = "unstuck"
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "unstuck".to_string(),
@@ -553,6 +562,7 @@ command = "unstuck"
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "brute".to_string(),
@@ -580,6 +590,7 @@ command = "unstuck"
         let cfg = RepoConfig {
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
+            tasks_dir: None,
             state_root: ".wreck-it".to_string(),
             ralphs: vec![RalphConfig {
                 name: "docs".to_string(),
