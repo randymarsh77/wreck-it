@@ -119,6 +119,11 @@ fn tools_list() -> Value {
                             "type": "string",
                             "description": "Human-readable description of the task."
                         },
+                        "role": {
+                            "type": "string",
+                            "description": "Agent role for this task. Defaults to 'implementer'.",
+                            "enum": ["ideas", "implementer", "evaluator", "security_gate", "coverage_enforcer", "changelog_generator"]
+                        },
                         "depends_on": {
                             "type": "array",
                             "items": { "type": "string" },
@@ -233,6 +238,20 @@ fn handle_add_task(ctx: &ServerContext, params: &Value) -> Result<Value, String>
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required parameter 'description'".to_string())?;
 
+    let role: AgentRole = params
+        .get("role")
+        .and_then(|v| v.as_str())
+        .map(|r| {
+            parse_agent_role(r).ok_or_else(|| {
+                format!(
+                    "Unknown role '{}'. Valid values: ideas, implementer, evaluator, security_gate, coverage_enforcer, changelog_generator",
+                    r
+                )
+            })
+        })
+        .transpose()?
+        .unwrap_or_default();
+
     let depends_on: Vec<String> = params
         .get("depends_on")
         .and_then(|v| v.as_array())
@@ -247,7 +266,7 @@ fn handle_add_task(ctx: &ServerContext, params: &Value) -> Result<Value, String>
         id: id.to_string(),
         description: description.to_string(),
         status: TaskStatus::Pending,
-        role: AgentRole::default(),
+        role,
         kind: TaskKind::default(),
         cooldown_seconds: None,
         phase: 1,
@@ -540,6 +559,18 @@ fn parse_task_status(s: &str) -> Option<TaskStatus> {
         "in-progress" | "in_progress" => Some(TaskStatus::InProgress),
         "completed" => Some(TaskStatus::Completed),
         "failed" => Some(TaskStatus::Failed),
+        _ => None,
+    }
+}
+
+fn parse_agent_role(s: &str) -> Option<AgentRole> {
+    match s {
+        "ideas" => Some(AgentRole::Ideas),
+        "implementer" => Some(AgentRole::Implementer),
+        "evaluator" => Some(AgentRole::Evaluator),
+        "security_gate" => Some(AgentRole::SecurityGate),
+        "coverage_enforcer" => Some(AgentRole::CoverageEnforcer),
+        "changelog_generator" => Some(AgentRole::ChangelogGenerator),
         _ => None,
     }
 }
@@ -984,6 +1015,96 @@ mod tests {
         let tasks = task_manager::load_tasks(&task_file).unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].depends_on, vec!["parent-task".to_string()]);
+    }
+
+    #[test]
+    fn add_task_with_role_ideas() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {"id": "ideas-task", "description": "Brainstorm ideas", "role": "ideas"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert!(!v["result"]["isError"].as_bool().unwrap_or(false));
+
+        let tasks = task_manager::load_tasks(&task_file).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].role, AgentRole::Ideas);
+    }
+
+    #[test]
+    fn add_task_with_role_evaluator() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {"id": "eval-task", "description": "Evaluate results", "role": "evaluator"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert!(!v["result"]["isError"].as_bool().unwrap_or(false));
+
+        let tasks = task_manager::load_tasks(&task_file).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].role, AgentRole::Evaluator);
+    }
+
+    #[test]
+    fn add_task_default_role_is_implementer() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {"id": "impl-task", "description": "Implement something"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert!(!v["result"]["isError"].as_bool().unwrap_or(false));
+
+        let tasks = task_manager::load_tasks(&task_file).unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].role, AgentRole::default());
+    }
+
+    #[test]
+    fn add_task_with_unknown_role_returns_error() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = json!({
+            "jsonrpc": "2.0", "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "add_task",
+                "arguments": {"id": "t", "description": "desc", "role": "bogus_role"}
+            }
+        })
+        .to_string();
+        let resp = process_message(&ctx, &req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+        assert_eq!(v["result"]["isError"], true);
+        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("bogus_role"));
     }
 
     // ── update_task_status ───────────────────────────────────────────────────
