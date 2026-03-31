@@ -556,7 +556,7 @@ wreck-it can act as a [Model Context Protocol](https://spec.modelcontextprotocol
 wreck-it mcp --task-file tasks.json --work-dir .
 ```
 
-Add to your Claude Desktop `claude_desktop_config.json`:
+**Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
 {
@@ -569,7 +569,38 @@ Add to your Claude Desktop `claude_desktop_config.json`:
 }
 ```
 
-The server exposes five tools: `list_tasks`, `add_task`, `update_task_status`, `read_artefact`, and `trigger_iteration`.
+**VS Code Copilot Chat** (`.vscode/mcp.json` in your workspace):
+
+```json
+{
+  "servers": {
+    "wreck-it": {
+      "type": "stdio",
+      "command": "wreck-it",
+      "args": ["mcp", "--task-file", "/abs/path/to/tasks.json", "--work-dir", "/abs/path/to/project"]
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json` in your project):
+
+```json
+{
+  "mcpServers": {
+    "wreck-it": {
+      "command": "wreck-it",
+      "args": ["mcp", "--task-file", "/abs/path/to/tasks.json", "--work-dir", "/abs/path/to/project"]
+    }
+  }
+}
+```
+
+The server exposes seven tools: `list_tasks`, `get_task`, `add_task`, `update_task_status`, `read_artefact`, `list_artefacts`, and `trigger_iteration`.
+
+Options:
+- `-t, --task-file <PATH>`: Task file (default: `tasks.json`)
+- `-w, --work-dir <PATH>`: Working directory used to locate artefacts (default: `.`)
 
 ### Fix Failing Checks (Unstuck)
 
