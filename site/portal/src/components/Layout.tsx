@@ -1,22 +1,35 @@
+import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 
 export default function Layout() {
   const { user, logout } = useAuth()
+  const [menuOpen, setMenuOpen] = useState(false)
 
   return (
     <div className="layout">
       <header className="topbar">
         <div className="topbar-left">
-          <NavLink to="/" className="brand">
+          <NavLink to="/" className="brand" onClick={() => setMenuOpen(false)}>
             wreck-it portal
           </NavLink>
           {user && (
-            <nav className="nav-links">
-              <NavLink to="/" end>
+            <button
+              className="menu-toggle"
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label="Toggle navigation"
+            >
+              <span className={`hamburger ${menuOpen ? 'open' : ''}`} />
+            </button>
+          )}
+          {user && (
+            <nav className={`nav-links ${menuOpen ? 'nav-open' : ''}`}>
+              <NavLink to="/" end onClick={() => setMenuOpen(false)}>
                 Dashboard
               </NavLink>
-              <NavLink to="/installations">Installations</NavLink>
+              <NavLink to="/installations" onClick={() => setMenuOpen(false)}>
+                Installations
+              </NavLink>
             </nav>
           )}
         </div>
