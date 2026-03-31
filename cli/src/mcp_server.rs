@@ -1813,4 +1813,189 @@ mod tests {
             "missing list_artefacts: {names:?}"
         );
     }
+
+    // ── notifications/initialized ────────────────────────────────────────────
+
+    #[test]
+    fn initialized_notification_produces_no_response() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        // The `notifications/initialized` message from the client is a notification
+        // (no `id` field). The server must not produce a response for notifications.
+        let notif = r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#;
+        let result = process_message(&ctx, notif);
+        assert!(
+            result.is_none(),
+            "notifications should produce no response, got: {result:?}"
+        );
+    }
+
+    // ── full MCP session lifecycle ────────────────────────────────────────────
+
+    /// Exercise the complete MCP handshake and a realistic tool-call sequence:
+    ///   initialize → notifications/initialized → tools/list → add_task
+    ///   → list_tasks → update_task_status → get_task → trigger_iteration
+    #[test]
+    fn full_mcp_session_lifecycle() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file.clone(), dir.path().to_path_buf());
+
+        // 1. initialize
+        let init_resp = process_message(
+            &ctx,
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
+        )
+        .unwrap();
+        let init_v: Value = serde_json::from_str(&init_resp).unwrap();
+        assert_eq!(init_v["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
+        assert_eq!(init_v["result"]["serverInfo"]["name"], "wreck-it");
+
+        // 2. notifications/initialized — must return nothing
+        let notif_result = process_message(
+            &ctx,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}"#,
+        );
+        assert!(notif_result.is_none());
+
+        // 3. tools/list — all 7 tools must be advertised
+        let tlist_resp = process_message(
+            &ctx,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+        )
+        .unwrap();
+        let tlist_v: Value = serde_json::from_str(&tlist_resp).unwrap();
+        let tool_names: Vec<&str> = tlist_v["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        for expected in &[
+            "list_tasks",
+            "get_task",
+            "add_task",
+            "update_task_status",
+            "read_artefact",
+            "list_artefacts",
+            "trigger_iteration",
+        ] {
+            assert!(
+                tool_names.contains(expected),
+                "tool '{expected}' not advertised"
+            );
+        }
+
+        // 4. add_task
+        let add_resp = process_message(
+            &ctx,
+            &json!({
+                "jsonrpc": "2.0", "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "add_task",
+                    "arguments": {
+                        "id": "lifecycle-task",
+                        "description": "Created during MCP session lifecycle test",
+                        "role": "implementer"
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let add_v: Value = serde_json::from_str(&add_resp).unwrap();
+        assert!(
+            !add_v["result"]["isError"].as_bool().unwrap_or(false),
+            "add_task should succeed: {add_v}"
+        );
+
+        // 5. list_tasks — task must appear
+        let list_resp = process_message(
+            &ctx,
+            &json!({
+                "jsonrpc": "2.0", "id": 4,
+                "method": "tools/call",
+                "params": {"name": "list_tasks", "arguments": {}}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let list_v: Value = serde_json::from_str(&list_resp).unwrap();
+        let list_text = list_v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            list_text.contains("lifecycle-task"),
+            "task should appear in list: {list_text}"
+        );
+        assert!(
+            list_text.contains("pending"),
+            "new task should have pending status: {list_text}"
+        );
+
+        // 6. update_task_status
+        let upd_resp = process_message(
+            &ctx,
+            &json!({
+                "jsonrpc": "2.0", "id": 5,
+                "method": "tools/call",
+                "params": {
+                    "name": "update_task_status",
+                    "arguments": {"id": "lifecycle-task", "status": "in-progress"}
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let upd_v: Value = serde_json::from_str(&upd_resp).unwrap();
+        assert!(
+            !upd_v["result"]["isError"].as_bool().unwrap_or(false),
+            "update_task_status should succeed: {upd_v}"
+        );
+
+        // 7. get_task — verify updated status
+        let get_resp = process_message(
+            &ctx,
+            &json!({
+                "jsonrpc": "2.0", "id": 6,
+                "method": "tools/call",
+                "params": {
+                    "name": "get_task",
+                    "arguments": {"id": "lifecycle-task"}
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let get_v: Value = serde_json::from_str(&get_resp).unwrap();
+        let get_text = get_v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            get_text.contains("in-progress"),
+            "get_task should reflect updated status: {get_text}"
+        );
+
+        // 8. trigger_iteration — must return a valid CLI command
+        let trig_resp = process_message(
+            &ctx,
+            &json!({
+                "jsonrpc": "2.0", "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": "trigger_iteration",
+                    "arguments": {"headless": true}
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let trig_v: Value = serde_json::from_str(&trig_resp).unwrap();
+        let trig_text = trig_v["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            trig_text.contains("wreck-it run"),
+            "trigger_iteration should return a CLI command: {trig_text}"
+        );
+        assert!(
+            trig_text.contains("--headless"),
+            "headless=true should add --headless flag: {trig_text}"
+        );
+    }
 }
