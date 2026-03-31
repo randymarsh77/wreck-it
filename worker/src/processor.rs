@@ -45,7 +45,7 @@ pub async fn process_iteration(
         worker::console_log!("[wreck-it][processor] no ralphs configured, using default");
         vec![RalphContext {
             name: "default".into(),
-            task_file: "tasks.json".into(),
+            task_file: config.resolve_task_path("tasks.json"),
             state_file: ".wreck-it-state.json".into(),
         }]
     } else {
@@ -64,7 +64,7 @@ pub async fn process_iteration(
             .iter()
             .map(|r| RalphContext {
                 name: r.name.clone(),
-                task_file: r.task_file.clone(),
+                task_file: config.resolve_task_path(&r.task_file),
                 state_file: r.state_file.clone(),
             })
             .collect()
@@ -317,7 +317,7 @@ pub async fn process_merged_pr(
     let contexts: Vec<RalphContext> = if config.ralphs.is_empty() {
         vec![RalphContext {
             name: "default".into(),
-            task_file: "tasks.json".into(),
+            task_file: config.resolve_task_path("tasks.json"),
             state_file: ".wreck-it-state.json".into(),
         }]
     } else {
@@ -326,7 +326,7 @@ pub async fn process_merged_pr(
             .iter()
             .map(|r| RalphContext {
                 name: r.name.clone(),
-                task_file: r.task_file.clone(),
+                task_file: config.resolve_task_path(&r.task_file),
                 state_file: r.state_file.clone(),
             })
             .collect()

@@ -60,13 +60,26 @@ enum StepOutcome {
 /// When a `task_branch` is configured in the repo config, task files live on
 /// the main checkout (`work_dir`) alongside the code.  Otherwise, they are
 /// read from the state worktree (`state_dir`) for backward compatibility.
+///
+/// When `tasks_dir` is also configured, it is appended to the resolved root.
 fn resolve_task_dir(repo_cfg: Option<&RepoConfig>, work_dir: &Path, state_dir: &Path) -> PathBuf {
-    if let Some(cfg) = repo_cfg {
+    let base = if let Some(cfg) = repo_cfg {
         if cfg.task_branch.is_some() {
-            return work_dir.to_path_buf();
+            work_dir.to_path_buf()
+        } else {
+            state_dir.to_path_buf()
+        }
+    } else {
+        state_dir.to_path_buf()
+    };
+    if let Some(cfg) = repo_cfg {
+        if let Some(dir) = cfg.tasks_dir.as_deref() {
+            if !dir.is_empty() {
+                return base.join(dir);
+            }
         }
     }
-    state_dir.to_path_buf()
+    base
 }
 
 /// Run wreck-it in headless mode.
@@ -2564,6 +2577,35 @@ mod tests {
             ..RepoConfig::default()
         };
         assert_eq!(resolve_task_dir(Some(&cfg), &work, &state), work);
+    }
+
+    #[test]
+    fn resolve_task_dir_appends_tasks_dir() {
+        let work = PathBuf::from("/work");
+        let state = PathBuf::from("/state");
+        let cfg = RepoConfig {
+            task_branch: Some("master".to_string()),
+            tasks_dir: Some("tasks".to_string()),
+            ..RepoConfig::default()
+        };
+        assert_eq!(
+            resolve_task_dir(Some(&cfg), &work, &state),
+            PathBuf::from("/work/tasks")
+        );
+    }
+
+    #[test]
+    fn resolve_task_dir_appends_tasks_dir_to_state() {
+        let work = PathBuf::from("/work");
+        let state = PathBuf::from("/state");
+        let cfg = RepoConfig {
+            tasks_dir: Some("tasks".to_string()),
+            ..RepoConfig::default()
+        };
+        assert_eq!(
+            resolve_task_dir(Some(&cfg), &work, &state),
+            PathBuf::from("/state/tasks")
+        );
     }
 
     #[test]

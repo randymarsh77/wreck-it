@@ -222,6 +222,7 @@ pub async fn run_merge(
             &mut state,
             work_dir,
             sd,
+            sd,
         )
         .await
         {
