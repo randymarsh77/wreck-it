@@ -467,7 +467,9 @@ fn process_message(ctx: &ServerContext, line: &str) -> Option<String> {
             json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {
-                    "tools": {}
+                    "tools": {},
+                    "resources": {},
+                    "prompts": {}
                 },
                 "serverInfo": {
                     "name": "wreck-it",
@@ -477,6 +479,13 @@ fn process_message(ctx: &ServerContext, line: &str) -> Option<String> {
         }
 
         "tools/list" => tools_list(),
+
+        // Return empty lists for resources and prompts so that MCP clients that
+        // send these discovery requests during their initial handshake do not
+        // receive a METHOD_NOT_FOUND error.
+        "resources/list" => json!({ "resources": [] }),
+
+        "prompts/list" => json!({ "prompts": [] }),
 
         "tools/call" => {
             let (content, is_error) = dispatch_tool_call(ctx, &req.params);
@@ -745,6 +754,55 @@ mod tests {
         assert_eq!(v["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
         assert_eq!(v["result"]["serverInfo"]["name"], "wreck-it");
         assert_eq!(v["id"], 1);
+    }
+
+    #[test]
+    fn initialize_declares_tools_resources_prompts_capabilities() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
+        let resp = process_message(&ctx, req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+
+        let caps = &v["result"]["capabilities"];
+        assert!(caps["tools"].is_object());
+        assert!(caps["resources"].is_object());
+        assert!(caps["prompts"].is_object());
+    }
+
+    // ── resources/list ──────────────────────────────────────────────────────
+
+    #[test]
+    fn resources_list_returns_empty_array() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = r#"{"jsonrpc":"2.0","id":5,"method":"resources/list","params":{}}"#;
+        let resp = process_message(&ctx, req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+
+        // Should be a success response with an empty resources array.
+        assert!(v["error"].is_null());
+        assert_eq!(v["result"]["resources"], json!([]));
+        assert_eq!(v["id"], 5);
+    }
+
+    // ── prompts/list ────────────────────────────────────────────────────────
+
+    #[test]
+    fn prompts_list_returns_empty_array() {
+        let (dir, task_file) = setup_task_file();
+        let ctx = make_ctx(task_file, dir.path().to_path_buf());
+
+        let req = r#"{"jsonrpc":"2.0","id":6,"method":"prompts/list","params":{}}"#;
+        let resp = process_message(&ctx, req).unwrap();
+        let v: Value = serde_json::from_str(&resp).unwrap();
+
+        // Should be a success response with an empty prompts array.
+        assert!(v["error"].is_null());
+        assert_eq!(v["result"]["prompts"], json!([]));
+        assert_eq!(v["id"], 6);
     }
 
     // ── tools/list ──────────────────────────────────────────────────────────
