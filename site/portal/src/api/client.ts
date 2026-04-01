@@ -214,6 +214,10 @@ export async function getTemplates(): Promise<RalphTemplate[]> {
   return request<RalphTemplate[]>('/api/portal/templates')
 }
 
+export async function getIndividualRalphs(): Promise<RalphTemplateEntry[]> {
+  return request<RalphTemplateEntry[]>('/api/portal/ralphs')
+}
+
 export async function deployRalph(
   owner: string,
   repo: string,

@@ -58,6 +58,18 @@ fn engineering_team() -> Template {
         "cohesiveness-tasks.json".to_string(),
         include_str!("../../templates/engineering-team/cohesiveness-tasks.json"),
     );
+    files.insert(
+        "test-coverage-tasks.json".to_string(),
+        include_str!("../../templates/engineering-team/test-coverage-tasks.json"),
+    );
+    files.insert(
+        "dependency-updates-tasks.json".to_string(),
+        include_str!("../../templates/engineering-team/dependency-updates-tasks.json"),
+    );
+    files.insert(
+        "reporter-tasks.json".to_string(),
+        include_str!("../../templates/engineering-team/reporter-tasks.json"),
+    );
 
     Template { manifest, files }
 }
@@ -139,7 +151,7 @@ mod tests {
         let tmpl = find_template("engineering-team").expect("template should exist");
         assert_eq!(tmpl.manifest.name, "engineering-team");
         assert!(!tmpl.manifest.description.is_empty());
-        assert_eq!(tmpl.manifest.ralphs.len(), 6);
+        assert_eq!(tmpl.manifest.ralphs.len(), 9);
 
         let names: Vec<&str> = tmpl
             .manifest
@@ -153,6 +165,9 @@ mod tests {
         assert!(names.contains(&"cohesiveness"));
         assert!(names.contains(&"feature-dev"));
         assert!(names.contains(&"merge"));
+        assert!(names.contains(&"test-coverage"));
+        assert!(names.contains(&"dependency-updates"));
+        assert!(names.contains(&"reporter"));
     }
 
     #[test]
@@ -163,6 +178,9 @@ mod tests {
         assert!(tmpl.files.contains_key("feature-dev-tasks.json"));
         assert!(tmpl.files.contains_key("planner-tasks.json"));
         assert!(tmpl.files.contains_key("cohesiveness-tasks.json"));
+        assert!(tmpl.files.contains_key("test-coverage-tasks.json"));
+        assert!(tmpl.files.contains_key("dependency-updates-tasks.json"));
+        assert!(tmpl.files.contains_key("reporter-tasks.json"));
     }
 
     #[test]
@@ -190,8 +208,8 @@ mod tests {
 
         assert!(!result.written.is_empty());
         assert!(result.skipped.is_empty());
-        assert_eq!(result.ralphs_added.len(), 6);
-        assert_eq!(config.ralphs.len(), 6);
+        assert_eq!(result.ralphs_added.len(), 9);
+        assert_eq!(config.ralphs.len(), 9);
 
         // Verify files exist on disk.
         for name in &result.written {
@@ -248,13 +266,19 @@ mod tests {
         // The existing custom path should be preserved.
         assert_eq!(config.ralphs[0].task_file, "custom-docs.json");
 
-        // "features", "planner", "cohesiveness", "feature-dev", and "merge" should be added.
-        assert_eq!(result.ralphs_added.len(), 5);
+        // "features", "planner", "cohesiveness", "feature-dev", "merge",
+        // "test-coverage", "dependency-updates", and "reporter" should be added.
+        assert_eq!(result.ralphs_added.len(), 8);
         assert!(result.ralphs_added.contains(&"features".to_string()));
         assert!(result.ralphs_added.contains(&"planner".to_string()));
         assert!(result.ralphs_added.contains(&"cohesiveness".to_string()));
         assert!(result.ralphs_added.contains(&"feature-dev".to_string()));
         assert!(result.ralphs_added.contains(&"merge".to_string()));
+        assert!(result.ralphs_added.contains(&"test-coverage".to_string()));
+        assert!(result
+            .ralphs_added
+            .contains(&"dependency-updates".to_string()));
+        assert!(result.ralphs_added.contains(&"reporter".to_string()));
     }
 
     #[test]
@@ -273,6 +297,6 @@ mod tests {
         assert!(result.written.is_empty());
         assert!(!result.skipped.is_empty());
         assert!(result.ralphs_added.is_empty());
-        assert_eq!(config.ralphs.len(), 6);
+        assert_eq!(config.ralphs.len(), 9);
     }
 }

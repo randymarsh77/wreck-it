@@ -4,6 +4,7 @@ import {
   getRepoConfig,
   updateRepoConfig,
   getTemplates,
+  getIndividualRalphs,
   deployRalph,
   getRalphTasks,
   updateRalphTasks,
@@ -210,7 +211,9 @@ function GuiMode({
   setSaveMsg,
 }: GuiModeProps) {
   const [templates, setTemplates] = useState<RalphTemplate[]>([])
+  const [individualRalphs, setIndividualRalphs] = useState<RalphTemplateEntry[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
+  const [showIndividualRalphs, setShowIndividualRalphs] = useState(false)
   const [showCustomForm, setShowCustomForm] = useState(false)
   const [deploying, setDeploying] = useState<string | null>(null)
   const [customName, setCustomName] = useState('')
@@ -225,6 +228,11 @@ function GuiMode({
       .then(setTemplates)
       .catch(() => {
         /* templates unavailable — not critical */
+      })
+    getIndividualRalphs()
+      .then(setIndividualRalphs)
+      .catch(() => {
+        /* individual ralphs unavailable — not critical */
       })
   }, [])
 
@@ -289,6 +297,47 @@ function GuiMode({
     } catch (err: unknown) {
       setError(
         err instanceof Error ? err.message : 'Failed to deploy template',
+      )
+    } finally {
+      setDeploying(null)
+    }
+  }
+
+  async function handleDeployIndividualRalph(ralph: RalphTemplateEntry) {
+    setDeploying(ralph.name)
+    setError(null)
+    setSaveMsg(null)
+    try {
+      await deployRalph(owner, repo, {
+        name: ralph.name,
+        task_file: ralph.task_file,
+        state_file: ralph.state_file,
+        tasks: [],
+        command: ralph.command,
+        backend: ralph.backend,
+      })
+
+      const existing = (config.ralphs as RalphEntry[] | undefined) ?? []
+      if (!existing.some((r) => r.name === ralph.name)) {
+        const entry: Record<string, unknown> = {
+          name: ralph.name,
+          task_file: ralph.task_file,
+          state_file: ralph.state_file,
+        }
+        if (ralph.command) entry.command = ralph.command
+        if (ralph.backend) entry.backend = ralph.backend
+
+        const newConfig = {
+          ...config,
+          ralphs: [...existing, entry],
+        }
+        await handleSaveConfig(newConfig)
+      }
+
+      setSaveMsg(`Deployed ralph "${ralph.name}".`)
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to deploy ralph',
       )
     } finally {
       setDeploying(null)
@@ -503,16 +552,28 @@ function GuiMode({
             className="btn btn-primary"
             onClick={() => {
               setShowTemplates(!showTemplates)
+              setShowIndividualRalphs(false)
               setShowCustomForm(false)
             }}
           >
             Deploy from Template
           </button>
           <button
+            className="btn btn-primary"
+            onClick={() => {
+              setShowIndividualRalphs(!showIndividualRalphs)
+              setShowTemplates(false)
+              setShowCustomForm(false)
+            }}
+          >
+            Add Individual Ralph
+          </button>
+          <button
             className="btn"
             onClick={() => {
               setShowCustomForm(!showCustomForm)
               setShowTemplates(false)
+              setShowIndividualRalphs(false)
             }}
           >
             Add Custom Ralph
@@ -537,7 +598,7 @@ function GuiMode({
                       onClick={() => void handleDeployTemplate(template)}
                       disabled={deploying !== null}
                     >
-                      {deploying === template.id ? 'Deploying…' : 'Deploy'}
+                      {deploying === template.id ? 'Deploying…' : 'Deploy All'}
                     </button>
                   </div>
                   <p className="muted template-desc">{template.description}</p>
@@ -551,6 +612,45 @@ function GuiMode({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Individual ralph picker */}
+      {showIndividualRalphs && (
+        <div className="gui-section">
+          <h3>Available Ralphs</h3>
+          {individualRalphs.length === 0 ? (
+            <p className="muted">Loading ralphs…</p>
+          ) : (
+            <div className="template-list">
+              {individualRalphs.map((ralph) => {
+                const alreadyDeployed = ralphs.some(
+                  (r) => r.name === ralph.name,
+                )
+                return (
+                  <div key={ralph.name} className="template-card card">
+                    <div className="template-header">
+                      <h4>{ralph.name}</h4>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() =>
+                          void handleDeployIndividualRalph(ralph)
+                        }
+                        disabled={deploying !== null || alreadyDeployed}
+                      >
+                        {alreadyDeployed
+                          ? 'Deployed'
+                          : deploying === ralph.name
+                            ? 'Deploying…'
+                            : 'Deploy'}
+                      </button>
+                    </div>
+                    <p className="muted template-desc">{ralph.description}</p>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
