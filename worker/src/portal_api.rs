@@ -34,7 +34,6 @@
 //! - `GITHUB_CLIENT_ID`       — GitHub App's OAuth client ID
 //! - `GITHUB_CLIENT_SECRET`   — GitHub App's OAuth client secret
 //! - `PORTAL_SESSION_SECRET`  — Random string for HMAC-signing session tokens
-//! - `GITHUB_MODELS_TOKEN`    — API token for GitHub Models (plan generation)
 
 use crate::github_app;
 use crate::kv_store;
@@ -887,11 +886,23 @@ async fn generate_plan(mut req: Request, ctx: RouteContext<()>) -> Result<Respon
         return error_response("Goal must not be empty", 400);
     }
 
-    // Get the models API token from secrets.
-    let api_token = ctx
-        .secret("GITHUB_MODELS_TOKEN")
-        .map(|s| s.to_string())
-        .map_err(|_| Error::RustError("GITHUB_MODELS_TOKEN secret not configured".into()))?;
+    // Vend a GitHub App installation token (which has Models permission).
+    let owner = ctx
+        .param("owner")
+        .ok_or_else(|| Error::RustError("Missing owner".into()))?
+        .to_string();
+    let repo = ctx
+        .param("repo")
+        .ok_or_else(|| Error::RustError("Missing repo".into()))?
+        .to_string();
+    let api_token = get_installation_token(&ctx, &owner, &repo)
+        .await
+        .map_err(|e| {
+            Error::RustError(format!(
+                "Failed to get installation token for {owner}/{repo}: {}",
+                e.status_code()
+            ))
+        })?;
 
     // Generate the task plan.
     let planner_prompt = build_planner_prompt(&goal);
