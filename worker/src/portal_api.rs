@@ -27,12 +27,14 @@
 //! | `PUT`     | `/api/portal/repos/:owner/:repo/ralphs/:name/tasks`   | Write ralph tasks to repo         |
 //! | `GET`     | `/api/portal/repos/:owner/:repo/ralphs/:name/state`   | Read ralph state from repo        |
 //! | `PUT`     | `/api/portal/repos/:owner/:repo/ralphs/:name/state`   | Write ralph state to repo         |
+//! | `POST`    | `/api/portal/repos/:owner/:repo/ralphs/plan`          | Generate a task plan from a goal  |
 //!
 //! ## Required secrets
 //!
 //! - `GITHUB_CLIENT_ID`       — GitHub App's OAuth client ID
 //! - `GITHUB_CLIENT_SECRET`   — GitHub App's OAuth client secret
 //! - `PORTAL_SESSION_SECRET`  — Random string for HMAC-signing session tokens
+//! - `GITHUB_MODELS_TOKEN`    — API token for GitHub Models (plan generation)
 
 use crate::github_app;
 use crate::kv_store;
@@ -590,6 +592,309 @@ async fn deploy_ralph(mut req: Request, ctx: RouteContext<()>) -> Result<Respons
             "task_file": body.task_file,
             "state_file": body.state_file,
             "tasks_count": body.tasks.len(),
+        }),
+        200,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Plan generation endpoint
+// ---------------------------------------------------------------------------
+
+/// GitHub Models API endpoint for chat completions.
+const GITHUB_MODELS_ENDPOINT: &str = "https://models.github.ai/inference/chat/completions";
+
+/// Default model for plan generation.
+const PLAN_MODEL: &str = "openai/gpt-4o-mini";
+
+/// Build the planner prompt that instructs the LLM to emit a structured task
+/// plan.  This mirrors the CLI's `planner.rs::build_planner_prompt`.
+fn build_planner_prompt(goal: &str) -> String {
+    format!(
+        "You are a task planning assistant. Your job is to break down a high-level goal \
+         into a structured list of concrete development tasks.\n\n\
+         Goal: {goal}\n\n\
+         Return ONLY a JSON array of task objects with NO additional text, markdown, or explanation.\n\
+         Each task object must have exactly these fields:\n\
+         - \"id\": a unique string identifier (e.g. \"1\", \"2\", or \"task-1\")\n\
+         - \"description\": a clear, actionable description of the task\n\
+         - \"phase\": an integer (>= 1) indicating the execution phase; tasks in the same phase \
+           can run in parallel, lower phases run first\n\
+         - \"depends_on\": (optional) an array of task ID strings that must complete before this \
+           task starts\n\n\
+         Example output:\n\
+         [\n\
+           {{\"id\": \"1\", \"description\": \"Set up project structure\", \"phase\": 1}},\n\
+           {{\"id\": \"2\", \"description\": \"Implement core logic\", \"phase\": 2, \"depends_on\": [\"1\"]}},\n\
+           {{\"id\": \"3\", \"description\": \"Add tests\", \"phase\": 2, \"depends_on\": [\"1\"]}}\n\
+         ]\n\n\
+         Output the JSON array now:",
+        goal = goal,
+    )
+}
+
+/// Build a prompt that asks the LLM for a short, descriptive plan name.
+/// Mirrors the CLI's `planner.rs::build_naming_prompt`.
+fn build_naming_prompt(goal: &str) -> String {
+    format!(
+        "Given the following project goal, produce a short identifier name (2-4 words, \
+         lowercase, separated by hyphens) that captures the essence of the goal. \
+         The name will be used as a filename-safe label.\n\n\
+         Goal: {goal}\n\n\
+         Reply with ONLY the hyphenated name and nothing else. \
+         Do not include quotes, punctuation, or explanation.\n\n\
+         Examples:\n\
+         - Goal: \"Build a REST API for user management\" → rest-api-users\n\
+         - Goal: \"Add CI/CD pipeline with GitHub Actions\" → ci-cd-pipeline\n\
+         - Goal: \"Migrate database from MySQL to PostgreSQL\" → mysql-to-postgres\n\n\
+         Name:",
+        goal = goal,
+    )
+}
+
+/// Sanitise raw LLM output into a filesystem-safe slug.
+/// Mirrors the CLI's `planner.rs::slugify_plan_name`.
+fn slugify_plan_name(raw: &str) -> String {
+    let first_line = raw
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+
+    let slug: String = first_line
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+
+    let collapsed: String = slug
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+
+    let max_len = 40;
+    if collapsed.len() > max_len {
+        collapsed[..max_len].trim_end_matches('-').to_string()
+    } else if collapsed.is_empty() {
+        "plan".to_string()
+    } else {
+        collapsed
+    }
+}
+
+/// Extract a JSON array from raw LLM output that may contain markdown
+/// fences or surrounding text.
+fn extract_json_array(raw: &str) -> std::result::Result<String, String> {
+    // Try to find a markdown code fence first.
+    if let Some(start) = raw.find("```") {
+        let after_fence = &raw[start + 3..];
+        // Skip optional language tag on the same line.
+        let content_start = after_fence.find('\n').map(|i| i + 1).unwrap_or(0);
+        let content = &after_fence[content_start..];
+        if let Some(end) = content.find("```") {
+            let inner = content[..end].trim();
+            if inner.starts_with('[') {
+                return Ok(inner.to_string());
+            }
+        }
+    }
+
+    // Fallback: find the first '[' and last ']'.
+    if let Some(start) = raw.find('[') {
+        if let Some(end) = raw.rfind(']') {
+            if end > start {
+                return Ok(raw[start..=end].to_string());
+            }
+        }
+    }
+
+    Err("Could not find a JSON array in the LLM output".to_string())
+}
+
+/// A minimal plan entry as returned by the LLM.
+#[derive(serde::Deserialize)]
+struct PlanEntry {
+    id: String,
+    description: String,
+    #[serde(default = "default_phase")]
+    phase: u32,
+    #[serde(default)]
+    depends_on: Vec<String>,
+}
+
+fn default_phase() -> u32 {
+    1
+}
+
+/// Parse and validate the raw LLM output into structured plan tasks.
+fn parse_and_validate_plan(raw: &str) -> std::result::Result<Vec<serde_json::Value>, String> {
+    let json_str = extract_json_array(raw)?;
+
+    let entries: Vec<PlanEntry> =
+        serde_json::from_str(&json_str).map_err(|e| format!("Invalid JSON: {e}"))?;
+
+    if entries.is_empty() {
+        return Err("LLM returned an empty task plan".to_string());
+    }
+
+    // Check for duplicate IDs.
+    let mut seen = std::collections::HashSet::new();
+    for entry in &entries {
+        if entry.id.is_empty() {
+            return Err("Task has an empty id".to_string());
+        }
+        if entry.description.is_empty() {
+            return Err(format!("Task '{}' has an empty description", entry.id));
+        }
+        if entry.phase == 0 {
+            return Err(format!(
+                "Task '{}' has an invalid phase 0 (must be >= 1)",
+                entry.id
+            ));
+        }
+        if !seen.insert(entry.id.clone()) {
+            return Err(format!("Duplicate task id: '{}'", entry.id));
+        }
+    }
+
+    let tasks: Vec<serde_json::Value> = entries
+        .into_iter()
+        .map(|e| {
+            let mut task = serde_json::json!({
+                "id": e.id,
+                "description": e.description,
+                "status": "pending",
+                "phase": e.phase,
+            });
+            if !e.depends_on.is_empty() {
+                task["depends_on"] = serde_json::json!(e.depends_on);
+            }
+            task
+        })
+        .collect();
+
+    Ok(tasks)
+}
+
+/// Call the GitHub Models API with a prompt and return the response content.
+async fn call_models_api(
+    api_token: &str,
+    prompt: &str,
+    model: &str,
+) -> std::result::Result<String, String> {
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            { "role": "user", "content": prompt }
+        ]
+    });
+
+    let headers = Headers::new();
+    headers
+        .set("Authorization", &format!("Bearer {api_token}"))
+        .ok();
+    headers.set("Content-Type", "application/json").ok();
+
+    let request = Request::new_with_init(
+        GITHUB_MODELS_ENDPOINT,
+        RequestInit::new()
+            .with_method(Method::Post)
+            .with_headers(headers)
+            .with_body(Some(wasm_bindgen::JsValue::from_str(
+                &body.to_string(),
+            ))),
+    )
+    .map_err(|e| format!("Failed to build models API request: {e}"))?;
+
+    let mut response = Fetch::Request(request)
+        .send()
+        .await
+        .map_err(|e| format!("Models API request failed: {e}"))?;
+
+    let status = response.status_code();
+    if !(200..300).contains(&status) {
+        let err_body = response.text().await.unwrap_or_default();
+        return Err(format!("Models API error ({status}): {err_body}"));
+    }
+
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse models API response: {e}"))?;
+
+    json.get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Models API response missing choices[0].message.content".to_string())
+}
+
+/// Request body for `POST /api/portal/repos/:owner/:repo/ralphs/plan`.
+#[derive(serde::Deserialize)]
+struct PlanRequest {
+    /// Natural-language goal to plan for.
+    goal: String,
+    /// Optional ralph name; if omitted, the LLM generates one.
+    #[serde(default)]
+    ralph: Option<String>,
+}
+
+/// `POST /api/portal/repos/:owner/:repo/ralphs/plan` — generate a task plan
+/// from a natural-language goal using the GitHub Models API.
+async fn generate_plan(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let body: PlanRequest = req.json().await.map_err(|e| {
+        Error::RustError(format!("Invalid plan request JSON: {e}"))
+    })?;
+
+    let goal = body.goal.trim().to_string();
+    if goal.is_empty() {
+        return error_response("Goal must not be empty", 400);
+    }
+
+    // Get the models API token from secrets.
+    let api_token = ctx
+        .secret("GITHUB_MODELS_TOKEN")
+        .map(|s| s.to_string())
+        .map_err(|_| Error::RustError("GITHUB_MODELS_TOKEN secret not configured".into()))?;
+
+    // Generate the task plan.
+    let planner_prompt = build_planner_prompt(&goal);
+    let raw_plan = call_models_api(&api_token, &planner_prompt, PLAN_MODEL)
+        .await
+        .map_err(|e| Error::RustError(format!("Plan generation failed: {e}")))?;
+
+    let tasks = parse_and_validate_plan(&raw_plan)
+        .map_err(|e| Error::RustError(format!("Plan validation failed: {e}")))?;
+
+    // Resolve the ralph name.
+    let name = match body.ralph {
+        Some(n) if !n.trim().is_empty() => slugify_plan_name(n.trim()),
+        _ => {
+            let naming_prompt = build_naming_prompt(&goal);
+            match call_models_api(&api_token, &naming_prompt, PLAN_MODEL).await {
+                Ok(raw_name) => slugify_plan_name(&raw_name),
+                Err(_) => slugify_plan_name(&goal),
+            }
+        }
+    };
+
+    console_log!(
+        "[wreck-it][portal] generated plan '{}' with {} task(s)",
+        name,
+        tasks.len()
+    );
+
+    json_response(
+        &serde_json::json!({
+            "name": name,
+            "tasks": tasks,
         }),
         200,
     )
@@ -1288,6 +1593,10 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
             options_handler,
         )
         .options_async(
+            "/api/portal/repos/:owner/:repo/ralphs/plan",
+            options_handler,
+        )
+        .options_async(
             "/api/portal/repos/:owner/:repo/ralphs/:name/tasks",
             options_handler,
         )
@@ -1313,6 +1622,10 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .post_async(
             "/api/portal/repos/:owner/:repo/ralphs/deploy",
             deploy_ralph,
+        )
+        .post_async(
+            "/api/portal/repos/:owner/:repo/ralphs/plan",
+            generate_plan,
         )
         // Ralph task & state endpoints
         .get_async(
@@ -1529,5 +1842,204 @@ mod tests {
         };
 
         assert_eq!(task_path, "docs-tasks.json");
+    }
+
+    // -----------------------------------------------------------------------
+    // Plan generation helper tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_build_planner_prompt_contains_goal() {
+        let prompt = build_planner_prompt("Build a REST API");
+        assert!(prompt.contains("Build a REST API"));
+        assert!(prompt.contains("JSON array"));
+        assert!(prompt.contains("\"id\""));
+        assert!(prompt.contains("\"description\""));
+        assert!(prompt.contains("\"phase\""));
+    }
+
+    #[test]
+    fn test_build_naming_prompt_contains_goal() {
+        let prompt = build_naming_prompt("Add CI/CD pipeline");
+        assert!(prompt.contains("Add CI/CD pipeline"));
+        assert!(prompt.contains("hyphenated name"));
+    }
+
+    #[test]
+    fn test_slugify_plan_name_basic() {
+        assert_eq!(slugify_plan_name("rest-api-users"), "rest-api-users");
+    }
+
+    #[test]
+    fn test_slugify_plan_name_with_spaces() {
+        assert_eq!(slugify_plan_name("Rest API Users"), "rest-api-users");
+    }
+
+    #[test]
+    fn test_slugify_plan_name_with_special_chars() {
+        assert_eq!(
+            slugify_plan_name("hello_world! (test)"),
+            "hello-world-test"
+        );
+    }
+
+    #[test]
+    fn test_slugify_plan_name_truncates_long_names() {
+        let long = "a-".repeat(30);
+        let result = slugify_plan_name(&long);
+        assert!(result.len() <= 40);
+    }
+
+    #[test]
+    fn test_slugify_plan_name_empty_returns_plan() {
+        assert_eq!(slugify_plan_name(""), "plan");
+        assert_eq!(slugify_plan_name("   "), "plan");
+    }
+
+    #[test]
+    fn test_slugify_plan_name_takes_first_line() {
+        assert_eq!(
+            slugify_plan_name("my-plan\nextra commentary"),
+            "my-plan"
+        );
+    }
+
+    #[test]
+    fn test_extract_json_array_plain() {
+        let input = r#"[{"id":"1","description":"test","phase":1}]"#;
+        let result = extract_json_array(input).unwrap();
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_extract_json_array_with_markdown() {
+        let input = "Here is the plan:\n```json\n[{\"id\":\"1\",\"description\":\"test\",\"phase\":1}]\n```\n";
+        let result = extract_json_array(input).unwrap();
+        assert!(result.starts_with('['));
+        assert!(result.ends_with(']'));
+    }
+
+    #[test]
+    fn test_extract_json_array_with_surrounding_text() {
+        let input = "Sure! Here's the plan: [{\"id\":\"1\",\"description\":\"test\",\"phase\":1}] Hope that helps!";
+        let result = extract_json_array(input).unwrap();
+        assert!(result.starts_with('['));
+        assert!(result.ends_with(']'));
+    }
+
+    #[test]
+    fn test_extract_json_array_no_array() {
+        let result = extract_json_array("no array here");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_and_validate_plan_valid() {
+        let input = r#"[
+            {"id":"1","description":"Set up project","phase":1},
+            {"id":"2","description":"Implement logic","phase":2,"depends_on":["1"]}
+        ]"#;
+        let tasks = parse_and_validate_plan(input).unwrap();
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0]["id"], "1");
+        assert_eq!(tasks[0]["status"], "pending");
+        assert_eq!(tasks[1]["depends_on"][0], "1");
+    }
+
+    #[test]
+    fn test_parse_and_validate_plan_with_markdown() {
+        let input = "```json\n[{\"id\":\"1\",\"description\":\"test\",\"phase\":1}]\n```";
+        let tasks = parse_and_validate_plan(input).unwrap();
+        assert_eq!(tasks.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_and_validate_plan_empty_array() {
+        let result = parse_and_validate_plan("[]");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn test_parse_and_validate_plan_empty_id() {
+        let input = r#"[{"id":"","description":"test","phase":1}]"#;
+        let result = parse_and_validate_plan(input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty id"));
+    }
+
+    #[test]
+    fn test_parse_and_validate_plan_empty_description() {
+        let input = r#"[{"id":"1","description":"","phase":1}]"#;
+        let result = parse_and_validate_plan(input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty description"));
+    }
+
+    #[test]
+    fn test_parse_and_validate_plan_phase_zero() {
+        let input = r#"[{"id":"1","description":"test","phase":0}]"#;
+        let result = parse_and_validate_plan(input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("phase 0"));
+    }
+
+    #[test]
+    fn test_parse_and_validate_plan_duplicate_ids() {
+        let input = r#"[
+            {"id":"1","description":"first","phase":1},
+            {"id":"1","description":"duplicate","phase":1}
+        ]"#;
+        let result = parse_and_validate_plan(input);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Duplicate"));
+    }
+
+    #[test]
+    fn test_parse_and_validate_plan_default_phase() {
+        let input = r#"[{"id":"1","description":"test"}]"#;
+        let tasks = parse_and_validate_plan(input).unwrap();
+        assert_eq!(tasks[0]["phase"], 1);
+    }
+
+    #[test]
+    fn test_parse_and_validate_plan_no_depends_on_field() {
+        let input = r#"[{"id":"1","description":"test","phase":1}]"#;
+        let tasks = parse_and_validate_plan(input).unwrap();
+        assert!(tasks[0].get("depends_on").is_none());
+    }
+
+    #[test]
+    fn test_plan_request_deserialize() {
+        let json = r#"{"goal":"Build an API","ralph":"my-api"}"#;
+        let req: PlanRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.goal, "Build an API");
+        assert_eq!(req.ralph.as_deref(), Some("my-api"));
+    }
+
+    #[test]
+    fn test_plan_request_deserialize_minimal() {
+        let json = r#"{"goal":"Build an API"}"#;
+        let req: PlanRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.goal, "Build an API");
+        assert!(req.ralph.is_none());
+    }
+
+    #[test]
+    fn test_plan_entry_deserialize() {
+        let json = r#"{"id":"1","description":"test","phase":2,"depends_on":["0"]}"#;
+        let entry: PlanEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.id, "1");
+        assert_eq!(entry.description, "test");
+        assert_eq!(entry.phase, 2);
+        assert_eq!(entry.depends_on, vec!["0"]);
+    }
+
+    #[test]
+    fn test_plan_entry_deserialize_defaults() {
+        let json = r#"{"id":"1","description":"test"}"#;
+        let entry: PlanEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.phase, 1);
+        assert!(entry.depends_on.is_empty());
     }
 }

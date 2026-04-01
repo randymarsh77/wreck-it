@@ -7,6 +7,7 @@ import AuthCallback from './pages/AuthCallback'
 import Dashboard from './pages/Dashboard'
 import Installations from './pages/Installations'
 import RepoConfig from './pages/RepoConfig'
+import Plan from './pages/Plan'
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="installations" element={<Installations />} />
             <Route path="repos/:owner/:repo/config" element={<RepoConfig />} />
+            <Route path="repos/:owner/:repo/plan" element={<Plan />} />
           </Route>
         </Routes>
       </AuthProvider>

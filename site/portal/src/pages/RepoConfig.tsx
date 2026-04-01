@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import {
   getRepoConfig,
   updateRepoConfig,
@@ -105,6 +105,12 @@ export default function RepoConfig() {
         {owner}/{repo}
       </h1>
       <h2>Ralph Configuration</h2>
+
+      <div style={{ marginBottom: 16 }}>
+        <Link to={`/repos/${owner}/${repo}/plan`} className="btn btn-primary btn-sm">
+          ✦ Generate Plan
+        </Link>
+      </div>
 
       {error && <p className="error-text">{error}</p>}
       {saveMsg && <p className="success-text">{saveMsg}</p>}

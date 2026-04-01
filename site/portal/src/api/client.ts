@@ -101,6 +101,16 @@ export interface RalphStateResponse {
   _branch: string
 }
 
+export interface PlanRequest {
+  goal: string
+  ralph?: string
+}
+
+export interface PlanResponse {
+  name: string
+  tasks: RalphTask[]
+}
+
 interface AuthCallbackResponse {
   user: User
   token: string
@@ -212,6 +222,17 @@ export async function deployRalph(
   return request<RalphDeployResponse>(
     `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/deploy`,
     { method: 'POST', body: JSON.stringify(deploy) },
+  )
+}
+
+export async function generatePlan(
+  owner: string,
+  repo: string,
+  planRequest: PlanRequest,
+): Promise<PlanResponse> {
+  return request<PlanResponse>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/plan`,
+    { method: 'POST', body: JSON.stringify(planRequest) },
   )
 }
 
