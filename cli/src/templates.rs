@@ -275,7 +275,9 @@ mod tests {
         assert!(result.ralphs_added.contains(&"feature-dev".to_string()));
         assert!(result.ralphs_added.contains(&"merge".to_string()));
         assert!(result.ralphs_added.contains(&"test-coverage".to_string()));
-        assert!(result.ralphs_added.contains(&"dependency-updates".to_string()));
+        assert!(result
+            .ralphs_added
+            .contains(&"dependency-updates".to_string()));
         assert!(result.ralphs_added.contains(&"reporter".to_string()));
     }
 
