@@ -71,6 +71,33 @@ fn is_trusted_pr_author(pr: &types::PullRequest, authenticated_login: Option<&st
     wreck_it_core::types::is_trusted_pr_author(login, authenticated_login)
 }
 
+/// Check whether a pull request appears to still be a work in progress.
+///
+/// Returns `true` when:
+///   - The PR is a draft.
+///   - The title starts with `[WIP]` (case-insensitive).
+///   - The body contains incomplete GitHub checklist items (`- [ ]`).
+///
+/// This is used as a guard to prevent enabling auto-merge before the
+/// agent has finished working on the PR.
+fn is_pr_work_in_progress(pr: &types::PullRequest) -> bool {
+    if pr.draft.unwrap_or(false) {
+        return true;
+    }
+    if let Some(title) = &pr.title {
+        let trimmed = title.trim_start();
+        if matches!(trimmed.get(..5), Some(prefix) if prefix.eq_ignore_ascii_case("[wip]")) {
+            return true;
+        }
+    }
+    if let Some(body) = &pr.body {
+        if body.contains("- [ ]") {
+            return true;
+        }
+    }
+    false
+}
+
 /// Determine whether a pull request webhook event should be processed.
 ///
 /// Returns `true` for:
@@ -409,25 +436,33 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
                     );
                 }
 
-                // Enable auto-merge when the base branch has required checks.
-                match client.has_required_checks_for_pr(pr_number).await {
-                    Ok(true) => {
-                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                // Enable auto-merge when the base branch has required checks
+                // and the PR is not still a work in progress.
+                if !is_pr_work_in_progress(pr) {
+                    match client.has_required_checks_for_pr(pr_number).await {
+                        Ok(true) => {
+                            if let Err(e) = client.enable_auto_merge(pr_number).await {
+                                console_warn!(
+                                    "Failed to enable auto-merge for PR #{}: {}",
+                                    pr_number,
+                                    e,
+                                );
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
                             console_warn!(
-                                "Failed to enable auto-merge for PR #{}: {}",
+                                "Failed to check required checks for PR #{}: {}",
                                 pr_number,
                                 e,
                             );
                         }
                     }
-                    Ok(false) => {}
-                    Err(e) => {
-                        console_warn!(
-                            "Failed to check required checks for PR #{}: {}",
-                            pr_number,
-                            e,
-                        );
-                    }
+                } else {
+                    console_log!(
+                        "[wreck-it] PR #{} is work-in-progress — skipping auto-merge",
+                        pr_number,
+                    );
                 }
 
                 // Fall through to the iteration below.
@@ -443,25 +478,33 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
                     );
                 }
 
-                // Enable auto-merge when the base branch has required checks.
-                match client.has_required_checks_for_pr(pr_number).await {
-                    Ok(true) => {
-                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                // Enable auto-merge when the base branch has required checks
+                // and the PR is not still a work in progress.
+                if !is_pr_work_in_progress(pr) {
+                    match client.has_required_checks_for_pr(pr_number).await {
+                        Ok(true) => {
+                            if let Err(e) = client.enable_auto_merge(pr_number).await {
+                                console_warn!(
+                                    "Failed to enable auto-merge for PR #{}: {}",
+                                    pr_number,
+                                    e,
+                                );
+                            }
+                        }
+                        Ok(false) => {}
+                        Err(e) => {
                             console_warn!(
-                                "Failed to enable auto-merge for PR #{}: {}",
+                                "Failed to check required checks for PR #{}: {}",
                                 pr_number,
                                 e,
                             );
                         }
                     }
-                    Ok(false) => {}
-                    Err(e) => {
-                        console_warn!(
-                            "Failed to check required checks for PR #{}: {}",
-                            pr_number,
-                            e,
-                        );
-                    }
+                } else {
+                    console_log!(
+                        "[wreck-it] PR #{} is work-in-progress — skipping auto-merge",
+                        pr_number,
+                    );
                 }
 
                 return Response::ok(format!(
@@ -618,6 +661,9 @@ mod tests {
     fn make_pr(login: &str, user_type: &str) -> types::PullRequest {
         types::PullRequest {
             number: 1,
+            title: Some("test".into()),
+            body: None,
+            draft: None,
             state: "open".into(),
             merged: None,
             user: Some(types::User {
@@ -728,6 +774,9 @@ mod tests {
     fn untrusted_pr_author_no_user() {
         let pr = types::PullRequest {
             number: 1,
+            title: None,
+            body: None,
+            draft: None,
             state: "open".into(),
             merged: None,
             user: None,
@@ -838,10 +887,113 @@ mod tests {
     fn reject_pr_no_user() {
         let pr = types::PullRequest {
             number: 1,
+            title: None,
+            body: None,
+            draft: None,
             state: "open".into(),
             merged: None,
             user: None,
         };
         assert!(!should_process_pr_event("opened", &pr, None));
+    }
+
+    // ---- is_pr_work_in_progress ----
+
+    #[test]
+    fn wip_draft_pr() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.draft = Some(true);
+        assert!(is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn wip_title_prefix_lower() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.title = Some("[wip] some feature".into());
+        assert!(is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn wip_title_prefix_upper() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.title = Some("[WIP] Fix auto merge issue".into());
+        assert!(is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn wip_title_prefix_mixed() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.title = Some("[Wip] mixed case".into());
+        assert!(is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn wip_title_no_space() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.title = Some("[WIP]no space".into());
+        assert!(is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn wip_title_leading_whitespace() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.title = Some("  [wip] with leading space".into());
+        assert!(is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn wip_incomplete_checklist() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.body = Some("- [x] done\n- [ ] not done yet".into());
+        assert!(is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn not_wip_complete_checklist() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.body = Some("- [x] all done\n- [x] also done".into());
+        assert!(!is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn not_wip_normal_pr() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(!is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn not_wip_embedded_wip() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.title = Some("fix: [wip] embedded".into());
+        assert!(!is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn not_wip_empty_title() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.title = Some("".into());
+        assert!(!is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn not_wip_short_title() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.title = Some("[wi".into());
+        assert!(!is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn not_wip_no_title_no_body() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.title = None;
+        pr.body = None;
+        assert!(!is_pr_work_in_progress(&pr));
+    }
+
+    #[test]
+    fn not_wip_draft_false() {
+        let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        pr.draft = Some(false);
+        assert!(!is_pr_work_in_progress(&pr));
     }
 }
