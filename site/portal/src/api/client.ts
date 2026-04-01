@@ -37,6 +37,39 @@ export interface RalphConfig {
   [key: string]: unknown
 }
 
+export interface RalphTemplateEntry {
+  name: string
+  task_file: string
+  state_file: string
+  description: string
+  command?: string
+  backend?: string
+}
+
+export interface RalphTemplate {
+  id: string
+  name: string
+  description: string
+  ralphs: RalphTemplateEntry[]
+}
+
+export interface RalphDeployRequest {
+  name: string
+  task_file: string
+  state_file: string
+  tasks?: unknown[]
+  command?: string
+  backend?: string
+}
+
+export interface RalphDeployResponse {
+  status: string
+  ralph: string
+  task_file: string
+  state_file: string
+  tasks_count: number
+}
+
 interface AuthCallbackResponse {
   user: User
   token: string
@@ -133,6 +166,21 @@ export async function updateRepoConfig(
   return request<RalphConfig>(
     `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/config`,
     { method: 'PUT', body: JSON.stringify(config) },
+  )
+}
+
+export async function getTemplates(): Promise<RalphTemplate[]> {
+  return request<RalphTemplate[]>('/api/portal/templates')
+}
+
+export async function deployRalph(
+  owner: string,
+  repo: string,
+  deploy: RalphDeployRequest,
+): Promise<RalphDeployResponse> {
+  return request<RalphDeployResponse>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/deploy`,
+    { method: 'POST', body: JSON.stringify(deploy) },
   )
 }
 
