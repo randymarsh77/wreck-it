@@ -804,11 +804,6 @@ async fn resolve_ralph_paths(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let _state_root = config
-        .get("state_root")
-        .and_then(|v| v.as_str())
-        .unwrap_or(".wreck-it")
-        .to_string();
 
     // Find the ralph entry.
     let ralphs = config
