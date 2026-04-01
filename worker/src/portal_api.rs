@@ -635,6 +635,9 @@ const GITHUB_MODELS_ENDPOINT: &str = "https://models.github.ai/inference/chat/co
 /// Default model for plan generation.
 const PLAN_MODEL: &str = "openai/gpt-4o-mini";
 
+/// GitHub Models API endpoint for listing available models.
+const GITHUB_MODELS_LIST_ENDPOINT: &str = "https://models.github.ai/inference/models";
+
 /// Build the planner prompt that instructs the LLM to emit a structured task
 /// plan.  This mirrors the CLI's `planner.rs::build_planner_prompt`.
 fn build_planner_prompt(goal: &str) -> String {
@@ -860,6 +863,79 @@ async fn call_models_api(
         .ok_or_else(|| "Models API response missing choices[0].message.content".to_string())
 }
 
+/// `GET /api/portal/repos/:owner/:repo/models` — list models available from
+/// the GitHub Models API using the repository's installation token.
+async fn list_models(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let owner = ctx
+        .param("owner")
+        .ok_or_else(|| Error::RustError("Missing owner".into()))?
+        .to_string();
+    let repo = ctx
+        .param("repo")
+        .ok_or_else(|| Error::RustError("Missing repo".into()))?
+        .to_string();
+    let api_token = get_installation_token(&ctx, &owner, &repo)
+        .await
+        .map_err(|e| {
+            Error::RustError(format!(
+                "Failed to get installation token for {owner}/{repo}: {}",
+                e.status_code()
+            ))
+        })?;
+
+    let headers = Headers::new();
+    headers
+        .set("Authorization", &format!("Bearer {api_token}"))
+        .ok();
+
+    let request = Request::new_with_init(
+        GITHUB_MODELS_LIST_ENDPOINT,
+        RequestInit::new()
+            .with_method(Method::Get)
+            .with_headers(headers),
+    )
+    .map_err(|e| Error::RustError(format!("Failed to build models list request: {e}")))?;
+
+    let mut response = Fetch::Request(request)
+        .send()
+        .await
+        .map_err(|e| Error::RustError(format!("Models list request failed: {e}")))?;
+
+    let status = response.status_code();
+    if !(200..300).contains(&status) {
+        let err_body = response.text().await.unwrap_or_default();
+        console_log!(
+            "[wreck-it][portal] models list API returned {status}: {err_body}"
+        );
+        return json_response(&serde_json::json!({ "models": [] }), 200);
+    }
+
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| Error::RustError(format!("Failed to parse models list response: {e}")))?;
+
+    // The OpenAI-compatible /models endpoint returns { "data": [...] }.
+    let models = json
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    let id = m.get("id")?.as_str()?;
+                    Some(serde_json::json!({ "id": id }))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    json_response(&serde_json::json!({ "models": models }), 200)
+}
+
 /// Request body for `POST /api/portal/repos/:owner/:repo/ralphs/plan`.
 #[derive(serde::Deserialize)]
 struct PlanRequest {
@@ -868,6 +944,9 @@ struct PlanRequest {
     /// Optional ralph name; if omitted, the LLM generates one.
     #[serde(default)]
     ralph: Option<String>,
+    /// Optional model identifier (e.g. "openai/gpt-4o"); defaults to PLAN_MODEL.
+    #[serde(default)]
+    model: Option<String>,
 }
 
 /// `POST /api/portal/repos/:owner/:repo/ralphs/plan` — generate a task plan
@@ -906,7 +985,8 @@ async fn generate_plan(mut req: Request, ctx: RouteContext<()>) -> Result<Respon
 
     // Generate the task plan.
     let planner_prompt = build_planner_prompt(&goal);
-    let raw_plan = call_models_api(&api_token, &planner_prompt, PLAN_MODEL)
+    let model = body.model.as_deref().unwrap_or(PLAN_MODEL);
+    let raw_plan = call_models_api(&api_token, &planner_prompt, model)
         .await
         .map_err(|e| Error::RustError(format!("Plan generation failed: {e}")))?;
 
@@ -918,7 +998,7 @@ async fn generate_plan(mut req: Request, ctx: RouteContext<()>) -> Result<Respon
         Some(n) if !n.trim().is_empty() => slugify_plan_name(n.trim()),
         _ => {
             let naming_prompt = build_naming_prompt(&goal);
-            match call_models_api(&api_token, &naming_prompt, PLAN_MODEL).await {
+            match call_models_api(&api_token, &naming_prompt, model).await {
                 Ok(raw_name) => slugify_plan_name(&raw_name),
                 Err(e) => {
                     console_log!(
@@ -1673,6 +1753,10 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
             "/api/portal/repos/:owner/:repo/ralphs/plan",
             generate_plan,
         )
+        .get_async(
+            "/api/portal/repos/:owner/:repo/models",
+            list_models,
+        )
         // Ralph task & state endpoints
         .get_async(
             "/api/portal/repos/:owner/:repo/ralphs/:name/tasks",
@@ -2061,6 +2145,7 @@ mod tests {
         let req: PlanRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.goal, "Build an API");
         assert_eq!(req.ralph.as_deref(), Some("my-api"));
+        assert!(req.model.is_none());
     }
 
     #[test]
@@ -2069,6 +2154,25 @@ mod tests {
         let req: PlanRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.goal, "Build an API");
         assert!(req.ralph.is_none());
+        assert!(req.model.is_none());
+    }
+
+    #[test]
+    fn test_plan_request_deserialize_with_model() {
+        let json = r#"{"goal":"Build an API","model":"openai/gpt-4o"}"#;
+        let req: PlanRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.goal, "Build an API");
+        assert!(req.ralph.is_none());
+        assert_eq!(req.model.as_deref(), Some("openai/gpt-4o"));
+    }
+
+    #[test]
+    fn test_plan_request_deserialize_all_fields() {
+        let json = r#"{"goal":"Build an API","ralph":"my-api","model":"openai/gpt-4o"}"#;
+        let req: PlanRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.goal, "Build an API");
+        assert_eq!(req.ralph.as_deref(), Some("my-api"));
+        assert_eq!(req.model.as_deref(), Some("openai/gpt-4o"));
     }
 
     #[test]

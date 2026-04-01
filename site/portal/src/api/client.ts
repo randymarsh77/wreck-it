@@ -104,11 +104,16 @@ export interface RalphStateResponse {
 export interface PlanRequest {
   goal: string
   ralph?: string
+  model?: string
 }
 
 export interface PlanResponse {
   name: string
   tasks: RalphTask[]
+}
+
+export interface ModelInfo {
+  id: string
 }
 
 interface AuthCallbackResponse {
@@ -238,6 +243,16 @@ export async function generatePlan(
     `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/plan`,
     { method: 'POST', body: JSON.stringify(planRequest) },
   )
+}
+
+export async function getAvailableModels(
+  owner: string,
+  repo: string,
+): Promise<ModelInfo[]> {
+  const data = await request<{ models: ModelInfo[] }>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/models`,
+  )
+  return data.models
 }
 
 export async function getRalphTasks(
