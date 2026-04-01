@@ -1,18 +1,37 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { generatePlan, deployRalph, getRepoConfig, updateRepoConfig } from '../api/client'
-import type { RalphTask, PlanResponse, RalphConfig } from '../api/client'
+import { generatePlan, deployRalph, getRepoConfig, updateRepoConfig, getAvailableModels } from '../api/client'
+import type { RalphTask, PlanResponse, RalphConfig, ModelInfo } from '../api/client'
 
 export default function Plan() {
   const { owner, repo } = useParams<{ owner: string; repo: string }>()
   const navigate = useNavigate()
   const [goal, setGoal] = useState('')
   const [ralphName, setRalphName] = useState('')
+  const [model, setModel] = useState('')
+  const [models, setModels] = useState<ModelInfo[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [plan, setPlan] = useState<PlanResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [deploying, setDeploying] = useState(false)
   const [deployMsg, setDeployMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!owner || !repo) return
+    setModelsLoading(true)
+    getAvailableModels(owner, repo)
+      .then((list) => {
+        setModels(list)
+        if (list.length > 0) {
+          setModel((prev) => prev || list[0].id)
+        }
+      })
+      .catch(() => {
+        // Models list is best-effort; user can still type a model manually.
+      })
+      .finally(() => setModelsLoading(false))
+  }, [owner, repo])
 
   async function handleGenerate(e: React.FormEvent) {
     e.preventDefault()
@@ -27,6 +46,7 @@ export default function Plan() {
       const result = await generatePlan(owner, repo, {
         goal: goal.trim(),
         ralph: ralphName.trim() || undefined,
+        model: model.trim() || undefined,
       })
       setPlan(result)
       if (!ralphName.trim()) {
@@ -135,6 +155,31 @@ export default function Plan() {
             onChange={(e) => setRalphName(e.target.value)}
             disabled={generating}
           />
+        </div>
+        <div className="form-field">
+          <label htmlFor="model">Model</label>
+          {models.length > 0 ? (
+            <select
+              id="model"
+              className="form-input"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              disabled={generating}
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>{m.id}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              id="model"
+              className="form-input"
+              placeholder={modelsLoading ? 'Loading models…' : 'e.g. openai/gpt-4o-mini'}
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              disabled={generating}
+            />
+          )}
         </div>
         <button
           type="submit"
