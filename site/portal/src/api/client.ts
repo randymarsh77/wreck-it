@@ -70,6 +70,37 @@ export interface RalphDeployResponse {
   tasks_count: number
 }
 
+export interface RalphTask {
+  id: string
+  description: string
+  status?: string
+  role?: string
+  kind?: string
+  phase?: number
+  depends_on?: string[]
+  priority?: number
+  complexity?: number
+  cooldown_seconds?: number
+  last_attempt_at?: number
+  precondition_prompt?: string
+  acceptance_criteria?: string
+  [key: string]: unknown
+}
+
+export interface RalphTasksResponse {
+  tasks: RalphTask[]
+  _sha: string | null
+  _path: string
+  _branch: string
+}
+
+export interface RalphStateResponse {
+  state: Record<string, unknown>
+  _sha: string | null
+  _path: string
+  _branch: string
+}
+
 interface AuthCallbackResponse {
   user: User
   token: string
@@ -181,6 +212,52 @@ export async function deployRalph(
   return request<RalphDeployResponse>(
     `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/deploy`,
     { method: 'POST', body: JSON.stringify(deploy) },
+  )
+}
+
+export async function getRalphTasks(
+  owner: string,
+  repo: string,
+  name: string,
+): Promise<RalphTasksResponse> {
+  return request<RalphTasksResponse>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/${encodeURIComponent(name)}/tasks`,
+  )
+}
+
+export async function updateRalphTasks(
+  owner: string,
+  repo: string,
+  name: string,
+  tasks: RalphTask[],
+  sha: string | null,
+): Promise<RalphTasksResponse> {
+  return request<RalphTasksResponse>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/${encodeURIComponent(name)}/tasks`,
+    { method: 'PUT', body: JSON.stringify({ tasks, _sha: sha }) },
+  )
+}
+
+export async function getRalphState(
+  owner: string,
+  repo: string,
+  name: string,
+): Promise<RalphStateResponse> {
+  return request<RalphStateResponse>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/${encodeURIComponent(name)}/state`,
+  )
+}
+
+export async function updateRalphState(
+  owner: string,
+  repo: string,
+  name: string,
+  state: Record<string, unknown>,
+  sha: string | null,
+): Promise<RalphStateResponse> {
+  return request<RalphStateResponse>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/${encodeURIComponent(name)}/state`,
+    { method: 'PUT', body: JSON.stringify({ state, _sha: sha }) },
   )
 }
 

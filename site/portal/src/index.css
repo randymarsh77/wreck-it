@@ -576,6 +576,164 @@ ul {
   background: rgba(248, 81, 73, 0.1);
 }
 
+/* ── Ralph task & state panels ───────────────────────── */
+.ralph-panel {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.ralph-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ralph-panel-header h4 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.task-summary {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.task-count {
+  font-size: 0.75rem;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.task-status-pending {
+  background: rgba(125, 133, 144, 0.15);
+  color: var(--text-muted);
+}
+
+.task-status-inprogress {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--primary);
+}
+
+.task-status-completed {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--success);
+}
+
+.task-status-failed {
+  background: rgba(248, 81, 73, 0.15);
+  color: var(--error);
+}
+
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.task-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  gap: 8px;
+}
+
+.task-id {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.task-status-badge {
+  font-size: 0.7rem;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.task-description {
+  font-size: 0.82rem;
+  color: var(--text);
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+
+.task-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-right: 12px;
+}
+
+.task-item-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.task-status-select {
+  padding: 2px 6px;
+  font-size: 0.8rem;
+  font-family: var(--font);
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.task-status-select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.task-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.task-editor {
+  min-height: 150px;
+  font-size: 0.8rem;
+}
+
+.task-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.task-add-form {
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.state-editor {
+  min-height: 180px;
+  font-size: 0.8rem;
+  margin-bottom: 8px;
+}
+
 /* ── Hamburger menu toggle (hidden on desktop) ───────── */
 .menu-toggle {
   display: none;

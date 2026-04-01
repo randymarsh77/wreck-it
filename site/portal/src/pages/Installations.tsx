@@ -1,14 +1,14 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { getInstallations, getInstallationRepos } from '../api/client'
 import type { Installation, Repository } from '../api/client'
 
-const REPOS_PER_PAGE = 30
+const DISPLAY_PER_PAGE = 30
 
 interface RepoState {
   repos: Repository[]
   totalCount: number
-  page: number
+  loading: boolean
 }
 
 export default function Installations() {
@@ -17,8 +17,8 @@ export default function Installations() {
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [repoState, setRepoState] = useState<Record<number, RepoState>>({})
-  const [reposLoading, setReposLoading] = useState<number | null>(null)
   const [filter, setFilter] = useState('')
+  const [displayPage, setDisplayPage] = useState(1)
 
   useEffect(() => {
     getInstallations()
@@ -29,27 +29,41 @@ export default function Installations() {
       .finally(() => setLoading(false))
   }, [])
 
-  function fetchRepos(installationId: number, page: number) {
-    setReposLoading(installationId)
-    getInstallationRepos(installationId, page, REPOS_PER_PAGE)
-      .then((data) =>
-        setRepoState((prev) => ({
-          ...prev,
-          [installationId]: {
-            repos: data.repositories ?? [],
-            totalCount: data.total_count ?? 0,
-            page,
-          },
-        })),
-      )
-      .catch(() =>
-        setRepoState((prev) => ({
-          ...prev,
-          [installationId]: { repos: [], totalCount: 0, page: 1 },
-        })),
-      )
-      .finally(() => setReposLoading(null))
-  }
+  const fetchAllRepos = useCallback(async (installationId: number) => {
+    setRepoState((prev) => ({
+      ...prev,
+      [installationId]: { repos: [], totalCount: 0, loading: true },
+    }))
+
+    const perPage = 100
+    let page = 1
+    let allRepos: Repository[] = []
+    let totalCount = 0
+
+    try {
+      for (;;) {
+        const data = await getInstallationRepos(installationId, page, perPage)
+        totalCount = data.total_count ?? 0
+        const repos = data.repositories ?? []
+        allRepos = [...allRepos, ...repos]
+
+        if (allRepos.length >= totalCount || repos.length < perPage) {
+          break
+        }
+        page++
+      }
+
+      setRepoState((prev) => ({
+        ...prev,
+        [installationId]: { repos: allRepos, totalCount, loading: false },
+      }))
+    } catch {
+      setRepoState((prev) => ({
+        ...prev,
+        [installationId]: { repos: [], totalCount: 0, loading: false },
+      }))
+    }
+  }, [])
 
   function toggleExpand(id: number) {
     if (expanded === id) {
@@ -58,16 +72,13 @@ export default function Installations() {
     }
     setExpanded(id)
     setFilter('')
+    setDisplayPage(1)
     if (!repoState[id]) {
-      fetchRepos(id, 1)
+      void fetchAllRepos(id)
     }
   }
 
-  function goToPage(installationId: number, page: number) {
-    fetchRepos(installationId, page)
-  }
-
-  // Filter repos client-side by name or description
+  // Filter repos client-side across all loaded repos
   const filteredRepos = useMemo(() => {
     if (expanded === null || !repoState[expanded]) return []
     const q = filter.toLowerCase()
@@ -78,6 +89,14 @@ export default function Installations() {
         (r.description && r.description.toLowerCase().includes(q)),
     )
   }, [expanded, repoState, filter])
+
+  // Client-side pagination of filtered results
+  const totalDisplayPages =
+    DISPLAY_PER_PAGE > 0 ? Math.ceil(filteredRepos.length / DISPLAY_PER_PAGE) : 0
+  const displayedRepos = filteredRepos.slice(
+    (displayPage - 1) * DISPLAY_PER_PAGE,
+    displayPage * DISPLAY_PER_PAGE,
+  )
 
   if (loading) return <div className="loading">Loading installations…</div>
   if (error) return <div className="error-text">{error}</div>
@@ -91,7 +110,6 @@ export default function Installations() {
         <ul className="install-list">
           {installations.map((inst) => {
             const state = repoState[inst.id]
-            const totalPages = state && REPOS_PER_PAGE > 0 ? Math.ceil(state.totalCount / REPOS_PER_PAGE) : 0
             return (
               <li key={inst.id} className="card install-card">
                 <button className="install-header" onClick={() => toggleExpand(inst.id)}>
@@ -108,16 +126,19 @@ export default function Installations() {
                 </button>
                 {expanded === inst.id && (
                   <div className="install-repos">
-                    {state && state.repos.length > 0 && (
+                    {state && !state.loading && state.repos.length > 0 && (
                       <input
                         type="text"
                         className="repo-filter"
                         placeholder="Filter repositories…"
                         value={filter}
-                        onChange={(e) => setFilter(e.target.value)}
+                        onChange={(e) => {
+                          setFilter(e.target.value)
+                          setDisplayPage(1)
+                        }}
                       />
                     )}
-                    {reposLoading === inst.id ? (
+                    {state?.loading ? (
                       <p className="muted">Loading repos…</p>
                     ) : !state || state.repos.length === 0 ? (
                       <p className="muted">No repositories found.</p>
@@ -126,7 +147,7 @@ export default function Installations() {
                     ) : (
                       <>
                         <ul className="repo-list">
-                          {filteredRepos.map((r) => (
+                          {displayedRepos.map((r) => (
                             <li key={r.id}>
                               <Link to={`/repos/${r.owner.login}/${r.name}/config`}>
                                 {r.full_name}
@@ -137,22 +158,23 @@ export default function Installations() {
                             </li>
                           ))}
                         </ul>
-                        {totalPages > 1 && (
+                        {totalDisplayPages > 1 && (
                           <div className="pagination">
                             <button
                               className="btn btn-sm"
-                              disabled={state.page <= 1 || reposLoading === inst.id}
-                              onClick={() => goToPage(inst.id, state.page - 1)}
+                              disabled={displayPage <= 1}
+                              onClick={() => setDisplayPage((p) => p - 1)}
                             >
                               ← Prev
                             </button>
                             <span className="muted pagination-info">
-                              Page {state.page} of {totalPages}
+                              Page {displayPage} of {totalDisplayPages} ({filteredRepos.length}{' '}
+                              repos)
                             </span>
                             <button
                               className="btn btn-sm"
-                              disabled={state.page >= totalPages || reposLoading === inst.id}
-                              onClick={() => goToPage(inst.id, state.page + 1)}
+                              disabled={displayPage >= totalDisplayPages}
+                              onClick={() => setDisplayPage((p) => p + 1)}
                             >
                               Next →
                             </button>

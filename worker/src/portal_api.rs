@@ -23,6 +23,10 @@
 //! | `GET`     | `/api/portal/installations/:installation_id/repos`    | List repos for an installation    |
 //! | `GET`     | `/api/portal/repos/:owner/:repo/config`               | Read repo config (TOML → JSON)    |
 //! | `PUT`     | `/api/portal/repos/:owner/:repo/config`               | Write repo config (JSON → TOML)   |
+//! | `GET`     | `/api/portal/repos/:owner/:repo/ralphs/:name/tasks`   | Read ralph tasks from repo        |
+//! | `PUT`     | `/api/portal/repos/:owner/:repo/ralphs/:name/tasks`   | Write ralph tasks to repo         |
+//! | `GET`     | `/api/portal/repos/:owner/:repo/ralphs/:name/state`   | Read ralph state from repo        |
+//! | `PUT`     | `/api/portal/repos/:owner/:repo/ralphs/:name/state`   | Write ralph state to repo         |
 //!
 //! ## Required secrets
 //!
@@ -59,7 +63,7 @@ fn cors_headers(mut resp: Response) -> Result<Response> {
     resp.headers_mut()
         .set("Access-Control-Allow-Origin", "*")?;
     resp.headers_mut()
-        .set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")?;
+        .set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")?;
     resp.headers_mut()
         .set("Access-Control-Allow-Headers", "Authorization, Content-Type")?;
     Ok(resp)
@@ -744,6 +748,468 @@ async fn put_config(mut req: Request, ctx: RouteContext<()>) -> Result<Response>
 }
 
 // ---------------------------------------------------------------------------
+// Ralph task & state endpoints
+// ---------------------------------------------------------------------------
+
+/// Internal representation of the config settings needed for task/state
+/// resolution.
+struct ResolvedRalphPaths {
+    task_path: String,
+    task_branch: String,
+    state_path: String,
+    state_branch: String,
+}
+
+/// Read the repo config and resolve paths for a given ralph name.
+async fn resolve_ralph_paths(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    ralph_name: &str,
+) -> std::result::Result<ResolvedRalphPaths, Response> {
+    let file_url = format!(
+        "https://api.github.com/repos/{owner}/{repo}/contents/.wreck-it/config.toml"
+    );
+    let file_data = github_api_get(&file_url, token)
+        .await
+        .map_err(|e| error_response(&format!("Failed to read config: {e}"), 500).unwrap())?;
+
+    let content_b64 = file_data["content"]
+        .as_str()
+        .unwrap_or("")
+        .replace('\n', "");
+
+    let decoded = base64_decode(&content_b64);
+    let toml_str = String::from_utf8(decoded)
+        .map_err(|_| error_response("Config file is not valid UTF-8", 500).unwrap())?;
+
+    let config: toml::Value = toml::from_str(&toml_str)
+        .map_err(|_| error_response("Failed to parse config TOML", 500).unwrap())?;
+
+    // Extract branch / directory settings.
+    let state_branch = config
+        .get("state_branch")
+        .and_then(|v| v.as_str())
+        .unwrap_or("wreck-it-state")
+        .to_string();
+
+    let task_branch = config
+        .get("task_branch")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| state_branch.clone());
+
+    let tasks_dir = config
+        .get("tasks_dir")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let state_root = config
+        .get("state_root")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".wreck-it")
+        .to_string();
+
+    // Find the ralph entry.
+    let ralphs = config
+        .get("ralphs")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| error_response("No ralphs configured", 404).unwrap())?;
+
+    let ralph = ralphs
+        .iter()
+        .find(|r| r.get("name").and_then(|v| v.as_str()) == Some(ralph_name))
+        .ok_or_else(|| {
+            error_response(&format!("Ralph '{ralph_name}' not found in config"), 404).unwrap()
+        })?;
+
+    let task_file = ralph["task_file"]
+        .as_str()
+        .ok_or_else(|| error_response("Ralph missing task_file", 500).unwrap())?;
+
+    let state_file = ralph["state_file"]
+        .as_str()
+        .ok_or_else(|| error_response("Ralph missing state_file", 500).unwrap())?;
+
+    // Resolve full paths.
+    let task_path = match &tasks_dir {
+        Some(dir) => format!("{dir}/{task_file}"),
+        None => task_file.to_string(),
+    };
+
+    let state_path = format!("{state_root}/{state_file}");
+
+    Ok(ResolvedRalphPaths {
+        task_path,
+        task_branch,
+        state_path,
+        state_branch,
+    })
+}
+
+/// Read a file from a GitHub repo on a specific branch.  Returns `None`
+/// when the file does not exist (404).
+async fn read_repo_file(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    path: &str,
+    branch: &str,
+) -> std::result::Result<Option<(String, String)>, Response> {
+    let encoded_path = urlencoding::encode(path);
+    let url = format!(
+        "https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}?ref={branch}"
+    );
+
+    match github_api_get(&url, token).await {
+        Ok(data) => {
+            let content_b64 = data["content"].as_str().unwrap_or("").replace('\n', "");
+            let decoded = base64_decode(&content_b64);
+            let content = String::from_utf8(decoded)
+                .map_err(|_| error_response("File is not valid UTF-8", 500).unwrap())?;
+            let sha = data["sha"].as_str().unwrap_or("").to_string();
+            Ok(Some((content, sha)))
+        }
+        Err(e) if e.contains("404") => Ok(None),
+        Err(e) => Err(error_response(&format!("Failed to read file: {e}"), 500).unwrap()),
+    }
+}
+
+/// Write a file to a GitHub repo on a specific branch.
+#[allow(clippy::too_many_arguments)]
+async fn write_repo_file(
+    token: &str,
+    owner: &str,
+    repo: &str,
+    path: &str,
+    branch: &str,
+    content: &str,
+    sha: Option<&str>,
+    message: &str,
+) -> std::result::Result<String, Response> {
+    let encoded_path = urlencoding::encode(path);
+    let url = format!(
+        "https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}"
+    );
+
+    let encoded_content = base64_encode(content.as_bytes());
+
+    let mut body = serde_json::json!({
+        "message": message,
+        "content": encoded_content,
+        "branch": branch,
+    });
+    if let Some(s) = sha {
+        body["sha"] = serde_json::Value::String(s.to_string());
+    }
+
+    let headers = Headers::new();
+    headers.set("Accept", "application/vnd.github+json").ok();
+    headers
+        .set("Authorization", &format!("Bearer {token}"))
+        .ok();
+    headers.set("User-Agent", "wreck-it-worker").ok();
+    headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+    headers.set("Content-Type", "application/json").ok();
+
+    let put_req = Request::new_with_init(
+        &url,
+        RequestInit::new()
+            .with_method(Method::Put)
+            .with_headers(headers)
+            .with_body(Some(wasm_bindgen::JsValue::from_str(
+                &body.to_string(),
+            ))),
+    )
+    .map_err(|e| error_response(&format!("Failed to build request: {e}"), 500).unwrap())?;
+
+    let mut resp = Fetch::Request(put_req)
+        .send()
+        .await
+        .map_err(|e| error_response(&format!("GitHub API request failed: {e}"), 500).unwrap())?;
+
+    let status = resp.status_code();
+    if !(200..300).contains(&status) {
+        let err_body = resp.text().await.unwrap_or_default();
+        console_error!("[wreck-it][portal] file write failed ({status}): {err_body}");
+        return Err(error_response(
+            &format!("Failed to write file ({status})"),
+            status,
+        )
+        .unwrap());
+    }
+
+    // Extract the new SHA from the response.
+    let resp_json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| error_response(&format!("Failed to parse write response: {e}"), 500).unwrap())?;
+
+    let new_sha = resp_json["content"]["sha"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    Ok(new_sha)
+}
+
+/// `GET /api/portal/repos/:owner/:repo/ralphs/:name/tasks` — read tasks
+/// from the repo file on the task branch.
+async fn get_ralph_tasks(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let owner = ctx
+        .param("owner")
+        .ok_or_else(|| Error::RustError("Missing owner".into()))?
+        .to_string();
+    let repo = ctx
+        .param("repo")
+        .ok_or_else(|| Error::RustError("Missing repo".into()))?
+        .to_string();
+    let name = ctx
+        .param("name")
+        .ok_or_else(|| Error::RustError("Missing name".into()))?
+        .to_string();
+
+    let token = get_installation_token(&ctx, &owner, &repo)
+        .await
+        .map_err(|e| Error::RustError(format!("installation token failed: {}", e.status_code())))?;
+
+    let paths = resolve_ralph_paths(&token, &owner, &repo, &name)
+        .await
+        .map_err(|e| Error::RustError(format!("resolve paths failed: {}", e.status_code())))?;
+
+    match read_repo_file(&token, &owner, &repo, &paths.task_path, &paths.task_branch).await {
+        Ok(Some((content, sha))) => {
+            let tasks: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+                Error::RustError(format!("Failed to parse task JSON: {e}"))
+            })?;
+            json_response(
+                &serde_json::json!({
+                    "tasks": tasks,
+                    "_sha": sha,
+                    "_path": paths.task_path,
+                    "_branch": paths.task_branch,
+                }),
+                200,
+            )
+        }
+        Ok(None) => json_response(
+            &serde_json::json!({
+                "tasks": [],
+                "_sha": null,
+                "_path": paths.task_path,
+                "_branch": paths.task_branch,
+            }),
+            200,
+        ),
+        Err(e) => Ok(e),
+    }
+}
+
+/// `PUT /api/portal/repos/:owner/:repo/ralphs/:name/tasks` — write tasks
+/// back to the repo file on the task branch.
+async fn put_ralph_tasks(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let owner = ctx
+        .param("owner")
+        .ok_or_else(|| Error::RustError("Missing owner".into()))?
+        .to_string();
+    let repo = ctx
+        .param("repo")
+        .ok_or_else(|| Error::RustError("Missing repo".into()))?
+        .to_string();
+    let name = ctx
+        .param("name")
+        .ok_or_else(|| Error::RustError("Missing name".into()))?
+        .to_string();
+
+    let body: serde_json::Value = req.json().await.map_err(|e| {
+        Error::RustError(format!("Invalid JSON body: {e}"))
+    })?;
+
+    let tasks = body
+        .get("tasks")
+        .ok_or_else(|| Error::RustError("Missing 'tasks' field".into()))?;
+
+    let file_sha = body.get("_sha").and_then(|v| v.as_str());
+
+    let token = get_installation_token(&ctx, &owner, &repo)
+        .await
+        .map_err(|e| Error::RustError(format!("installation token failed: {}", e.status_code())))?;
+
+    let paths = resolve_ralph_paths(&token, &owner, &repo, &name)
+        .await
+        .map_err(|e| Error::RustError(format!("resolve paths failed: {}", e.status_code())))?;
+
+    let content = serde_json::to_string_pretty(tasks).map_err(|e| {
+        Error::RustError(format!("Failed to serialize tasks: {e}"))
+    })?;
+
+    let message = format!("Update {} tasks via portal", name);
+    match write_repo_file(
+        &token,
+        &owner,
+        &repo,
+        &paths.task_path,
+        &paths.task_branch,
+        &content,
+        file_sha,
+        &message,
+    )
+    .await
+    {
+        Ok(new_sha) => json_response(
+            &serde_json::json!({
+                "tasks": tasks,
+                "_sha": new_sha,
+                "_path": paths.task_path,
+                "_branch": paths.task_branch,
+            }),
+            200,
+        ),
+        Err(e) => Ok(e),
+    }
+}
+
+/// `GET /api/portal/repos/:owner/:repo/ralphs/:name/state` — read state
+/// from the repo file on the state branch.
+async fn get_ralph_state(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let owner = ctx
+        .param("owner")
+        .ok_or_else(|| Error::RustError("Missing owner".into()))?
+        .to_string();
+    let repo = ctx
+        .param("repo")
+        .ok_or_else(|| Error::RustError("Missing repo".into()))?
+        .to_string();
+    let name = ctx
+        .param("name")
+        .ok_or_else(|| Error::RustError("Missing name".into()))?
+        .to_string();
+
+    let token = get_installation_token(&ctx, &owner, &repo)
+        .await
+        .map_err(|e| Error::RustError(format!("installation token failed: {}", e.status_code())))?;
+
+    let paths = resolve_ralph_paths(&token, &owner, &repo, &name)
+        .await
+        .map_err(|e| Error::RustError(format!("resolve paths failed: {}", e.status_code())))?;
+
+    match read_repo_file(
+        &token,
+        &owner,
+        &repo,
+        &paths.state_path,
+        &paths.state_branch,
+    )
+    .await
+    {
+        Ok(Some((content, sha))) => {
+            let state: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+                Error::RustError(format!("Failed to parse state JSON: {e}"))
+            })?;
+            json_response(
+                &serde_json::json!({
+                    "state": state,
+                    "_sha": sha,
+                    "_path": paths.state_path,
+                    "_branch": paths.state_branch,
+                }),
+                200,
+            )
+        }
+        Ok(None) => json_response(
+            &serde_json::json!({
+                "state": {},
+                "_sha": null,
+                "_path": paths.state_path,
+                "_branch": paths.state_branch,
+            }),
+            200,
+        ),
+        Err(e) => Ok(e),
+    }
+}
+
+/// `PUT /api/portal/repos/:owner/:repo/ralphs/:name/state` — write state
+/// back to the repo file on the state branch.
+async fn put_ralph_state(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let owner = ctx
+        .param("owner")
+        .ok_or_else(|| Error::RustError("Missing owner".into()))?
+        .to_string();
+    let repo = ctx
+        .param("repo")
+        .ok_or_else(|| Error::RustError("Missing repo".into()))?
+        .to_string();
+    let name = ctx
+        .param("name")
+        .ok_or_else(|| Error::RustError("Missing name".into()))?
+        .to_string();
+
+    let body: serde_json::Value = req.json().await.map_err(|e| {
+        Error::RustError(format!("Invalid JSON body: {e}"))
+    })?;
+
+    let state = body
+        .get("state")
+        .ok_or_else(|| Error::RustError("Missing 'state' field".into()))?;
+
+    let file_sha = body.get("_sha").and_then(|v| v.as_str());
+
+    let token = get_installation_token(&ctx, &owner, &repo)
+        .await
+        .map_err(|e| Error::RustError(format!("installation token failed: {}", e.status_code())))?;
+
+    let paths = resolve_ralph_paths(&token, &owner, &repo, &name)
+        .await
+        .map_err(|e| Error::RustError(format!("resolve paths failed: {}", e.status_code())))?;
+
+    let content = serde_json::to_string_pretty(state).map_err(|e| {
+        Error::RustError(format!("Failed to serialize state: {e}"))
+    })?;
+
+    let message = format!("Update {} state via portal", name);
+    match write_repo_file(
+        &token,
+        &owner,
+        &repo,
+        &paths.state_path,
+        &paths.state_branch,
+        &content,
+        file_sha,
+        &message,
+    )
+    .await
+    {
+        Ok(new_sha) => json_response(
+            &serde_json::json!({
+                "state": state,
+                "_sha": new_sha,
+                "_path": paths.state_path,
+                "_branch": paths.state_branch,
+            }),
+            200,
+        ),
+        Err(e) => Ok(e),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Base64 helpers (matching github.rs style)
 // ---------------------------------------------------------------------------
 
@@ -821,6 +1287,14 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
             "/api/portal/repos/:owner/:repo/ralphs/deploy",
             options_handler,
         )
+        .options_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/tasks",
+            options_handler,
+        )
+        .options_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/state",
+            options_handler,
+        )
         // Auth endpoints
         .get_async("/api/portal/auth/login", auth_login)
         .get_async("/api/portal/auth/callback", auth_callback)
@@ -839,6 +1313,23 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .post_async(
             "/api/portal/repos/:owner/:repo/ralphs/deploy",
             deploy_ralph,
+        )
+        // Ralph task & state endpoints
+        .get_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/tasks",
+            get_ralph_tasks,
+        )
+        .put_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/tasks",
+            put_ralph_tasks,
+        )
+        .get_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/state",
+            get_ralph_state,
+        )
+        .put_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/state",
+            put_ralph_state,
         )
 }
 
@@ -865,11 +1356,11 @@ mod tests {
     #[test]
     fn test_cors_headers() {
         let origin = "*";
-        let methods = "GET, PUT, OPTIONS";
+        let methods = "GET, POST, PUT, DELETE, OPTIONS";
         let allowed = "Authorization, Content-Type";
 
         assert_eq!(origin, "*");
-        assert_eq!(methods, "GET, PUT, OPTIONS");
+        assert_eq!(methods, "GET, POST, PUT, DELETE, OPTIONS");
         assert_eq!(allowed, "Authorization, Content-Type");
     }
 
@@ -978,5 +1469,65 @@ mod tests {
         let req: RalphDeployRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.name, "test");
         assert!(req.tasks.is_empty());
+    }
+
+    #[test]
+    fn test_resolved_ralph_paths_struct() {
+        let paths = ResolvedRalphPaths {
+            task_path: "tasks/docs-tasks.json".to_string(),
+            task_branch: "master".to_string(),
+            state_path: ".wreck-it/.docs-state.json".to_string(),
+            state_branch: "wreck-it-state".to_string(),
+        };
+        assert_eq!(paths.task_path, "tasks/docs-tasks.json");
+        assert_eq!(paths.task_branch, "master");
+        assert_eq!(paths.state_path, ".wreck-it/.docs-state.json");
+        assert_eq!(paths.state_branch, "wreck-it-state");
+    }
+
+    #[test]
+    fn test_resolved_ralph_paths_no_tasks_dir() {
+        let paths = ResolvedRalphPaths {
+            task_path: "docs-tasks.json".to_string(),
+            task_branch: "wreck-it-state".to_string(),
+            state_path: ".wreck-it/.docs-state.json".to_string(),
+            state_branch: "wreck-it-state".to_string(),
+        };
+        assert_eq!(paths.task_path, "docs-tasks.json");
+        assert_eq!(paths.task_branch, "wreck-it-state");
+    }
+
+    /// Verify resolve logic inline: when tasks_dir is set, task_file gets
+    /// prefixed; state_file always gets state_root prefix.
+    #[test]
+    fn test_path_resolution_logic() {
+        // Simulate the resolve logic from resolve_ralph_paths.
+        let tasks_dir = Some("tasks".to_string());
+        let state_root = ".wreck-it".to_string();
+        let task_file = "docs-tasks.json";
+        let state_file = ".docs-state.json";
+
+        let task_path = match &tasks_dir {
+            Some(dir) => format!("{dir}/{task_file}"),
+            None => task_file.to_string(),
+        };
+        let state_path = format!("{state_root}/{state_file}");
+
+        assert_eq!(task_path, "tasks/docs-tasks.json");
+        assert_eq!(state_path, ".wreck-it/.docs-state.json");
+    }
+
+    /// When tasks_dir is None, task_file is used as-is.
+    #[test]
+    fn test_path_resolution_no_tasks_dir() {
+        let tasks_dir: Option<String> = None;
+        let task_file = "docs-tasks.json";
+
+        let task_path = match &tasks_dir {
+            Some(dir) => format!("{dir}/{task_file}"),
+            None => task_file.to_string(),
+        };
+
+        assert_eq!(task_path, "docs-tasks.json");
     }
 }
