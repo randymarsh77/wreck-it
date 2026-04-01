@@ -76,6 +76,7 @@ fn is_trusted_pr_author(pr: &types::PullRequest, authenticated_login: Option<&st
 /// Returns `true` for:
 ///   - `closed` + `merged == true` (task completion signal)
 ///   - `opened`, `ready_for_review`, `synchronize` (workflow approval)
+///   - `review_requested`, `edited` (agent-finished-work signals)
 ///
 /// In all cases the PR must be from a trusted author.
 fn should_process_pr_event(
@@ -91,6 +92,10 @@ fn should_process_pr_event(
     ["opened", "ready_for_review", "synchronize"].contains(&action)
         // Task-completion action (merged PR).
         || (action == "closed" && merged)
+        // Agent-finished-work signals — trigger a full iteration so the
+        // orchestrator can react to completed agent work (e.g. Copilot
+        // requesting a review or editing a PR title).
+        || ["review_requested", "edited"].contains(&action)
 }
 
 #[event(fetch)]
@@ -363,6 +368,11 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
     // handles the case where workflow runs need explicit approval before
     // they can execute (e.g. first-time contributors, outside
     // collaborators, or fork PRs).
+    //
+    // Some PR actions signal that an agent has finished its work (e.g.
+    // Copilot requesting a review or editing a PR title).  For these
+    // "iteration-triggering" actions we perform workflow approval **and**
+    // fall through to run a full iteration so the orchestrator can react.
     if event == WebhookEvent::PullRequest {
         if let Some(pr) = &payload.pull_request {
             let action = payload.action.as_deref().unwrap_or("");
@@ -382,10 +392,48 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
                         // Fall through to the normal iteration processing.
                     }
                 }
+            } else if ["review_requested", "edited", "ready_for_review"].contains(&action) {
+                // Agent-finished-work signals — approve workflow runs,
+                // then fall through to run a full iteration.
+                let pr_number = pr.number;
+                console_log!(
+                    "[wreck-it] PR #{} action={} — will approve workflows and run iteration",
+                    pr_number,
+                    action,
+                );
+                if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
+                    console_warn!(
+                        "Failed to approve workflow runs for PR #{}: {}",
+                        pr_number,
+                        e,
+                    );
+                }
+
+                // Enable auto-merge when the base branch has required checks.
+                match client.has_required_checks_for_pr(pr_number).await {
+                    Ok(true) => {
+                        if let Err(e) = client.enable_auto_merge(pr_number).await {
+                            console_warn!(
+                                "Failed to enable auto-merge for PR #{}: {}",
+                                pr_number,
+                                e,
+                            );
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(e) => {
+                        console_warn!(
+                            "Failed to check required checks for PR #{}: {}",
+                            pr_number,
+                            e,
+                        );
+                    }
+                }
+
+                // Fall through to the iteration below.
             } else {
-                // Non-merged PR event (opened, ready_for_review, synchronize)
-                // — approve pending workflow runs so required checks can
-                // execute, then enable auto-merge.
+                // Workflow-only PR events (opened, synchronize) — approve
+                // pending workflow runs and enable auto-merge, then return.
                 let pr_number = pr.number;
                 if let Err(e) = client.approve_pending_workflow_runs(pr_number).await {
                     console_warn!(
@@ -751,9 +799,33 @@ mod tests {
     }
 
     #[test]
+    fn process_pr_edited_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(should_process_pr_event("edited", &pr, None));
+    }
+
+    #[test]
+    fn process_pr_review_requested_trusted() {
+        let pr = make_pr("copilot-swe-agent[bot]", "Bot");
+        assert!(should_process_pr_event("review_requested", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_review_requested_untrusted() {
+        let pr = make_pr("attacker", "User");
+        assert!(!should_process_pr_event("review_requested", &pr, None));
+    }
+
+    #[test]
+    fn reject_pr_edited_untrusted() {
+        let pr = make_pr("attacker", "User");
+        assert!(!should_process_pr_event("edited", &pr, None));
+    }
+
+    #[test]
     fn reject_pr_unknown_action_trusted() {
         let pr = make_pr("copilot-swe-agent[bot]", "Bot");
-        assert!(!should_process_pr_event("edited", &pr, None));
+        assert!(!should_process_pr_event("labeled", &pr, None));
     }
 
     #[test]
