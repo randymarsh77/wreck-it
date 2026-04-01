@@ -103,6 +103,9 @@ pub struct Label {
 #[allow(dead_code)]
 pub struct PullRequest {
     pub number: u64,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub draft: Option<bool>,
     pub state: String,
     pub merged: Option<bool>,
     pub user: Option<User>,
@@ -233,6 +236,9 @@ state_file = ".docs-state.json"
     fn pr_user_parsed() {
         let json = r#"{
             "number": 10,
+            "title": "Fix something",
+            "body": "Description here",
+            "draft": false,
             "state": "closed",
             "merged": true,
             "user": {"login": "copilot-swe-agent[bot]", "type": "Bot"}
@@ -241,6 +247,9 @@ state_file = ".docs-state.json"
         let user = pr.user.unwrap();
         assert_eq!(user.login, "copilot-swe-agent[bot]");
         assert_eq!(user.user_type.as_deref(), Some("Bot"));
+        assert_eq!(pr.title.as_deref(), Some("Fix something"));
+        assert_eq!(pr.body.as_deref(), Some("Description here"));
+        assert_eq!(pr.draft, Some(false));
     }
 
     #[test]
