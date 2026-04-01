@@ -163,7 +163,7 @@ export default function Plan() {
                 <div className="task-item-header">
                   <span className="task-id">{task.id}</span>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {task.phase != null && (
+                    {task.phase !== undefined && (
                       <span className="task-meta">phase {task.phase}</span>
                     )}
                     <button

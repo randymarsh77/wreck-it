@@ -880,7 +880,12 @@ async fn generate_plan(mut req: Request, ctx: RouteContext<()>) -> Result<Respon
             let naming_prompt = build_naming_prompt(&goal);
             match call_models_api(&api_token, &naming_prompt, PLAN_MODEL).await {
                 Ok(raw_name) => slugify_plan_name(&raw_name),
-                Err(_) => slugify_plan_name(&goal),
+                Err(e) => {
+                    console_log!(
+                        "[wreck-it][portal] LLM naming failed, falling back to goal slug: {e}"
+                    );
+                    slugify_plan_name(&goal)
+                }
             }
         }
     };
