@@ -357,6 +357,12 @@ ul {
   margin-bottom: 20px;
 }
 
+.mode-switcher {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
 .config-editor {
   width: 100%;
   min-height: 300px;
@@ -375,6 +381,199 @@ ul {
 .config-editor:focus {
   outline: none;
   border-color: var(--primary);
+}
+
+/* ── GUI mode ─────────────────────────────────────────── */
+.gui-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.gui-section h3 {
+  font-size: 1rem;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+.ralph-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.ralph-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.ralph-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ralph-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.ralph-status-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--success);
+  font-weight: 500;
+}
+
+.ralph-card-body {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ralph-field {
+  display: flex;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.ralph-field-label {
+  color: var(--text-muted);
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.ralph-field-value {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+
+.ralph-card-actions {
+  padding: 8px 16px 12px;
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Deploy actions ───────────────────────────────────── */
+.deploy-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Template cards ───────────────────────────────────── */
+.template-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.template-card {
+  padding: 16px;
+}
+
+.template-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.template-header h4 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.template-desc {
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+}
+
+.template-ralphs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.template-ralph-item {
+  display: flex;
+  gap: 8px;
+  font-size: 0.85rem;
+  align-items: baseline;
+}
+
+.template-ralph-name {
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+/* ── Custom ralph form ────────────────────────────────── */
+.custom-ralph-form {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.form-field label {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.form-input {
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.form-textarea {
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  resize: vertical;
+}
+
+.form-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* ── Danger button ────────────────────────────────────── */
+.btn-danger {
+  color: var(--error);
+  border-color: var(--error);
+  background: transparent;
+}
+.btn-danger:hover {
+  background: rgba(248, 81, 73, 0.1);
 }
 
 /* ── Hamburger menu toggle (hidden on desktop) ───────── */
@@ -548,5 +747,26 @@ ul {
 
   .pagination-info {
     font-size: 0.8rem;
+  }
+
+  .ralph-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .deploy-actions {
+    flex-direction: column;
+  }
+
+  .deploy-actions .btn {
+    width: 100%;
+  }
+
+  .template-ralph-item {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .template-ralph-name {
+    min-width: unset;
   }
 }
