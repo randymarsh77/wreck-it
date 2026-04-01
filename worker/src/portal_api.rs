@@ -804,11 +804,6 @@ async fn resolve_ralph_paths(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let state_root = config
-        .get("state_root")
-        .and_then(|v| v.as_str())
-        .unwrap_or(".wreck-it")
-        .to_string();
 
     // Find the ralph entry.
     let ralphs = config
@@ -837,7 +832,12 @@ async fn resolve_ralph_paths(
         None => task_file.to_string(),
     };
 
-    let state_path = format!("{state_root}/{state_file}");
+    // State files live at the root of the state branch (matching the CLI
+    // headless runner which uses `state_dir.join(state_file)` where state_dir
+    // is the worktree root).  Do NOT prefix with state_root — that directory
+    // is for config on the main branch, not for locating files on the state
+    // branch.
+    let state_path = state_file.to_string();
 
     Ok(ResolvedRalphPaths {
         task_path,
@@ -1476,12 +1476,12 @@ mod tests {
         let paths = ResolvedRalphPaths {
             task_path: "tasks/docs-tasks.json".to_string(),
             task_branch: "master".to_string(),
-            state_path: ".wreck-it/.docs-state.json".to_string(),
+            state_path: ".docs-state.json".to_string(),
             state_branch: "wreck-it-state".to_string(),
         };
         assert_eq!(paths.task_path, "tasks/docs-tasks.json");
         assert_eq!(paths.task_branch, "master");
-        assert_eq!(paths.state_path, ".wreck-it/.docs-state.json");
+        assert_eq!(paths.state_path, ".docs-state.json");
         assert_eq!(paths.state_branch, "wreck-it-state");
     }
 
@@ -1490,7 +1490,7 @@ mod tests {
         let paths = ResolvedRalphPaths {
             task_path: "docs-tasks.json".to_string(),
             task_branch: "wreck-it-state".to_string(),
-            state_path: ".wreck-it/.docs-state.json".to_string(),
+            state_path: ".docs-state.json".to_string(),
             state_branch: "wreck-it-state".to_string(),
         };
         assert_eq!(paths.task_path, "docs-tasks.json");
@@ -1498,12 +1498,12 @@ mod tests {
     }
 
     /// Verify resolve logic inline: when tasks_dir is set, task_file gets
-    /// prefixed; state_file always gets state_root prefix.
+    /// prefixed; state_file is used as-is (state files live at the root of
+    /// the state branch).
     #[test]
     fn test_path_resolution_logic() {
         // Simulate the resolve logic from resolve_ralph_paths.
         let tasks_dir = Some("tasks".to_string());
-        let state_root = ".wreck-it".to_string();
         let task_file = "docs-tasks.json";
         let state_file = ".docs-state.json";
 
@@ -1511,10 +1511,10 @@ mod tests {
             Some(dir) => format!("{dir}/{task_file}"),
             None => task_file.to_string(),
         };
-        let state_path = format!("{state_root}/{state_file}");
+        let state_path = state_file.to_string();
 
         assert_eq!(task_path, "tasks/docs-tasks.json");
-        assert_eq!(state_path, ".wreck-it/.docs-state.json");
+        assert_eq!(state_path, ".docs-state.json");
     }
 
     /// When tasks_dir is None, task_file is used as-is.
