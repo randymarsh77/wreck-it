@@ -1,0 +1,11 @@
+[
+  {
+    "id": "project-status-report",
+    "description": "Generate a periodic project status report. Analyze recent commits, open pull requests, open issues, and project milestones to produce a concise summary of project health and activity. Include sections for: recent changes (notable commits and merged PRs), open work (active PRs and their status), outstanding issues (grouped by priority or label), and actionable recommendations. Write the report as a markdown file in the project documentation, replacing the previous report.",
+    "status": "pending",
+    "role": "evaluator",
+    "kind": "recurring",
+    "cooldown_seconds": 604800,
+    "precondition_prompt": "Check if there has been meaningful project activity since the last status report. Look for new commits, merged PRs, opened or closed issues, or other significant changes. Return true if there is enough activity to warrant a new report, false if the project has been idle."
+  }
+]

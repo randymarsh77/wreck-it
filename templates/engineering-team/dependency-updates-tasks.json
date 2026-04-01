@@ -1,0 +1,11 @@
+[
+  {
+    "id": "dependency-updates",
+    "description": "Review project dependencies for available updates and security vulnerabilities. Check for outdated packages using the project's package manager (e.g. cargo outdated, npm outdated, pip list --outdated). Identify and prioritize security patches and critical updates. For each update, assess breaking change risk by reviewing changelogs and migration guides. Apply safe updates (patch and minor versions with no breaking changes) one at a time, verifying the project builds and tests pass after each change.",
+    "status": "pending",
+    "role": "evaluator",
+    "kind": "recurring",
+    "cooldown_seconds": 604800,
+    "precondition_prompt": "Check if any project dependencies have available updates, especially security patches. Run the appropriate package manager command to list outdated dependencies. Return true if there are updates available, false if all dependencies are already at their latest compatible versions."
+  }
+]

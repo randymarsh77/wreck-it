@@ -1,0 +1,11 @@
+[
+  {
+    "id": "test-coverage-review",
+    "description": "Analyze test coverage across the project. Identify modules, functions, and code paths that lack adequate test coverage. Prioritize areas with complex logic, recent changes, or critical functionality. Write focused tests for the highest-priority uncovered areas, ensuring they follow existing test conventions and patterns. Each iteration should target one specific area and produce a small, well-scoped set of tests.",
+    "status": "pending",
+    "role": "evaluator",
+    "kind": "recurring",
+    "cooldown_seconds": 172800,
+    "precondition_prompt": "Check the test suite and codebase to determine if there are meaningful gaps in test coverage. Look for modules with no tests, recently changed code without corresponding test updates, or critical paths that lack edge-case coverage. Return true if there are concrete coverage improvements to make, false if coverage is already comprehensive."
+  }
+]
