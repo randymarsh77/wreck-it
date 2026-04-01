@@ -81,8 +81,9 @@ export default function RepoConfig() {
         const parsed = JSON.parse(draft) as RalphConfig
         setConfig(parsed)
         setParseError(null)
-      } catch {
-        setParseError('Fix JSON errors before switching to GUI mode')
+      } catch (e: unknown) {
+        const detail = e instanceof SyntaxError ? e.message : 'unknown error'
+        setParseError(`Fix JSON errors before switching to GUI mode: ${detail}`)
         return
       }
     } else if (newMode === 'json' && mode === 'gui' && config) {
@@ -293,7 +294,7 @@ function GuiMode({
       const tasks = customPrompt.trim()
         ? [
             {
-              id: `${customName}-task`,
+              id: `${customName}-task-${Date.now()}`,
               description: customPrompt.trim(),
               status: 'pending',
               role: 'implementer',

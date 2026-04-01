@@ -453,8 +453,8 @@ async fn get_installation_token(
 // ---------------------------------------------------------------------------
 
 /// Known ralph templates — matches the `templates/engineering-team` directory
-/// in the repository.  This is a static list embedded in the worker so that
-/// the frontend can offer "deploy from template" without a GitHub API call.
+/// in the wreck-it repository.  This is a static list embedded in the worker
+/// so the frontend can offer "deploy from template" without a GitHub API call.
 fn get_ralph_templates() -> serde_json::Value {
     serde_json::json!([
         {

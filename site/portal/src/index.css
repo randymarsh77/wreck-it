@@ -452,7 +452,7 @@ ul {
   font-family: var(--font-mono);
   font-size: 0.8rem;
   color: var(--text);
-  word-break: break-all;
+  overflow-wrap: break-word;
 }
 
 .ralph-card-actions {
