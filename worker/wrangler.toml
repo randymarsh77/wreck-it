@@ -28,6 +28,18 @@ id = "REPLACE_WITH_KV_NAMESPACE_ID"
 [observability]
 enabled = true
 
+# Durable Object binding for stateful ralph agents.
+# Each ralph context runs as an isolated Durable Object instance with
+# co-located SQLite storage, WebSocket support, and alarm scheduling.
+[durable_objects]
+bindings = [
+  { name = "RALPH_AGENT", class_name = "RalphAgent" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RalphAgent"]
+
 # Pulse trigger — cron schedule for injecting entropy.
 # Fires every 30 minutes to process registered repositories.
 # Tasks with expired cooldowns will be picked up even without webhook events.

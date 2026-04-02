@@ -28,6 +28,12 @@
 //! | `GET`     | `/api/portal/repos/:owner/:repo/ralphs/:name/state`   | Read ralph state from repo        |
 //! | `PUT`     | `/api/portal/repos/:owner/:repo/ralphs/:name/state`   | Write ralph state to repo         |
 //! | `POST`    | `/api/portal/repos/:owner/:repo/ralphs/plan`          | Generate a task plan from a goal  |
+//! | `GET`     | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/state`     | Get agent DO state       |
+//! | `POST`    | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/run`       | Trigger agent iteration  |
+//! | `POST`    | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/pause`     | Pause agent execution    |
+//! | `POST`    | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/resume`    | Resume agent execution   |
+//! | `POST`    | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/migrate`   | Seed agent from KV/file  |
+//! | `GET`     | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/websocket` | WebSocket for live state |
 //!
 //! ## Required secrets
 //!
@@ -61,12 +67,15 @@ fn portal_session_key(hmac_hex: &str) -> String {
 
 /// Add CORS headers to a [`Response`].
 fn cors_headers(mut resp: Response) -> Result<Response> {
-    resp.headers_mut()
-        .set("Access-Control-Allow-Origin", "*")?;
-    resp.headers_mut()
-        .set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")?;
-    resp.headers_mut()
-        .set("Access-Control-Allow-Headers", "Authorization, Content-Type")?;
+    resp.headers_mut().set("Access-Control-Allow-Origin", "*")?;
+    resp.headers_mut().set(
+        "Access-Control-Allow-Methods",
+        "GET, POST, PUT, DELETE, OPTIONS",
+    )?;
+    resp.headers_mut().set(
+        "Access-Control-Allow-Headers",
+        "Authorization, Content-Type",
+    )?;
     Ok(resp)
 }
 
@@ -203,14 +212,10 @@ async fn auth_login(req: Request, ctx: RouteContext<()>) -> Result<Response> {
         .find(|(k, _)| k == "redirect_uri")
         .map(|(_, v)| v.to_string());
 
-    let mut url = format!(
-        "https://github.com/login/oauth/authorize?client_id={client_id}&scope=read:org"
-    );
+    let mut url =
+        format!("https://github.com/login/oauth/authorize?client_id={client_id}&scope=read:org");
     if let Some(ru) = &redirect_uri {
-        url.push_str(&format!(
-            "&redirect_uri={}",
-            urlencoding::encode(ru)
-        ));
+        url.push_str(&format!("&redirect_uri={}", urlencoding::encode(ru)));
     }
 
     let resp = Response::empty()?.with_status(302);
@@ -360,12 +365,9 @@ async fn list_installations(req: Request, ctx: RouteContext<()>) -> Result<Respo
         .await
         .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
 
-    let data = github_api_get(
-        "https://api.github.com/user/installations",
-        &github_token,
-    )
-    .await
-    .map_err(Error::RustError)?;
+    let data = github_api_get("https://api.github.com/user/installations", &github_token)
+        .await
+        .map_err(Error::RustError)?;
 
     // GitHub returns { total_count, installations: [...] } — unwrap to a
     // plain array so the frontend can use it directly.
@@ -383,12 +385,14 @@ async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<
         .await
         .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
 
-    let installation_id = ctx.param("installation_id").ok_or_else(|| {
-        Error::RustError("Missing installation_id parameter".into())
-    })?;
+    let installation_id = ctx
+        .param("installation_id")
+        .ok_or_else(|| Error::RustError("Missing installation_id parameter".into()))?;
 
     // Extract optional pagination query parameters.
-    let req_url = req.url().map_err(|e| Error::RustError(format!("bad url: {e}")))?;
+    let req_url = req
+        .url()
+        .map_err(|e| Error::RustError(format!("bad url: {e}")))?;
     let page = req_url
         .query_pairs()
         .find(|(k, _)| k == "page")
@@ -584,9 +588,10 @@ async fn deploy_ralph(mut req: Request, ctx: RouteContext<()>) -> Result<Respons
         .ok_or_else(|| Error::RustError("Missing repo".into()))?
         .to_string();
 
-    let body: RalphDeployRequest = req.json().await.map_err(|e| {
-        Error::RustError(format!("Invalid deploy request JSON: {e}"))
-    })?;
+    let body: RalphDeployRequest = req
+        .json()
+        .await
+        .map_err(|e| Error::RustError(format!("Invalid deploy request JSON: {e}")))?;
 
     let kv = ctx
         .kv(kv_store::KV_BINDING)
@@ -832,9 +837,7 @@ async fn call_models_api(
         RequestInit::new()
             .with_method(Method::Post)
             .with_headers(headers)
-            .with_body(Some(wasm_bindgen::JsValue::from_str(
-                &body.to_string(),
-            ))),
+            .with_body(Some(wasm_bindgen::JsValue::from_str(&body.to_string()))),
     )
     .map_err(|e| format!("Failed to build models API request: {e}"))?;
 
@@ -908,9 +911,7 @@ async fn list_models(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let status = response.status_code();
     if !(200..300).contains(&status) {
         let err_body = response.text().await.unwrap_or_default();
-        console_log!(
-            "[wreck-it][portal] models list API returned {status}: {err_body}"
-        );
+        console_log!("[wreck-it][portal] models list API returned {status}: {err_body}");
         return json_response(&serde_json::json!({ "models": [] }), 200);
     }
 
@@ -956,9 +957,10 @@ async fn generate_plan(mut req: Request, ctx: RouteContext<()>) -> Result<Respon
         .await
         .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
 
-    let body: PlanRequest = req.json().await.map_err(|e| {
-        Error::RustError(format!("Invalid plan request JSON: {e}"))
-    })?;
+    let body: PlanRequest = req
+        .json()
+        .await
+        .map_err(|e| Error::RustError(format!("Invalid plan request JSON: {e}")))?;
 
     let goal = body.goal.trim().to_string();
     if goal.is_empty() {
@@ -1050,9 +1052,8 @@ async fn get_config(req: Request, ctx: RouteContext<()>) -> Result<Response> {
         .map_err(|e| Error::RustError(format!("installation token failed: {}", e.status_code())))?;
 
     // Read the config file via the GitHub Contents API.
-    let file_url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/contents/.wreck-it/config.toml"
-    );
+    let file_url =
+        format!("https://api.github.com/repos/{owner}/{repo}/contents/.wreck-it/config.toml");
     let file_resp = github_api_get(&file_url, &token).await;
 
     match file_resp {
@@ -1063,13 +1064,11 @@ async fn get_config(req: Request, ctx: RouteContext<()>) -> Result<Response> {
                 .replace('\n', "");
 
             let decoded = base64_decode(&content_b64);
-            let toml_str = String::from_utf8(decoded).map_err(|e| {
-                Error::RustError(format!("Config file is not valid UTF-8: {e}"))
-            })?;
+            let toml_str = String::from_utf8(decoded)
+                .map_err(|e| Error::RustError(format!("Config file is not valid UTF-8: {e}")))?;
 
-            let config: toml::Value = toml::from_str(&toml_str).map_err(|e| {
-                Error::RustError(format!("Failed to parse config TOML: {e}"))
-            })?;
+            let config: toml::Value = toml::from_str(&toml_str)
+                .map_err(|e| Error::RustError(format!("Failed to parse config TOML: {e}")))?;
 
             // Include the file SHA for update operations.
             let mut resp = serde_json::json!(config);
@@ -1103,9 +1102,10 @@ async fn put_config(mut req: Request, ctx: RouteContext<()>) -> Result<Response>
         .ok_or_else(|| Error::RustError("Missing repo".into()))?
         .to_string();
 
-    let body: serde_json::Value = req.json().await.map_err(|e| {
-        Error::RustError(format!("Invalid JSON body: {e}"))
-    })?;
+    let body: serde_json::Value = req
+        .json()
+        .await
+        .map_err(|e| Error::RustError(format!("Invalid JSON body: {e}")))?;
 
     // Extract the optional file SHA for updates (sent by the GET endpoint).
     let file_sha = body
@@ -1119,18 +1119,16 @@ async fn put_config(mut req: Request, ctx: RouteContext<()>) -> Result<Response>
         obj.remove("_sha");
     }
 
-    let toml_str = toml::to_string_pretty(&config).map_err(|e| {
-        Error::RustError(format!("Failed to serialize config to TOML: {e}"))
-    })?;
+    let toml_str = toml::to_string_pretty(&config)
+        .map_err(|e| Error::RustError(format!("Failed to serialize config to TOML: {e}")))?;
 
     let token = get_installation_token(&ctx, &owner, &repo)
         .await
         .map_err(|e| Error::RustError(format!("installation token failed: {}", e.status_code())))?;
 
     // Write the file via the GitHub Contents API.
-    let file_url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/contents/.wreck-it/config.toml"
-    );
+    let file_url =
+        format!("https://api.github.com/repos/{owner}/{repo}/contents/.wreck-it/config.toml");
 
     let encoded_content = base64_encode(toml_str.as_bytes());
 
@@ -1156,9 +1154,7 @@ async fn put_config(mut req: Request, ctx: RouteContext<()>) -> Result<Response>
         RequestInit::new()
             .with_method(Method::Put)
             .with_headers(headers)
-            .with_body(Some(wasm_bindgen::JsValue::from_str(
-                &put_body.to_string(),
-            ))),
+            .with_body(Some(wasm_bindgen::JsValue::from_str(&put_body.to_string()))),
     )?;
 
     let mut put_resp = Fetch::Request(put_req).send().await?;
@@ -1167,10 +1163,7 @@ async fn put_config(mut req: Request, ctx: RouteContext<()>) -> Result<Response>
     if !(200..300).contains(&status) {
         let err_body = put_resp.text().await.unwrap_or_default();
         console_error!("[wreck-it][portal] config write failed ({status}): {err_body}");
-        return error_response(
-            &format!("Failed to write config ({status})"),
-            status,
-        );
+        return error_response(&format!("Failed to write config ({status})"), status);
     }
 
     console_log!("[wreck-it][portal] config updated for {owner}/{repo}");
@@ -1197,9 +1190,8 @@ async fn resolve_ralph_paths(
     repo: &str,
     ralph_name: &str,
 ) -> std::result::Result<ResolvedRalphPaths, Response> {
-    let file_url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/contents/.wreck-it/config.toml"
-    );
+    let file_url =
+        format!("https://api.github.com/repos/{owner}/{repo}/contents/.wreck-it/config.toml");
     let file_data = github_api_get(&file_url, token)
         .await
         .map_err(|e| error_response(&format!("Failed to read config: {e}"), 500).unwrap())?;
@@ -1233,7 +1225,6 @@ async fn resolve_ralph_paths(
         .get("tasks_dir")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-
 
     // Find the ralph entry.
     let ralphs = config
@@ -1287,9 +1278,8 @@ async fn read_repo_file(
     branch: &str,
 ) -> std::result::Result<Option<(String, String)>, Response> {
     let encoded_path = urlencoding::encode(path);
-    let url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}?ref={branch}"
-    );
+    let url =
+        format!("https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}?ref={branch}");
 
     match github_api_get(&url, token).await {
         Ok(data) => {
@@ -1318,9 +1308,7 @@ async fn write_repo_file(
     message: &str,
 ) -> std::result::Result<String, Response> {
     let encoded_path = urlencoding::encode(path);
-    let url = format!(
-        "https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}"
-    );
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}");
 
     let encoded_content = base64_encode(content.as_bytes());
 
@@ -1347,9 +1335,7 @@ async fn write_repo_file(
         RequestInit::new()
             .with_method(Method::Put)
             .with_headers(headers)
-            .with_body(Some(wasm_bindgen::JsValue::from_str(
-                &body.to_string(),
-            ))),
+            .with_body(Some(wasm_bindgen::JsValue::from_str(&body.to_string()))),
     )
     .map_err(|e| error_response(&format!("Failed to build request: {e}"), 500).unwrap())?;
 
@@ -1362,18 +1348,13 @@ async fn write_repo_file(
     if !(200..300).contains(&status) {
         let err_body = resp.text().await.unwrap_or_default();
         console_error!("[wreck-it][portal] file write failed ({status}): {err_body}");
-        return Err(error_response(
-            &format!("Failed to write file ({status})"),
-            status,
-        )
-        .unwrap());
+        return Err(error_response(&format!("Failed to write file ({status})"), status).unwrap());
     }
 
     // Extract the new SHA from the response.
-    let resp_json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| error_response(&format!("Failed to parse write response: {e}"), 500).unwrap())?;
+    let resp_json: serde_json::Value = resp.json().await.map_err(|e| {
+        error_response(&format!("Failed to parse write response: {e}"), 500).unwrap()
+    })?;
 
     let new_sha = resp_json["content"]["sha"]
         .as_str()
@@ -1413,9 +1394,8 @@ async fn get_ralph_tasks(req: Request, ctx: RouteContext<()>) -> Result<Response
 
     match read_repo_file(&token, &owner, &repo, &paths.task_path, &paths.task_branch).await {
         Ok(Some((content, sha))) => {
-            let tasks: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
-                Error::RustError(format!("Failed to parse task JSON: {e}"))
-            })?;
+            let tasks: serde_json::Value = serde_json::from_str(&content)
+                .map_err(|e| Error::RustError(format!("Failed to parse task JSON: {e}")))?;
             json_response(
                 &serde_json::json!({
                     "tasks": tasks,
@@ -1459,9 +1439,10 @@ async fn put_ralph_tasks(mut req: Request, ctx: RouteContext<()>) -> Result<Resp
         .ok_or_else(|| Error::RustError("Missing name".into()))?
         .to_string();
 
-    let body: serde_json::Value = req.json().await.map_err(|e| {
-        Error::RustError(format!("Invalid JSON body: {e}"))
-    })?;
+    let body: serde_json::Value = req
+        .json()
+        .await
+        .map_err(|e| Error::RustError(format!("Invalid JSON body: {e}")))?;
 
     let tasks = body
         .get("tasks")
@@ -1477,9 +1458,8 @@ async fn put_ralph_tasks(mut req: Request, ctx: RouteContext<()>) -> Result<Resp
         .await
         .map_err(|e| Error::RustError(format!("resolve paths failed: {}", e.status_code())))?;
 
-    let content = serde_json::to_string_pretty(tasks).map_err(|e| {
-        Error::RustError(format!("Failed to serialize tasks: {e}"))
-    })?;
+    let content = serde_json::to_string_pretty(tasks)
+        .map_err(|e| Error::RustError(format!("Failed to serialize tasks: {e}")))?;
 
     let message = format!("Update {} tasks via portal", name);
     match write_repo_file(
@@ -1545,9 +1525,8 @@ async fn get_ralph_state(req: Request, ctx: RouteContext<()>) -> Result<Response
     .await
     {
         Ok(Some((content, sha))) => {
-            let state: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
-                Error::RustError(format!("Failed to parse state JSON: {e}"))
-            })?;
+            let state: serde_json::Value = serde_json::from_str(&content)
+                .map_err(|e| Error::RustError(format!("Failed to parse state JSON: {e}")))?;
             json_response(
                 &serde_json::json!({
                     "state": state,
@@ -1591,9 +1570,10 @@ async fn put_ralph_state(mut req: Request, ctx: RouteContext<()>) -> Result<Resp
         .ok_or_else(|| Error::RustError("Missing name".into()))?
         .to_string();
 
-    let body: serde_json::Value = req.json().await.map_err(|e| {
-        Error::RustError(format!("Invalid JSON body: {e}"))
-    })?;
+    let body: serde_json::Value = req
+        .json()
+        .await
+        .map_err(|e| Error::RustError(format!("Invalid JSON body: {e}")))?;
 
     let state = body
         .get("state")
@@ -1609,9 +1589,8 @@ async fn put_ralph_state(mut req: Request, ctx: RouteContext<()>) -> Result<Resp
         .await
         .map_err(|e| Error::RustError(format!("resolve paths failed: {}", e.status_code())))?;
 
-    let content = serde_json::to_string_pretty(state).map_err(|e| {
-        Error::RustError(format!("Failed to serialize state: {e}"))
-    })?;
+    let content = serde_json::to_string_pretty(state)
+        .map_err(|e| Error::RustError(format!("Failed to serialize state: {e}")))?;
 
     let message = format!("Update {} state via portal", name);
     match write_repo_file(
@@ -1696,6 +1675,141 @@ fn base64_decode(input: &str) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------------------------
+// Durable Object agent proxy handlers
+//
+// These endpoints forward requests to the `RalphAgent` Durable Object
+// identified by the `{owner}/{repo}/ralph/{name}` naming convention.
+// ---------------------------------------------------------------------------
+
+/// Extract `owner`, `repo`, and `name` from route params.
+fn extract_ralph_params(
+    ctx: &RouteContext<()>,
+) -> std::result::Result<(String, String, String), Error> {
+    let owner = ctx
+        .param("owner")
+        .ok_or_else(|| Error::RustError("Missing owner".into()))?
+        .to_string();
+    let repo = ctx
+        .param("repo")
+        .ok_or_else(|| Error::RustError("Missing repo".into()))?
+        .to_string();
+    let name = ctx
+        .param("name")
+        .ok_or_else(|| Error::RustError("Missing name".into()))?
+        .to_string();
+    Ok((owner, repo, name))
+}
+
+/// Get a [`Stub`] for the named ralph agent Durable Object.
+fn get_agent_stub(
+    ctx: &RouteContext<()>,
+    owner: &str,
+    repo: &str,
+    name: &str,
+) -> std::result::Result<durable::Stub, Error> {
+    let namespace = ctx.durable_object("RALPH_AGENT")?;
+    let do_name = crate::durable_object::agent_name(owner, repo, name);
+    let id = namespace.id_from_name(&do_name)?;
+    id.get_stub()
+}
+
+/// `GET /api/portal/repos/:owner/:repo/ralphs/:name/agent/state`
+///
+/// Proxy to `GET /state` on the Durable Object.
+async fn agent_get_state(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let (owner, repo, name) = extract_ralph_params(&ctx)?;
+    let stub = get_agent_stub(&ctx, &owner, &repo, &name)?;
+    let resp = stub.fetch_with_str("https://do/state").await?;
+    cors_headers(resp)
+}
+
+/// `POST /api/portal/repos/:owner/:repo/ralphs/:name/agent/run`
+///
+/// Proxy to `POST /run` on the Durable Object.
+async fn agent_run(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let (owner, repo, name) = extract_ralph_params(&ctx)?;
+    let stub = get_agent_stub(&ctx, &owner, &repo, &name)?;
+    let do_req = Request::new("https://do/run", Method::Post)?;
+    let resp = stub.fetch_with_request(do_req).await?;
+    cors_headers(resp)
+}
+
+/// `POST /api/portal/repos/:owner/:repo/ralphs/:name/agent/pause`
+///
+/// Proxy to `POST /pause` on the Durable Object.
+async fn agent_pause(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let (owner, repo, name) = extract_ralph_params(&ctx)?;
+    let stub = get_agent_stub(&ctx, &owner, &repo, &name)?;
+    let do_req = Request::new("https://do/pause", Method::Post)?;
+    let resp = stub.fetch_with_request(do_req).await?;
+    cors_headers(resp)
+}
+
+/// `POST /api/portal/repos/:owner/:repo/ralphs/:name/agent/resume`
+///
+/// Proxy to `POST /resume` on the Durable Object.
+async fn agent_resume(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let (owner, repo, name) = extract_ralph_params(&ctx)?;
+    let stub = get_agent_stub(&ctx, &owner, &repo, &name)?;
+    let do_req = Request::new("https://do/resume", Method::Post)?;
+    let resp = stub.fetch_with_request(do_req).await?;
+    cors_headers(resp)
+}
+
+/// `POST /api/portal/repos/:owner/:repo/ralphs/:name/agent/migrate`
+///
+/// Reads current task + state data from KV / GitHub and seeds the Durable
+/// Object.  Proxy to `POST /migrate` on the DO.
+async fn agent_migrate(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let (owner, repo, name) = extract_ralph_params(&ctx)?;
+    let stub = get_agent_stub(&ctx, &owner, &repo, &name)?;
+
+    // The caller may send the full RalphState body directly.  Forward it.
+    let body = req.text().await?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post);
+    init.with_body(Some(wasm_bindgen::JsValue::from_str(&body)));
+    let do_req = Request::new_with_init("https://do/migrate", &init)?;
+    let resp = stub.fetch_with_request(do_req).await?;
+    cors_headers(resp)
+}
+
+/// `GET /api/portal/repos/:owner/:repo/ralphs/:name/agent/websocket`
+///
+/// Proxy to `GET /websocket` on the Durable Object.
+async fn agent_websocket(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let (owner, repo, name) = extract_ralph_params(&ctx)?;
+    let stub = get_agent_stub(&ctx, &owner, &repo, &name)?;
+
+    let do_req = Request::new("https://do/websocket", Method::Get)?;
+    stub.fetch_with_request(do_req).await
+}
+
+// ---------------------------------------------------------------------------
 // Router registration
 // ---------------------------------------------------------------------------
 
@@ -1745,18 +1859,9 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         // Template & ralph deploy endpoints
         .get_async("/api/portal/templates", list_templates)
         .get_async("/api/portal/ralphs", list_individual_ralphs)
-        .post_async(
-            "/api/portal/repos/:owner/:repo/ralphs/deploy",
-            deploy_ralph,
-        )
-        .post_async(
-            "/api/portal/repos/:owner/:repo/ralphs/plan",
-            generate_plan,
-        )
-        .get_async(
-            "/api/portal/repos/:owner/:repo/models",
-            list_models,
-        )
+        .post_async("/api/portal/repos/:owner/:repo/ralphs/deploy", deploy_ralph)
+        .post_async("/api/portal/repos/:owner/:repo/ralphs/plan", generate_plan)
+        .get_async("/api/portal/repos/:owner/:repo/models", list_models)
         // Ralph task & state endpoints
         .get_async(
             "/api/portal/repos/:owner/:repo/ralphs/:name/tasks",
@@ -1773,6 +1878,55 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .put_async(
             "/api/portal/repos/:owner/:repo/ralphs/:name/state",
             put_ralph_state,
+        )
+        // Durable Object agent endpoints
+        .options_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/state",
+            options_handler,
+        )
+        .options_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/run",
+            options_handler,
+        )
+        .options_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/pause",
+            options_handler,
+        )
+        .options_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/resume",
+            options_handler,
+        )
+        .options_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/migrate",
+            options_handler,
+        )
+        .options_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/websocket",
+            options_handler,
+        )
+        .get_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/state",
+            agent_get_state,
+        )
+        .post_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/run",
+            agent_run,
+        )
+        .post_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/pause",
+            agent_pause,
+        )
+        .post_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/resume",
+            agent_resume,
+        )
+        .post_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/migrate",
+            agent_migrate,
+        )
+        .get_async(
+            "/api/portal/repos/:owner/:repo/ralphs/:name/agent/websocket",
+            agent_websocket,
         )
 }
 
@@ -1862,10 +2016,7 @@ mod tests {
         assert!(eng_team.is_some(), "engineering-team template must exist");
 
         let ralphs = eng_team.unwrap()["ralphs"].as_array().unwrap();
-        let names: Vec<&str> = ralphs
-            .iter()
-            .map(|r| r["name"].as_str().unwrap())
-            .collect();
+        let names: Vec<&str> = ralphs.iter().map(|r| r["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"docs"));
         assert!(names.contains(&"features"));
         assert!(names.contains(&"planner"));
@@ -2007,10 +2158,7 @@ mod tests {
 
     #[test]
     fn test_slugify_plan_name_with_special_chars() {
-        assert_eq!(
-            slugify_plan_name("hello_world! (test)"),
-            "hello-world-test"
-        );
+        assert_eq!(slugify_plan_name("hello_world! (test)"), "hello-world-test");
     }
 
     #[test]
@@ -2028,10 +2176,7 @@ mod tests {
 
     #[test]
     fn test_slugify_plan_name_takes_first_line() {
-        assert_eq!(
-            slugify_plan_name("my-plan\nextra commentary"),
-            "my-plan"
-        );
+        assert_eq!(slugify_plan_name("my-plan\nextra commentary"), "my-plan");
     }
 
     #[test]

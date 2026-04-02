@@ -39,6 +39,7 @@
 //! - `GITHUB_APP_PRIVATE_KEY` — PEM-encoded RSA private key.
 
 mod api;
+mod durable_object;
 mod github;
 mod github_app;
 mod kv_store;
@@ -47,6 +48,8 @@ mod processor;
 mod pulse;
 mod types;
 mod webhook;
+
+pub use durable_object::RalphAgent;
 
 use webhook::{verify_signature, WebhookEvent};
 use worker::*;
