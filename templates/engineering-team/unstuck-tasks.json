@@ -1,0 +1,11 @@
+[
+  {
+    "id": "unstuck-prs",
+    "description": "Monitor open PRs for failing CI checks. When a workflow run fails on a PR, comment @copilot to request a fix. This task is handled automatically by the webhook handler when workflow_run events arrive — no manual iteration is needed.",
+    "status": "pending",
+    "role": "evaluator",
+    "kind": "recurring",
+    "cooldown_seconds": 3600,
+    "precondition_prompt": "Check if any open PRs have failing CI checks that need attention. Return true if there are PRs with failures that have not been commented on recently."
+  }
+]

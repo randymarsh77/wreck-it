@@ -45,6 +45,8 @@ pub enum WebhookEvent {
     Push,
     /// Pull request created, closed, merged, etc.
     PullRequest,
+    /// A workflow run has completed (or changed status).
+    WorkflowRun,
     /// An event type we do not handle.
     Other(String),
 }
@@ -56,6 +58,7 @@ impl WebhookEvent {
             "issues" => Self::Issues,
             "push" => Self::Push,
             "pull_request" => Self::PullRequest,
+            "workflow_run" => Self::WorkflowRun,
             other => Self::Other(other.to_string()),
         }
     }
@@ -96,6 +99,10 @@ mod tests {
         assert_eq!(
             WebhookEvent::from_header("pull_request"),
             WebhookEvent::PullRequest
+        );
+        assert_eq!(
+            WebhookEvent::from_header("workflow_run"),
+            WebhookEvent::WorkflowRun
         );
         assert_eq!(
             WebhookEvent::from_header("ping"),
