@@ -46,10 +46,12 @@ mod kv_store;
 mod portal_api;
 mod processor;
 mod pulse;
+mod scheduler;
 mod types;
 mod webhook;
 
 pub use durable_object::RalphAgent;
+pub use scheduler::SchedulerAgent;
 
 use webhook::{verify_signature, WebhookEvent};
 use worker::*;
@@ -259,6 +261,28 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
     let owner = &repo.owner.login;
     let repo_name = &repo.name;
     let default_branch = repo.default_branch.as_deref().unwrap_or("main");
+
+    // Check installation-level events_enabled setting.  When disabled, all
+    // webhook processing is short-circuited for this installation.
+    if let Some(installation) = &payload.installation {
+        if let Ok(kv) = env.kv(kv_store::KV_BINDING) {
+            match kv_store::load_installation_settings(&kv, installation.id).await {
+                Ok(settings) if !settings.events_enabled => {
+                    console_log!(
+                        "[wreck-it] events disabled for installation {} — ignoring",
+                        installation.id,
+                    );
+                    return Response::ok("events disabled for this installation");
+                }
+                Err(e) => {
+                    console_warn!(
+                        "[wreck-it] failed to load installation settings: {e} — proceeding",
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
 
     // Resolve the GitHub API token.
     //

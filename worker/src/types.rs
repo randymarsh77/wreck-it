@@ -34,6 +34,55 @@ pub struct PulseRegistration {
 }
 
 // ---------------------------------------------------------------------------
+// Installation settings
+// ---------------------------------------------------------------------------
+
+/// Per-installation settings stored in KV.
+///
+/// These settings control installation-wide behaviour such as scheduled
+/// pulse execution and event processing.  They are managed via the portal
+/// UI and persisted in KV under `_installation/{id}/settings`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct InstallationSettings {
+    /// Cron expression for the recurring pulse schedule (e.g. `"*/30 * * * *"`).
+    ///
+    /// When set, a `SchedulerAgent` Durable Object schedules alarms at
+    /// this cadence to pulse Ralph iterations across all repos in the
+    /// installation.
+    #[serde(default = "default_pulse_cron")]
+    pub pulse_cron: String,
+
+    /// Whether the scheduled pulse is enabled.  When `false`, the scheduler
+    /// alarm still exists but skips processing.
+    #[serde(default = "default_true")]
+    pub pulse_enabled: bool,
+
+    /// Whether webhook-driven events and triggers are enabled for this
+    /// installation.  When `false`, all incoming webhook events are
+    /// short-circuited with a `200 OK` response without any processing.
+    #[serde(default = "default_true")]
+    pub events_enabled: bool,
+}
+
+fn default_pulse_cron() -> String {
+    "*/30 * * * *".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for InstallationSettings {
+    fn default() -> Self {
+        Self {
+            pulse_cron: default_pulse_cron(),
+            pulse_enabled: true,
+            events_enabled: true,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Durable Object agent state types
 // ---------------------------------------------------------------------------
 
@@ -490,5 +539,45 @@ state_file = ".docs-state.json"
         assert_eq!(json, r#""running""#);
         let loaded: ExecutionStatus = serde_json::from_str(r#""paused""#).unwrap();
         assert_eq!(loaded, ExecutionStatus::Paused);
+    }
+
+    #[test]
+    fn installation_settings_default() {
+        let settings = InstallationSettings::default();
+        assert_eq!(settings.pulse_cron, "*/30 * * * *");
+        assert!(settings.pulse_enabled);
+        assert!(settings.events_enabled);
+    }
+
+    #[test]
+    fn installation_settings_roundtrip() {
+        let settings = InstallationSettings {
+            pulse_cron: "*/15 * * * *".into(),
+            pulse_enabled: false,
+            events_enabled: true,
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let loaded: InstallationSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.pulse_cron, "*/15 * * * *");
+        assert!(!loaded.pulse_enabled);
+        assert!(loaded.events_enabled);
+    }
+
+    #[test]
+    fn installation_settings_deserialize_defaults() {
+        let json = r#"{}"#;
+        let settings: InstallationSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.pulse_cron, "*/30 * * * *");
+        assert!(settings.pulse_enabled);
+        assert!(settings.events_enabled);
+    }
+
+    #[test]
+    fn installation_settings_partial_deserialize() {
+        let json = r#"{"events_enabled": false}"#;
+        let settings: InstallationSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.pulse_cron, "*/30 * * * *");
+        assert!(settings.pulse_enabled);
+        assert!(!settings.events_enabled);
     }
 }

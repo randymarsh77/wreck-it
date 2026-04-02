@@ -1,7 +1,12 @@
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { getInstallations, getInstallationRepos } from '../api/client'
-import type { Installation, Repository } from '../api/client'
+import {
+  getInstallations,
+  getInstallationRepos,
+  getInstallationSettings,
+  updateInstallationSettings,
+} from '../api/client'
+import type { Installation, Repository, InstallationSettings } from '../api/client'
 
 const DISPLAY_PER_PAGE = 30
 
@@ -11,12 +16,20 @@ interface RepoState {
   loading: boolean
 }
 
+interface SettingsState {
+  settings: InstallationSettings | null
+  loading: boolean
+  saving: boolean
+  error: string | null
+}
+
 export default function Installations() {
   const [installations, setInstallations] = useState<Installation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
   const [repoState, setRepoState] = useState<Record<number, RepoState>>({})
+  const [settingsState, setSettingsState] = useState<Record<number, SettingsState>>({})
   const [filter, setFilter] = useState('')
   const [displayPage, setDisplayPage] = useState(1)
 
@@ -65,6 +78,31 @@ export default function Installations() {
     }
   }, [])
 
+  const fetchSettings = useCallback(async (installationId: number) => {
+    setSettingsState((prev) => ({
+      ...prev,
+      [installationId]: { settings: null, loading: true, saving: false, error: null },
+    }))
+
+    try {
+      const settings = await getInstallationSettings(installationId)
+      setSettingsState((prev) => ({
+        ...prev,
+        [installationId]: { settings, loading: false, saving: false, error: null },
+      }))
+    } catch (err: unknown) {
+      setSettingsState((prev) => ({
+        ...prev,
+        [installationId]: {
+          settings: null,
+          loading: false,
+          saving: false,
+          error: err instanceof Error ? err.message : 'Failed to load settings',
+        },
+      }))
+    }
+  }, [])
+
   function toggleExpand(id: number) {
     if (expanded === id) {
       setExpanded(null)
@@ -75,6 +113,41 @@ export default function Installations() {
     setDisplayPage(1)
     if (!repoState[id]) {
       void fetchAllRepos(id)
+    }
+    if (!settingsState[id]) {
+      void fetchSettings(id)
+    }
+  }
+
+  async function handleSettingsUpdate(
+    installationId: number,
+    updates: Partial<InstallationSettings>,
+  ) {
+    const current = settingsState[installationId]?.settings
+    if (!current) return
+
+    const newSettings: InstallationSettings = { ...current, ...updates }
+
+    setSettingsState((prev) => ({
+      ...prev,
+      [installationId]: { ...prev[installationId], saving: true, error: null },
+    }))
+
+    try {
+      const saved = await updateInstallationSettings(installationId, newSettings)
+      setSettingsState((prev) => ({
+        ...prev,
+        [installationId]: { settings: saved, loading: false, saving: false, error: null },
+      }))
+    } catch (err: unknown) {
+      setSettingsState((prev) => ({
+        ...prev,
+        [installationId]: {
+          ...prev[installationId],
+          saving: false,
+          error: err instanceof Error ? err.message : 'Failed to save settings',
+        },
+      }))
     }
   }
 
@@ -110,6 +183,7 @@ export default function Installations() {
         <ul className="install-list">
           {installations.map((inst) => {
             const state = repoState[inst.id]
+            const sState = settingsState[inst.id]
             return (
               <li key={inst.id} className="card install-card">
                 <button className="install-header" onClick={() => toggleExpand(inst.id)}>
@@ -126,6 +200,10 @@ export default function Installations() {
                 </button>
                 {expanded === inst.id && (
                   <div className="install-repos">
+                    <InstallationSettingsPanel
+                      state={sState ?? null}
+                      onUpdate={(updates) => handleSettingsUpdate(inst.id, updates)}
+                    />
                     {state && !state.loading && state.repos.length > 0 && (
                       <input
                         type="text"
@@ -189,6 +267,103 @@ export default function Installations() {
           })}
         </ul>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Installation settings sub-component
+// ---------------------------------------------------------------------------
+
+interface SettingsPanelProps {
+  state: SettingsState | null
+  onUpdate: (updates: Partial<InstallationSettings>) => void
+}
+
+function InstallationSettingsPanel({ state, onUpdate }: SettingsPanelProps) {
+  const currentCron = state?.settings?.pulse_cron ?? '*/30 * * * *'
+  const [cronDraft, setCronDraft] = useState(currentCron)
+  const [cronDirty, setCronDirty] = useState(false)
+
+  // Reset cronDraft when the settings cron changes externally (e.g. after
+  // save round-trip).  Using a ref to track the previous cron avoids
+  // calling setState inside an effect.
+  const prevCronRef = useRef(currentCron)
+  if (prevCronRef.current !== currentCron) {
+    prevCronRef.current = currentCron
+    if (!cronDirty) {
+      setCronDraft(currentCron)
+    }
+  }
+
+  if (!state || state.loading) {
+    return <div className="settings-panel muted">Loading settings…</div>
+  }
+
+  if (state.error && !state.settings) {
+    return <div className="settings-panel error-text">{state.error}</div>
+  }
+
+  const settings = state.settings
+  if (!settings) return null
+
+  return (
+    <div className="settings-panel card" style={{ marginBottom: '1rem', padding: '0.75rem' }}>
+      <h4 style={{ margin: '0 0 0.5rem 0' }}>Installation Settings</h4>
+
+      {state.error && <div className="error-text" style={{ marginBottom: '0.5rem' }}>{state.error}</div>}
+
+      <div className="settings-row" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={settings.events_enabled}
+            disabled={state.saving}
+            onChange={(e) => onUpdate({ events_enabled: e.target.checked })}
+          />
+          Events &amp; triggers enabled
+        </label>
+      </div>
+
+      <div className="settings-row" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={settings.pulse_enabled}
+            disabled={state.saving}
+            onChange={(e) => onUpdate({ pulse_enabled: e.target.checked })}
+          />
+          Scheduled pulse enabled
+        </label>
+      </div>
+
+      <div className="settings-row" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <label style={{ whiteSpace: 'nowrap' }}>Pulse schedule (cron):</label>
+        <input
+          type="text"
+          value={cronDraft}
+          disabled={state.saving || !settings.pulse_enabled}
+          onChange={(e) => {
+            setCronDraft(e.target.value)
+            setCronDirty(e.target.value !== settings.pulse_cron)
+          }}
+          style={{ flex: 1, minWidth: '10rem' }}
+        />
+        {cronDirty && (
+          <button
+            className="btn btn-sm"
+            disabled={state.saving}
+            onClick={() => {
+              onUpdate({ pulse_cron: cronDraft })
+              setCronDirty(false)
+            }}
+          >
+            Apply
+          </button>
+        )}
+      </div>
+
+      {state.saving && <p className="muted" style={{ marginTop: '0.5rem' }}>Saving…</p>}
     </div>
   )
 }

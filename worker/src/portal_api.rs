@@ -21,6 +21,8 @@
 //! | `GET`     | `/api/portal/auth/user`                               | Get authenticated user info       |
 //! | `GET`     | `/api/portal/installations`                           | List user's app installations     |
 //! | `GET`     | `/api/portal/installations/:installation_id/repos`    | List repos for an installation    |
+//! | `GET`     | `/api/portal/installations/:installation_id/settings` | Get installation settings         |
+//! | `PUT`     | `/api/portal/installations/:installation_id/settings` | Update installation settings      |
 //! | `GET`     | `/api/portal/repos/:owner/:repo/config`               | Read repo config (TOML → JSON)    |
 //! | `PUT`     | `/api/portal/repos/:owner/:repo/config`               | Write repo config (JSON → TOML)   |
 //! | `GET`     | `/api/portal/repos/:owner/:repo/ralphs/:name/tasks`   | Read ralph tasks from repo        |
@@ -415,6 +417,156 @@ async fn list_installation_repos(req: Request, ctx: RouteContext<()>) -> Result<
     // GitHub returns { total_count, repositories: [...] } — forward the
     // full object so the frontend can use total_count for pagination.
     json_response(&data, 200)
+}
+
+// ---------------------------------------------------------------------------
+// Installation settings endpoints
+// ---------------------------------------------------------------------------
+
+/// `GET /api/portal/installations/:installation_id/settings`
+///
+/// Return per-installation settings (pulse schedule, events toggle).
+/// Returns defaults when no settings have been saved yet.
+async fn get_installation_settings(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let installation_id: u64 = ctx
+        .param("installation_id")
+        .ok_or_else(|| Error::RustError("Missing installation_id parameter".into()))?
+        .parse()
+        .map_err(|_| Error::RustError("Invalid installation_id".into()))?;
+
+    let kv = ctx
+        .kv(kv_store::KV_BINDING)
+        .map_err(|e| Error::RustError(format!("KV binding failed: {e}")))?;
+
+    let settings = kv_store::load_installation_settings(&kv, installation_id)
+        .await
+        .map_err(Error::RustError)?;
+
+    json_response(&settings, 200)
+}
+
+/// `PUT /api/portal/installations/:installation_id/settings`
+///
+/// Update per-installation settings.  Also (re-)configures the
+/// `SchedulerAgent` Durable Object so the alarm interval matches the
+/// new settings.
+async fn put_installation_settings(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let installation_id: u64 = ctx
+        .param("installation_id")
+        .ok_or_else(|| Error::RustError("Missing installation_id parameter".into()))?
+        .parse()
+        .map_err(|_| Error::RustError("Invalid installation_id".into()))?;
+
+    let body = req.text().await?;
+    let settings: crate::types::InstallationSettings = serde_json::from_str(&body)
+        .map_err(|e| Error::RustError(format!("Invalid settings JSON: {e}")))?;
+
+    let kv = ctx
+        .kv(kv_store::KV_BINDING)
+        .map_err(|e| Error::RustError(format!("KV binding failed: {e}")))?;
+
+    kv_store::save_installation_settings(&kv, installation_id, &settings)
+        .await
+        .map_err(Error::RustError)?;
+
+    // Update the SchedulerAgent Durable Object to reflect the new settings.
+    let do_result = sync_scheduler_do(&ctx, installation_id, &settings).await;
+    if let Err(e) = do_result {
+        worker::console_warn!(
+            "[wreck-it][portal] scheduler sync failed for installation {}: {e}",
+            installation_id,
+        );
+    }
+
+    json_response(&settings, 200)
+}
+
+/// Sync the `SchedulerAgent` Durable Object with the current settings.
+///
+/// If `pulse_enabled` is `true`, sends a `/schedule` request to set or
+/// update the alarm interval.  If `false`, sends a `/disable` request to
+/// cancel the alarm.
+async fn sync_scheduler_do(
+    ctx: &RouteContext<()>,
+    installation_id: u64,
+    settings: &crate::types::InstallationSettings,
+) -> std::result::Result<(), String> {
+    let namespace = ctx
+        .durable_object("SCHEDULER_AGENT")
+        .map_err(|e| format!("DO binding failed: {e}"))?;
+    let do_name = crate::scheduler::scheduler_name(installation_id);
+    let id = namespace
+        .id_from_name(&do_name)
+        .map_err(|e| format!("DO id failed: {e}"))?;
+    let stub = id.get_stub().map_err(|e| format!("DO stub failed: {e}"))?;
+
+    if settings.pulse_enabled {
+        // Parse the cron expression into an interval in seconds.
+        let interval_secs = match cron_to_interval_secs(&settings.pulse_cron) {
+            Some(secs) => secs,
+            None => {
+                worker::console_warn!(
+                    "[wreck-it][portal] unsupported cron expression '{}' for installation {} — \
+                     falling back to 30-minute interval",
+                    settings.pulse_cron,
+                    installation_id,
+                );
+                30 * 60
+            }
+        };
+
+        let body = serde_json::json!({
+            "installation_id": installation_id,
+            "interval_secs": interval_secs,
+        });
+        let body_str = serde_json::to_string(&body)
+            .map_err(|e| format!("JSON serialization failed: {e}"))?;
+
+        let mut init = RequestInit::new();
+        init.with_method(Method::Post);
+        init.with_body(Some(wasm_bindgen::JsValue::from_str(&body_str)));
+        let do_req = Request::new_with_init("https://do/schedule", &init)
+            .map_err(|e| format!("DO request failed: {e}"))?;
+        stub.fetch_with_request(do_req)
+            .await
+            .map_err(|e| format!("DO fetch failed: {e}"))?;
+    } else {
+        let do_req = Request::new("https://do/disable", Method::Post)
+            .map_err(|e| format!("DO request failed: {e}"))?;
+        stub.fetch_with_request(do_req)
+            .await
+            .map_err(|e| format!("DO fetch failed: {e}"))?;
+    }
+
+    Ok(())
+}
+
+/// Convert a simple cron expression to an interval in seconds.
+///
+/// Supports the common `*/N * * * *` (every N minutes) pattern.
+/// For other expressions, returns `None`.
+fn cron_to_interval_secs(cron: &str) -> Option<u64> {
+    let parts: Vec<&str> = cron.split_whitespace().collect();
+    if parts.len() != 5 {
+        return None;
+    }
+    let minute_part = parts[0];
+    if let Some(n_str) = minute_part.strip_prefix("*/") {
+        if let Ok(n) = n_str.parse::<u64>() {
+            if n > 0 {
+                return Some(n * 60);
+            }
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -1833,6 +1985,10 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
             "/api/portal/installations/:installation_id/repos",
             options_handler,
         )
+        .options_async(
+            "/api/portal/installations/:installation_id/settings",
+            options_handler,
+        )
         .options_async("/api/portal/repos/:owner/:repo/config", options_handler)
         .options_async("/api/portal/templates", options_handler)
         .options_async("/api/portal/ralphs", options_handler)
@@ -1861,6 +2017,15 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .get_async(
             "/api/portal/installations/:installation_id/repos",
             list_installation_repos,
+        )
+        // Installation settings endpoints
+        .get_async(
+            "/api/portal/installations/:installation_id/settings",
+            get_installation_settings,
+        )
+        .put_async(
+            "/api/portal/installations/:installation_id/settings",
+            put_installation_settings,
         )
         // Config endpoints
         .get_async("/api/portal/repos/:owner/:repo/config", get_config)
@@ -2345,5 +2510,36 @@ mod tests {
         let entry: PlanEntry = serde_json::from_str(json).unwrap();
         assert_eq!(entry.phase, 1);
         assert!(entry.depends_on.is_empty());
+    }
+
+    #[test]
+    fn test_cron_to_interval_secs_every_30() {
+        assert_eq!(cron_to_interval_secs("*/30 * * * *"), Some(1800));
+    }
+
+    #[test]
+    fn test_cron_to_interval_secs_every_15() {
+        assert_eq!(cron_to_interval_secs("*/15 * * * *"), Some(900));
+    }
+
+    #[test]
+    fn test_cron_to_interval_secs_every_1() {
+        assert_eq!(cron_to_interval_secs("*/1 * * * *"), Some(60));
+    }
+
+    #[test]
+    fn test_cron_to_interval_secs_unsupported() {
+        // Fixed minute, not an interval pattern.
+        assert_eq!(cron_to_interval_secs("0 * * * *"), None);
+    }
+
+    #[test]
+    fn test_cron_to_interval_secs_invalid() {
+        assert_eq!(cron_to_interval_secs("not a cron"), None);
+    }
+
+    #[test]
+    fn test_cron_to_interval_secs_zero() {
+        assert_eq!(cron_to_interval_secs("*/0 * * * *"), None);
     }
 }

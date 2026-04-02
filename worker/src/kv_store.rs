@@ -4,7 +4,7 @@
 //! and `{owner}/{repo}/state/{context}` for per-context headless state.
 //! Values are stored as JSON strings.
 
-use crate::types::{HeadlessState, PulseRegistration, Task};
+use crate::types::{HeadlessState, InstallationSettings, PulseRegistration, Task};
 
 /// KV binding name expected in `wrangler.toml`.
 pub const KV_BINDING: &str = "WRECK_IT_STORE";
@@ -117,6 +117,48 @@ pub async fn delete_state(
 }
 
 // ---------------------------------------------------------------------------
+// Installation settings
+// ---------------------------------------------------------------------------
+
+/// Build the KV key for an installation's settings.
+fn installation_settings_key(installation_id: u64) -> String {
+    format!("_installation/{installation_id}/settings")
+}
+
+/// Load per-installation settings from KV.
+///
+/// Returns `InstallationSettings::default()` when no settings have been
+/// saved yet.
+pub async fn load_installation_settings(
+    kv: &worker::kv::KvStore,
+    installation_id: u64,
+) -> Result<InstallationSettings, String> {
+    let key = installation_settings_key(installation_id);
+    match kv.get(&key).text().await {
+        Ok(Some(json)) => serde_json::from_str(&json)
+            .map_err(|e| format!("failed to parse installation settings JSON: {e}")),
+        Ok(None) => Ok(InstallationSettings::default()),
+        Err(e) => Err(format!("KV get failed for {key}: {e}")),
+    }
+}
+
+/// Persist per-installation settings to KV.
+pub async fn save_installation_settings(
+    kv: &worker::kv::KvStore,
+    installation_id: u64,
+    settings: &InstallationSettings,
+) -> Result<(), String> {
+    let key = installation_settings_key(installation_id);
+    let json = serde_json::to_string(settings)
+        .map_err(|e| format!("failed to serialize installation settings: {e}"))?;
+    kv.put(&key, json)
+        .map_err(|e| format!("KV put build failed for {key}: {e}"))?
+        .execute()
+        .await
+        .map_err(|e| format!("KV put execute failed for {key}: {e}"))
+}
+
+// ---------------------------------------------------------------------------
 // Pulse registry
 // ---------------------------------------------------------------------------
 
@@ -214,5 +256,23 @@ mod tests {
     fn pulse_registry_key_is_underscore_prefixed() {
         // The pulse registry key should not collide with repo keys.
         assert!(PULSE_REGISTRY_KEY.starts_with('_'));
+    }
+
+    #[test]
+    fn installation_settings_key_format() {
+        let key = installation_settings_key(42);
+        assert_eq!(key, "_installation/42/settings");
+    }
+
+    #[test]
+    fn installation_settings_key_large_id() {
+        let key = installation_settings_key(123456789);
+        assert_eq!(key, "_installation/123456789/settings");
+    }
+
+    #[test]
+    fn installation_settings_key_is_underscore_prefixed() {
+        let key = installation_settings_key(1);
+        assert!(key.starts_with('_'));
     }
 }
