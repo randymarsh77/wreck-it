@@ -54,6 +54,10 @@ pub use durable_object::RalphAgent;
 use webhook::{verify_signature, WebhookEvent};
 use worker::*;
 
+/// Comment posted by the unstuck ralph when a workflow run fails on a PR.
+const UNSTUCK_COMMENT: &str = "@copilot The CI checks on this PR are failing. \
+    Please investigate the failures and push a fix.";
+
 /// Check whether an issue was opened by a trusted author.
 ///
 /// Delegates to the shared [`wreck_it_core::types::is_trusted_issue_author`]
@@ -235,7 +239,10 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
         WebhookEvent::Other(name) if name == "ping" => {
             return Response::ok("pong");
         }
-        WebhookEvent::Issues | WebhookEvent::Push | WebhookEvent::PullRequest => {
+        WebhookEvent::Issues
+        | WebhookEvent::Push
+        | WebhookEvent::PullRequest
+        | WebhookEvent::WorkflowRun => {
             // These may need further processing — continue below.
         }
         _ => {
@@ -347,6 +354,28 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
                 result,
             );
             result
+        }
+        WebhookEvent::WorkflowRun => {
+            // Process completed workflow runs that have a failure conclusion
+            // and at least one associated pull request.
+            let action = payload.action.as_deref().unwrap_or("");
+            let conclusion = payload
+                .workflow_run
+                .as_ref()
+                .and_then(|wr| wr.conclusion.as_deref())
+                .unwrap_or("");
+            let pr_count = payload
+                .workflow_run
+                .as_ref()
+                .map(|wr| wr.pull_requests.len())
+                .unwrap_or(0);
+            console_log!(
+                "[wreck-it] workflow_run filter: action={} conclusion={} pull_requests={}",
+                action,
+                conclusion,
+                pr_count,
+            );
+            action == "completed" && conclusion == "failure" && pr_count > 0
         }
         _ => false,
     };
@@ -515,6 +544,61 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
                     pr_number, action,
                 ));
             }
+        }
+    }
+
+    // For workflow_run events with a failure conclusion, check if the repo
+    // has an "unstuck" ralph configured and, if so, comment `@copilot` on
+    // each associated PR to request fixes.
+    if event == WebhookEvent::WorkflowRun {
+        if let Some(workflow_run) = &payload.workflow_run {
+            let config_content = config_file
+                .as_ref()
+                .and_then(|f| github::GitHubClient::decode_content(f).ok());
+            let has_unstuck = config_content
+                .as_deref()
+                .and_then(|c| toml::from_str::<types::RepoConfig>(c).ok())
+                .map(|cfg| {
+                    cfg.ralphs
+                        .iter()
+                        .any(|r| r.command.as_deref() == Some("unstuck"))
+                })
+                .unwrap_or(false);
+
+            if !has_unstuck {
+                console_log!(
+                    "[wreck-it] no unstuck ralph configured — ignoring workflow_run failure"
+                );
+                return Response::ok("workflow_run failure ignored: no unstuck ralph configured");
+            }
+
+            let mut commented = 0u32;
+            for wr_pr in &workflow_run.pull_requests {
+                console_log!(
+                    "[wreck-it] workflow_run failure — commenting on PR #{}",
+                    wr_pr.number,
+                );
+                match client
+                    .comment_on_pr(wr_pr.number, UNSTUCK_COMMENT)
+                    .await
+                {
+                    Ok(()) => {
+                        commented += 1;
+                    }
+                    Err(e) => {
+                        console_warn!(
+                            "[wreck-it] failed to comment on PR #{}: {}",
+                            wr_pr.number,
+                            e,
+                        );
+                    }
+                }
+            }
+
+            return Response::ok(format!(
+                "workflow_run failure: commented on {} PR(s)",
+                commented,
+            ));
         }
     }
 

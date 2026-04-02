@@ -533,6 +533,14 @@ fn get_individual_ralphs() -> serde_json::Value {
             "task_file": "reporter-tasks.json",
             "state_file": ".reporter-state.json",
             "description": "Generates periodic project status reports"
+        },
+        {
+            "name": "unstuck",
+            "task_file": "unstuck-tasks.json",
+            "state_file": ".unstuck-state.json",
+            "command": "unstuck",
+            "backend": "copilot_cli",
+            "description": "Monitors PRs for failing CI checks and comments @copilot to request fixes on workflow failures"
         }
     ])
 }
@@ -1827,6 +1835,7 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         )
         .options_async("/api/portal/repos/:owner/:repo/config", options_handler)
         .options_async("/api/portal/templates", options_handler)
+        .options_async("/api/portal/ralphs", options_handler)
         .options_async(
             "/api/portal/repos/:owner/:repo/ralphs/deploy",
             options_handler,

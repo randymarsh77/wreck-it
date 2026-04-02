@@ -120,6 +120,7 @@ pub struct WebhookPayload {
     pub issue: Option<Issue>,
     pub pull_request: Option<PullRequest>,
     pub sender: Option<User>,
+    pub workflow_run: Option<WorkflowRun>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -179,6 +180,26 @@ pub struct PullRequest {
     pub state: String,
     pub merged: Option<bool>,
     pub user: Option<User>,
+}
+
+/// A workflow run as represented in `workflow_run` webhook payloads.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct WorkflowRun {
+    pub id: u64,
+    /// The outcome of the workflow run: `"success"`, `"failure"`,
+    /// `"cancelled"`, `"timed_out"`, etc.
+    pub conclusion: Option<String>,
+    /// Pull requests associated with the head branch of this run.
+    #[serde(default)]
+    pub pull_requests: Vec<WorkflowRunPr>,
+}
+
+/// Minimal pull request reference inside a `workflow_run` payload.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct WorkflowRunPr {
+    pub number: u64,
 }
 
 #[cfg(test)]
@@ -369,6 +390,47 @@ state_file = ".docs-state.json"
         let sender = payload.sender.unwrap();
         assert_eq!(sender.login, "my-app[bot]");
         assert_eq!(sender.user_type.as_deref(), Some("Bot"));
+    }
+
+    #[test]
+    fn webhook_payload_with_workflow_run() {
+        let json = r#"{
+            "action": "completed",
+            "workflow_run": {
+                "id": 999,
+                "conclusion": "failure",
+                "pull_requests": [{"number": 42}, {"number": 7}]
+            },
+            "repository": {"full_name": "o/r", "name": "r", "owner": {"login": "o"}}
+        }"#;
+        let payload: WebhookPayload = serde_json::from_str(json).unwrap();
+        let wr = payload.workflow_run.unwrap();
+        assert_eq!(wr.id, 999);
+        assert_eq!(wr.conclusion.as_deref(), Some("failure"));
+        assert_eq!(wr.pull_requests.len(), 2);
+        assert_eq!(wr.pull_requests[0].number, 42);
+        assert_eq!(wr.pull_requests[1].number, 7);
+    }
+
+    #[test]
+    fn workflow_run_no_prs() {
+        let json = r#"{
+            "id": 100,
+            "conclusion": "success",
+            "pull_requests": []
+        }"#;
+        let wr: WorkflowRun = serde_json::from_str(json).unwrap();
+        assert_eq!(wr.id, 100);
+        assert_eq!(wr.conclusion.as_deref(), Some("success"));
+        assert!(wr.pull_requests.is_empty());
+    }
+
+    #[test]
+    fn workflow_run_missing_prs_defaults_to_empty() {
+        let json = r#"{"id": 100, "conclusion": null}"#;
+        let wr: WorkflowRun = serde_json::from_str(json).unwrap();
+        assert!(wr.pull_requests.is_empty());
+        assert!(wr.conclusion.is_none());
     }
 
     #[test]

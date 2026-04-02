@@ -68,3 +68,10 @@ state_file = ".dependency-updates-state.json"
 name = "reporter"
 task_file = "reporter-tasks.json"
 state_file = ".reporter-state.json"
+
+[[ralphs]]
+name = "unstuck"
+task_file = "unstuck-tasks.json"
+state_file = ".unstuck-state.json"
+command = "unstuck"
+backend = "copilot_cli"
