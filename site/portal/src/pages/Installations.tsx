@@ -201,7 +201,6 @@ export default function Installations() {
                 {expanded === inst.id && (
                   <div className="install-repos">
                     <InstallationSettingsPanel
-                      installationId={inst.id}
                       state={sState ?? null}
                       onUpdate={(updates) => handleSettingsUpdate(inst.id, updates)}
                     />
@@ -277,12 +276,11 @@ export default function Installations() {
 // ---------------------------------------------------------------------------
 
 interface SettingsPanelProps {
-  installationId: number
   state: SettingsState | null
   onUpdate: (updates: Partial<InstallationSettings>) => void
 }
 
-function InstallationSettingsPanel({ installationId, state, onUpdate }: SettingsPanelProps) {
+function InstallationSettingsPanel({ state, onUpdate }: SettingsPanelProps) {
   const currentCron = state?.settings?.pulse_cron ?? '*/30 * * * *'
   const [cronDraft, setCronDraft] = useState(currentCron)
   const [cronDirty, setCronDirty] = useState(false)
@@ -308,11 +306,6 @@ function InstallationSettingsPanel({ installationId, state, onUpdate }: Settings
 
   const settings = state.settings
   if (!settings) return null
-
-  // Suppress unused variable lint — installationId is used for future
-  // extensibility (e.g. unique element IDs) but currently only needed in
-  // the parent's onUpdate callback.
-  void installationId
 
   return (
     <div className="settings-panel card" style={{ marginBottom: '1rem', padding: '0.75rem' }}>

@@ -510,7 +510,18 @@ async fn sync_scheduler_do(
 
     if settings.pulse_enabled {
         // Parse the cron expression into an interval in seconds.
-        let interval_secs = cron_to_interval_secs(&settings.pulse_cron).unwrap_or(30 * 60);
+        let interval_secs = match cron_to_interval_secs(&settings.pulse_cron) {
+            Some(secs) => secs,
+            None => {
+                worker::console_warn!(
+                    "[wreck-it][portal] unsupported cron expression '{}' for installation {} — \
+                     falling back to 30-minute interval",
+                    settings.pulse_cron,
+                    installation_id,
+                );
+                30 * 60
+            }
+        };
 
         let body = serde_json::json!({
             "installation_id": installation_id,
