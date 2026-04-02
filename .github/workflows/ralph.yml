@@ -14,8 +14,17 @@
 #
 # Required secrets:
 #   PAT_TOKEN – Personal Access Token with repo + PR merge permissions
-#               (used to push changes, merge agent PRs, and assign Copilot
-#               to issues via GraphQL)
+#               (used to push the state branch; also used as fallback for
+#               GitHub API calls when the GitHub App is not configured)
+#
+# Optional secrets (GitHub App authentication):
+#   APP_ID          – Numeric GitHub App ID
+#   APP_PRIVATE_KEY – PEM-encoded RSA private key for the GitHub App
+#
+#   When both APP_ID and APP_PRIVATE_KEY are set, all GitHub API actions
+#   (comments, issue creation, PR merges) are performed as the app's bot
+#   user (e.g. wreck-it[bot]) instead of the PAT owner.  This gives the
+#   bot its own identity, avatar, and @-mentionable username.
 name: Ralph
 
 on:
@@ -78,6 +87,8 @@ jobs:
           ./target/release/wreck-it run $ARGS
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_APP_ID: ${{ secrets.APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
           MAX_ITER: ${{ inputs.max_iterations }}
 
       - name: Push state branch

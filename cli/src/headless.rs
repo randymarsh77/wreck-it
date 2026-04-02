@@ -1,5 +1,6 @@
 use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus, PrMergeStatus};
 use crate::error_classifier::{classify_error, ErrorCategory};
+use crate::github_auth;
 use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::headless_state::{
     load_headless_state, save_headless_state, AgentPhase, HeadlessState, TrackedPr,
@@ -379,17 +380,14 @@ pub(crate) async fn advance_tracked_prs(
     _state_dir: &Path,
     task_dir: &Path,
 ) -> Result<bool> {
-    let github_token = config
-        .api_token
-        .clone()
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-        .context("GitHub token required to advance tracked PRs")?;
-
     let (repo_owner, repo_name) = resolve_repo_info(
         headless_cfg.repo_owner.as_deref(),
         headless_cfg.repo_name.as_deref(),
         work_dir,
     )?;
+
+    let github_token =
+        github_auth::resolve_github_api_token(config, &repo_owner, &repo_name).await?;
 
     let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
     client.resolve_authenticated_login().await;
@@ -1193,17 +1191,14 @@ async fn run_needs_trigger(
     state.last_prompt = Some(pending_task.description.clone());
 
     // Resolve GitHub token and repo info.
-    let github_token = config
-        .api_token
-        .clone()
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-        .context("GitHub token required to trigger cloud agent")?;
-
     let (repo_owner, repo_name) = resolve_repo_info(
         headless_cfg.repo_owner.as_deref(),
         headless_cfg.repo_name.as_deref(),
         work_dir,
     )?;
+
+    let github_token =
+        github_auth::resolve_github_api_token(config, &repo_owner, &repo_name).await?;
 
     let mut client = CloudAgentClient::new(github_token, repo_owner.clone(), repo_name.clone());
     client.resolve_authenticated_login().await;
@@ -1304,17 +1299,14 @@ async fn run_agent_working(
         }
     };
 
-    let github_token = config
-        .api_token
-        .clone()
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-        .context("GitHub token required to check cloud agent status")?;
-
     let (repo_owner, repo_name) = resolve_repo_info(
         headless_cfg.repo_owner.as_deref(),
         headless_cfg.repo_name.as_deref(),
         work_dir,
     )?;
+
+    let github_token =
+        github_auth::resolve_github_api_token(config, &repo_owner, &repo_name).await?;
 
     let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
     client.resolve_authenticated_login().await;
@@ -1421,17 +1413,14 @@ async fn run_needs_verification(
         }
     };
 
-    let github_token = config
-        .api_token
-        .clone()
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-        .context("GitHub token required to merge PR")?;
-
     let (repo_owner, repo_name) = resolve_repo_info(
         headless_cfg.repo_owner.as_deref(),
         headless_cfg.repo_name.as_deref(),
         work_dir,
     )?;
+
+    let github_token =
+        github_auth::resolve_github_api_token(config, &repo_owner, &repo_name).await?;
 
     let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
     client.resolve_authenticated_login().await;
@@ -1968,17 +1957,14 @@ async fn run_awaiting_review(
         }
     };
 
-    let github_token = config
-        .api_token
-        .clone()
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-        .context("GitHub token required to check reviews")?;
-
     let (repo_owner, repo_name) = resolve_repo_info(
         headless_cfg.repo_owner.as_deref(),
         headless_cfg.repo_name.as_deref(),
         work_dir,
     )?;
+
+    let github_token =
+        github_auth::resolve_github_api_token(config, &repo_owner, &repo_name).await?;
 
     let mut client = CloudAgentClient::new(github_token, repo_owner, repo_name);
     client.resolve_authenticated_login().await;

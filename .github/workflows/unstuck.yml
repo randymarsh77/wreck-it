@@ -5,12 +5,15 @@
 # fix failures on the default branch.
 #
 # Required secrets:
-#   PAT_TOKEN – Personal Access Token with repo scope.  Used for the
-#               GitHub API calls that list PRs and post comments.  Also
-#               set as GITHUB_TOKEN so the wreck-it action can authenticate
-#               with the GitHub API (the default GITHUB_TOKEN lacks the
-#               scopes needed to create issue/PR comments on behalf of the
-#               PAT owner).
+#   PAT_TOKEN – Personal Access Token with repo scope.  Used as fallback
+#               for GitHub API calls and for checkout/push operations.
+#
+# Optional secrets (GitHub App authentication):
+#   APP_ID          – Numeric GitHub App ID
+#   APP_PRIVATE_KEY – PEM-encoded RSA private key for the GitHub App
+#
+#   When both are set, GitHub API actions (listing PRs, posting comments)
+#   are performed as the app's bot user instead of the PAT owner.
 name: Unstuck
 
 on:
@@ -44,3 +47,5 @@ jobs:
           command: unstuck
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_APP_ID: ${{ secrets.APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
