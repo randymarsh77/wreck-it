@@ -33,12 +33,17 @@ enabled = true
 # co-located SQLite storage, WebSocket support, and alarm scheduling.
 [durable_objects]
 bindings = [
-  { name = "RALPH_AGENT", class_name = "RalphAgent" }
+  { name = "RALPH_AGENT", class_name = "RalphAgent" },
+  { name = "SCHEDULER_AGENT", class_name = "SchedulerAgent" }
 ]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RalphAgent"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["SchedulerAgent"]
 
 # Pulse trigger — cron schedule for injecting entropy.
 # Fires every 30 minutes to process registered repositories.

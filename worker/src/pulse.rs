@@ -51,6 +51,27 @@ pub async fn run_pulse(env: &worker::Env) -> Result<String, String> {
     let mut summaries = Vec::new();
 
     for reg in &registrations {
+        // Check installation-level pulse_enabled setting.
+        match kv_store::load_installation_settings(&kv, reg.installation_id).await {
+            Ok(settings) if !settings.pulse_enabled => {
+                worker::console_log!(
+                    "[wreck-it][pulse] pulse disabled for installation {} ({}/{}) — skipping",
+                    reg.installation_id,
+                    reg.owner,
+                    reg.repo,
+                );
+                summaries.push(format!("{}/{}: pulse disabled", reg.owner, reg.repo));
+                continue;
+            }
+            Err(e) => {
+                worker::console_warn!(
+                    "[wreck-it][pulse] failed to load settings for installation {}: {e} — proceeding",
+                    reg.installation_id,
+                );
+            }
+            _ => {}
+        }
+
         let result = process_registration(&jwt, reg).await;
         let summary = match result {
             Ok(s) => s,
