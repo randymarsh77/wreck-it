@@ -1,15 +1,18 @@
-//! GitHub OAuth device flow authentication.
+//! GitHub authentication helpers.
 //!
-//! When no GitHub token is available from environment variables or user config,
-//! this module implements the [OAuth device flow][df] to obtain a token via
-//! browser-based sign-in.
+//! This module provides token resolution for the CLI, supporting multiple
+//! authentication methods in priority order:
 //!
-//! The flow requires a GitHub OAuth App client ID.  Set the
-//! `WRECK_IT_OAUTH_CLIENT_ID` environment variable or pass it via CLI.  If no
-//! client ID is configured the user is prompted to create a GitHub OAuth App.
+//! 1. **GitHub App** — when `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are
+//!    set, generates a JWT and vends an installation token.  All API actions
+//!    appear as the app's bot user (e.g. `wreck-it[bot]`).
+//! 2. **`GITHUB_TOKEN` env var** — personal access token.
+//! 3. **Stored config token** — from user config file.
+//! 4. **OAuth device flow** — interactive browser-based sign-in.
 //!
 //! [df]: https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#device-flow
 
+use crate::github_app;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
@@ -224,6 +227,38 @@ pub fn build_plan_issue_body(goal: &str, plan_filename: &str) -> String {
     )
 }
 
+/// Resolve a GitHub API token for a specific repository, preferring GitHub
+/// App authentication when available.
+///
+/// Priority:
+/// 1. GitHub App installation token (via `GITHUB_APP_ID` +
+///    `GITHUB_APP_PRIVATE_KEY` env vars)
+/// 2. `config.api_token` (CLI arg, config file, or `COPILOT_API_TOKEN`)
+/// 3. `GITHUB_TOKEN` environment variable
+///
+/// When the GitHub App path succeeds, all API actions (comments, commits,
+/// merges) will appear as the app's bot user rather than a personal account.
+pub async fn resolve_github_api_token(
+    config: &crate::types::Config,
+    repo_owner: &str,
+    repo_name: &str,
+) -> Result<String> {
+    // 1. Try GitHub App credentials.
+    if let Some(token) = github_app::resolve_app_token(repo_owner, repo_name).await {
+        return Ok(token);
+    }
+
+    // 2. Fall back to PAT-based resolution.
+    config
+        .api_token
+        .clone()
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .context(
+            "GitHub token required.  Set GITHUB_TOKEN, or set GITHUB_APP_ID \
+             and GITHUB_APP_PRIVATE_KEY to authenticate as a GitHub App.",
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +362,104 @@ mod tests {
     fn plan_issue_body_contains_plans_path() {
         let body = build_plan_issue_body("goal", "my-plan.json");
         assert!(body.contains(".wreck-it/plans/my-plan.json"));
+    }
+
+    // ---- resolve_github_api_token tests ----
+
+    #[tokio::test]
+    async fn api_token_falls_back_to_config_api_token() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let had_env = std::env::var("GITHUB_TOKEN").ok();
+        let had_app_id = std::env::var("GITHUB_APP_ID").ok();
+        let had_app_key = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
+
+        std::env::remove_var("GITHUB_TOKEN");
+        std::env::remove_var("GITHUB_APP_ID");
+        std::env::remove_var("GITHUB_APP_PRIVATE_KEY");
+
+        let config = crate::types::Config {
+            api_token: Some("test-pat-token".to_string()),
+            ..Default::default()
+        };
+
+        let token = resolve_github_api_token(&config, "owner", "repo")
+            .await
+            .unwrap();
+        assert_eq!(token, "test-pat-token");
+
+        // Restore.
+        if let Some(v) = had_env {
+            std::env::set_var("GITHUB_TOKEN", v);
+        }
+        if let Some(v) = had_app_id {
+            std::env::set_var("GITHUB_APP_ID", v);
+        }
+        if let Some(v) = had_app_key {
+            std::env::set_var("GITHUB_APP_PRIVATE_KEY", v);
+        }
+    }
+
+    #[tokio::test]
+    async fn api_token_falls_back_to_github_token_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let had_env = std::env::var("GITHUB_TOKEN").ok();
+        let had_app_id = std::env::var("GITHUB_APP_ID").ok();
+        let had_app_key = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
+
+        std::env::set_var("GITHUB_TOKEN", "env-pat-token");
+        std::env::remove_var("GITHUB_APP_ID");
+        std::env::remove_var("GITHUB_APP_PRIVATE_KEY");
+
+        let config = crate::types::Config::default();
+
+        let token = resolve_github_api_token(&config, "owner", "repo")
+            .await
+            .unwrap();
+        assert_eq!(token, "env-pat-token");
+
+        // Restore.
+        match had_env {
+            Some(v) => std::env::set_var("GITHUB_TOKEN", v),
+            None => std::env::remove_var("GITHUB_TOKEN"),
+        }
+        if let Some(v) = had_app_id {
+            std::env::set_var("GITHUB_APP_ID", v);
+        }
+        if let Some(v) = had_app_key {
+            std::env::set_var("GITHUB_APP_PRIVATE_KEY", v);
+        }
+    }
+
+    #[tokio::test]
+    async fn api_token_errors_when_no_sources() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let had_env = std::env::var("GITHUB_TOKEN").ok();
+        let had_app_id = std::env::var("GITHUB_APP_ID").ok();
+        let had_app_key = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
+
+        std::env::remove_var("GITHUB_TOKEN");
+        std::env::remove_var("GITHUB_APP_ID");
+        std::env::remove_var("GITHUB_APP_PRIVATE_KEY");
+
+        let config = crate::types::Config::default();
+
+        let result = resolve_github_api_token(&config, "owner", "repo").await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("GITHUB_APP_ID"),
+            "error should mention GITHUB_APP_ID: {msg}"
+        );
+
+        // Restore.
+        if let Some(v) = had_env {
+            std::env::set_var("GITHUB_TOKEN", v);
+        }
+        if let Some(v) = had_app_id {
+            std::env::set_var("GITHUB_APP_ID", v);
+        }
+        if let Some(v) = had_app_key {
+            std::env::set_var("GITHUB_APP_PRIVATE_KEY", v);
+        }
     }
 }

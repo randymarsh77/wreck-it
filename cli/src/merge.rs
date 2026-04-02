@@ -19,6 +19,7 @@
 //! ralph command (`command = "merge"` in `[[ralphs]]`).
 
 use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus};
+use crate::github_auth;
 use crate::headless;
 use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::headless_state::{load_headless_state, save_headless_state, TrackedPr};
@@ -57,12 +58,6 @@ pub async fn run_merge(
     let work_dir = &config.work_dir;
     let backend = backend.unwrap_or(BACKEND_COPILOT_CLI);
 
-    let github_token = config
-        .api_token
-        .clone()
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-        .context("GitHub token required for merge command")?;
-
     let headless_cfg = load_headless_cfg(work_dir)?;
 
     let (repo_owner, repo_name) = resolve_repo_info(
@@ -70,6 +65,9 @@ pub async fn run_merge(
         headless_cfg.repo_name.as_deref(),
         work_dir,
     )?;
+
+    let github_token =
+        github_auth::resolve_github_api_token(config, &repo_owner, &repo_name).await?;
 
     println!(
         "[wreck-it] merge: scanning {}/{} for PRs with merge conflicts (backend={})",

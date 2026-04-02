@@ -63,6 +63,8 @@ jobs:
           ./target/release/wreck-it plan "$@"
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GITHUB_APP_ID: ${{ secrets.APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
           GOAL: ${{ inputs.goal }}
           RALPH: ${{ inputs.ralph }}
           CLOUD: ${{ inputs.cloud }}

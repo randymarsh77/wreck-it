@@ -10,6 +10,7 @@
 //! ralph command (`command = "unstuck"` in `[[ralphs]]`).
 
 use crate::cloud_agent::{resolve_repo_info, CloudAgentClient, CloudAgentStatus, PrMergeStatus};
+use crate::github_auth;
 use crate::headless_config::{load_headless_config, HeadlessConfig};
 use crate::state_worktree::{detect_default_branch, ensure_state_worktree};
 use crate::types::Config;
@@ -30,12 +31,6 @@ const MAIN_BRANCH_ISSUE_TITLE: &str = "[wreck-it] Fix failing checks on";
 pub async fn run_unstuck(config: &Config) -> Result<()> {
     let work_dir = &config.work_dir;
 
-    let github_token = config
-        .api_token
-        .clone()
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-        .context("GitHub token required for unstuck command")?;
-
     let headless_cfg = load_headless_cfg(work_dir)?;
 
     let (repo_owner, repo_name) = resolve_repo_info(
@@ -43,6 +38,9 @@ pub async fn run_unstuck(config: &Config) -> Result<()> {
         headless_cfg.repo_name.as_deref(),
         work_dir,
     )?;
+
+    let github_token =
+        github_auth::resolve_github_api_token(config, &repo_owner, &repo_name).await?;
 
     println!(
         "[wreck-it] unstuck: scanning {}/{} for PRs with failing checks",

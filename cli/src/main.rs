@@ -10,6 +10,7 @@ mod coverage_enforcer;
 mod error_classifier;
 mod fan_out;
 mod gastown_client;
+mod github_app;
 mod github_auth;
 mod github_client;
 mod graph;

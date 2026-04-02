@@ -29,6 +29,11 @@ copilot-sdk-supercharged = "1.0"
 # HTTP client for direct API calls (GitHub Models)
 reqwest = { version = "0.12", features = ["json"] }
 
+# GitHub App JWT signing (RSA / SHA-256)
+rsa = { version = "0.9", default-features = false, features = ["std", "pem"] }
+sha2 = { version = "0.10", features = ["oid"] }
+signature = "2.2"
+
 # Error handling
 anyhow = "1.0"
 thiserror = "1.0"
