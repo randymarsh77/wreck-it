@@ -54,6 +54,10 @@ pub use durable_object::RalphAgent;
 use webhook::{verify_signature, WebhookEvent};
 use worker::*;
 
+/// Comment posted by the unstuck ralph when a workflow run fails on a PR.
+const UNSTUCK_COMMENT: &str = "@copilot The CI checks on this PR are failing. \
+    Please investigate the failures and push a fix.";
+
 /// Check whether an issue was opened by a trusted author.
 ///
 /// Delegates to the shared [`wreck_it_core::types::is_trusted_issue_author`]
@@ -575,11 +579,7 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
                     wr_pr.number,
                 );
                 match client
-                    .comment_on_pr(
-                        wr_pr.number,
-                        "@copilot The CI checks on this PR are failing. \
-                         Please investigate the failures and push a fix.",
-                    )
+                    .comment_on_pr(wr_pr.number, UNSTUCK_COMMENT)
                     .await
                 {
                     Ok(()) => {
