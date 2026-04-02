@@ -34,6 +34,76 @@ pub struct PulseRegistration {
 }
 
 // ---------------------------------------------------------------------------
+// Durable Object agent state types
+// ---------------------------------------------------------------------------
+
+/// Execution status of a ralph agent running as a Durable Object.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionStatus {
+    #[default]
+    Idle,
+    Running,
+    Paused,
+}
+
+/// Execution metadata tracked by the ralph agent Durable Object.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExecutionState {
+    pub status: ExecutionStatus,
+    pub current_task_id: Option<String>,
+    pub iteration_count: usize,
+    pub last_run_at: Option<u64>,
+}
+
+impl Default for ExecutionState {
+    fn default() -> Self {
+        Self {
+            status: ExecutionStatus::Idle,
+            current_task_id: None,
+            iteration_count: 0,
+            last_run_at: None,
+        }
+    }
+}
+
+/// Config stashed inside the ralph agent Durable Object.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AgentConfig {
+    pub task_file: String,
+    pub state_file: String,
+    pub owner: String,
+    pub repo: String,
+}
+
+/// Full persistent state for a `RalphAgent` Durable Object.
+///
+/// Stored in the DO's transactional storage under the key `"ralph_state"`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RalphState {
+    pub tasks: Vec<Task>,
+    pub execution: ExecutionState,
+    pub config: AgentConfig,
+}
+
+impl RalphState {
+    /// Build an initial state from configuration values.
+    #[allow(dead_code)]
+    pub fn new(owner: &str, repo: &str, task_file: &str, state_file: &str) -> Self {
+        Self {
+            tasks: Vec::new(),
+            execution: ExecutionState::default(),
+            config: AgentConfig {
+                task_file: task_file.to_string(),
+                state_file: state_file.to_string(),
+                owner: owner.to_string(),
+                repo: repo.to_string(),
+            },
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Webhook payload types
 //
 // Fields are populated by deserialization and exposed for consumers; suppress
@@ -299,5 +369,64 @@ state_file = ".docs-state.json"
         let sender = payload.sender.unwrap();
         assert_eq!(sender.login, "my-app[bot]");
         assert_eq!(sender.user_type.as_deref(), Some("Bot"));
+    }
+
+    #[test]
+    fn execution_status_default_is_idle() {
+        let status = ExecutionStatus::default();
+        assert_eq!(status, ExecutionStatus::Idle);
+    }
+
+    #[test]
+    fn execution_state_default() {
+        let state = ExecutionState::default();
+        assert_eq!(state.status, ExecutionStatus::Idle);
+        assert!(state.current_task_id.is_none());
+        assert_eq!(state.iteration_count, 0);
+        assert!(state.last_run_at.is_none());
+    }
+
+    #[test]
+    fn ralph_state_new() {
+        let state = RalphState::new("octo", "repo", "tasks.json", ".state.json");
+        assert!(state.tasks.is_empty());
+        assert_eq!(state.execution.status, ExecutionStatus::Idle);
+        assert_eq!(state.config.owner, "octo");
+        assert_eq!(state.config.repo, "repo");
+        assert_eq!(state.config.task_file, "tasks.json");
+        assert_eq!(state.config.state_file, ".state.json");
+    }
+
+    #[test]
+    fn ralph_state_roundtrip() {
+        let state = RalphState {
+            tasks: vec![],
+            execution: ExecutionState {
+                status: ExecutionStatus::Running,
+                current_task_id: Some("t1".into()),
+                iteration_count: 3,
+                last_run_at: Some(1700000000),
+            },
+            config: AgentConfig {
+                task_file: "tasks.json".into(),
+                state_file: ".state.json".into(),
+                owner: "octo".into(),
+                repo: "repo".into(),
+            },
+        };
+        let json = serde_json::to_string(&state).unwrap();
+        let loaded: RalphState = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.execution.status, ExecutionStatus::Running);
+        assert_eq!(loaded.execution.current_task_id.as_deref(), Some("t1"));
+        assert_eq!(loaded.execution.iteration_count, 3);
+        assert_eq!(loaded.config.owner, "octo");
+    }
+
+    #[test]
+    fn execution_status_serde() {
+        let json = serde_json::to_string(&ExecutionStatus::Running).unwrap();
+        assert_eq!(json, r#""running""#);
+        let loaded: ExecutionStatus = serde_json::from_str(r#""paused""#).unwrap();
+        assert_eq!(loaded, ExecutionStatus::Paused);
     }
 }
