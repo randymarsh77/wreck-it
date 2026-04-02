@@ -20,6 +20,12 @@ export interface Installation {
   events: string[]
 }
 
+export interface InstallationSettings {
+  pulse_cron: string
+  pulse_enabled: boolean
+  events_enabled: boolean
+}
+
 export interface Repository {
   id: number
   name: string
@@ -298,6 +304,24 @@ export async function updateRalphState(
   return request<RalphStateResponse>(
     `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/${encodeURIComponent(name)}/state`,
     { method: 'PUT', body: JSON.stringify({ state, _sha: sha }) },
+  )
+}
+
+export async function getInstallationSettings(
+  installationId: number,
+): Promise<InstallationSettings> {
+  return request<InstallationSettings>(
+    `/api/portal/installations/${installationId}/settings`,
+  )
+}
+
+export async function updateInstallationSettings(
+  installationId: number,
+  settings: InstallationSettings,
+): Promise<InstallationSettings> {
+  return request<InstallationSettings>(
+    `/api/portal/installations/${installationId}/settings`,
+    { method: 'PUT', body: JSON.stringify(settings) },
   )
 }
 
