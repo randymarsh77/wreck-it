@@ -518,9 +518,8 @@ async fn reinitialize_installation(req: Request, ctx: RouteContext<()>) -> Resul
     let mut all_repos: Vec<serde_json::Value> = Vec::new();
     let per_page = 100u32;
     let mut page = 1u32;
-    // Updated in every loop iteration; clippy flags the initial value as
-    // dead because the loop body always runs, but we need a declaration
-    // before the loop so the variable is available after it.
+    // Captures the `total_count` reported by the GitHub API on the final
+    // page so we can surface it in the response for diagnostics.
     #[allow(clippy::needless_late_init)]
     let github_total_count: u64;
 
