@@ -170,6 +170,9 @@ pub struct WebhookPayload {
     pub pull_request: Option<PullRequest>,
     pub sender: Option<User>,
     pub workflow_run: Option<WorkflowRun>,
+    /// Repositories included in `installation` webhook events.
+    #[serde(default)]
+    pub repositories: Vec<InstallationRepository>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -191,6 +194,29 @@ pub struct RepositoryOwner {
 #[allow(dead_code)]
 pub struct Installation {
     pub id: u64,
+    pub account: Option<InstallationAccount>,
+}
+
+/// The account (user or org) that owns an installation.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct InstallationAccount {
+    pub login: String,
+}
+
+/// A repository reference inside an `installation` webhook payload.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct InstallationRepository {
+    pub id: u64,
+    pub name: String,
+    pub full_name: String,
+    #[serde(default = "default_branch_main")]
+    pub default_branch: String,
+}
+
+fn default_branch_main() -> String {
+    "main".to_string()
 }
 
 /// A GitHub user (or bot) as represented in webhook payloads.
@@ -579,5 +605,67 @@ state_file = ".docs-state.json"
         assert_eq!(settings.pulse_cron, "*/30 * * * *");
         assert!(settings.pulse_enabled);
         assert!(!settings.events_enabled);
+    }
+
+    #[test]
+    fn installation_account_parsed() {
+        let json = r#"{"id": 42, "account": {"login": "my-org"}}"#;
+        let inst: Installation = serde_json::from_str(json).unwrap();
+        assert_eq!(inst.id, 42);
+        assert_eq!(inst.account.unwrap().login, "my-org");
+    }
+
+    #[test]
+    fn installation_without_account() {
+        let json = r#"{"id": 42}"#;
+        let inst: Installation = serde_json::from_str(json).unwrap();
+        assert_eq!(inst.id, 42);
+        assert!(inst.account.is_none());
+    }
+
+    #[test]
+    fn installation_repository_parsed() {
+        let json = r#"{"id": 1, "name": "repo", "full_name": "org/repo", "default_branch": "develop"}"#;
+        let repo: InstallationRepository = serde_json::from_str(json).unwrap();
+        assert_eq!(repo.id, 1);
+        assert_eq!(repo.name, "repo");
+        assert_eq!(repo.full_name, "org/repo");
+        assert_eq!(repo.default_branch, "develop");
+    }
+
+    #[test]
+    fn installation_repository_default_branch() {
+        let json = r#"{"id": 1, "name": "repo", "full_name": "org/repo"}"#;
+        let repo: InstallationRepository = serde_json::from_str(json).unwrap();
+        assert_eq!(repo.default_branch, "main");
+    }
+
+    #[test]
+    fn webhook_payload_installation_event() {
+        let json = r#"{
+            "action": "created",
+            "installation": {"id": 100, "account": {"login": "my-org"}},
+            "repositories": [
+                {"id": 1, "name": "repo-a", "full_name": "my-org/repo-a", "default_branch": "main"},
+                {"id": 2, "name": "repo-b", "full_name": "my-org/repo-b", "default_branch": "develop"}
+            ]
+        }"#;
+        let payload: WebhookPayload = serde_json::from_str(json).unwrap();
+        assert_eq!(payload.action.as_deref(), Some("created"));
+        assert_eq!(payload.installation.as_ref().unwrap().id, 100);
+        assert_eq!(
+            payload.installation.as_ref().unwrap().account.as_ref().unwrap().login,
+            "my-org"
+        );
+        assert_eq!(payload.repositories.len(), 2);
+        assert_eq!(payload.repositories[0].name, "repo-a");
+        assert_eq!(payload.repositories[1].default_branch, "develop");
+    }
+
+    #[test]
+    fn webhook_payload_no_repositories_defaults_empty() {
+        let json = r#"{"action":"opened","repository":{"full_name":"o/r","name":"r","owner":{"login":"o"}}}"#;
+        let payload: WebhookPayload = serde_json::from_str(json).unwrap();
+        assert!(payload.repositories.is_empty());
     }
 }

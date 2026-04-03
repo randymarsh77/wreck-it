@@ -5,6 +5,7 @@ import {
   getInstallationRepos,
   getInstallationSettings,
   updateInstallationSettings,
+  reinitializeInstallation,
 } from '../api/client'
 import type { Installation, Repository, InstallationSettings } from '../api/client'
 
@@ -21,6 +22,8 @@ interface SettingsState {
   loading: boolean
   saving: boolean
   error: string | null
+  reinitializing: boolean
+  reinitResult: string | null
 }
 
 export default function Installations() {
@@ -81,14 +84,14 @@ export default function Installations() {
   const fetchSettings = useCallback(async (installationId: number) => {
     setSettingsState((prev) => ({
       ...prev,
-      [installationId]: { settings: null, loading: true, saving: false, error: null },
+      [installationId]: { settings: null, loading: true, saving: false, error: null, reinitializing: false, reinitResult: null },
     }))
 
     try {
       const settings = await getInstallationSettings(installationId)
       setSettingsState((prev) => ({
         ...prev,
-        [installationId]: { settings, loading: false, saving: false, error: null },
+        [installationId]: { settings, loading: false, saving: false, error: null, reinitializing: false, reinitResult: null },
       }))
     } catch (err: unknown) {
       setSettingsState((prev) => ({
@@ -98,6 +101,8 @@ export default function Installations() {
           loading: false,
           saving: false,
           error: err instanceof Error ? err.message : 'Failed to load settings',
+          reinitializing: false,
+          reinitResult: null,
         },
       }))
     }
@@ -137,7 +142,7 @@ export default function Installations() {
       const saved = await updateInstallationSettings(installationId, newSettings)
       setSettingsState((prev) => ({
         ...prev,
-        [installationId]: { settings: saved, loading: false, saving: false, error: null },
+        [installationId]: { ...prev[installationId], settings: saved, loading: false, saving: false, error: null },
       }))
     } catch (err: unknown) {
       setSettingsState((prev) => ({
@@ -146,6 +151,40 @@ export default function Installations() {
           ...prev[installationId],
           saving: false,
           error: err instanceof Error ? err.message : 'Failed to save settings',
+        },
+      }))
+    }
+  }
+
+  async function handleReinitialize(installationId: number) {
+    setSettingsState((prev) => ({
+      ...prev,
+      [installationId]: { ...prev[installationId], reinitializing: true, reinitResult: null, error: null },
+    }))
+
+    try {
+      const result = await reinitializeInstallation(installationId)
+      setSettingsState((prev) => ({
+        ...prev,
+        [installationId]: {
+          ...prev[installationId],
+          reinitializing: false,
+          reinitResult: `Registered ${result.repos_registered} of ${result.repos_total} repo(s)`,
+        },
+      }))
+      // Refresh settings after reinitialization.
+      const settings = await getInstallationSettings(installationId)
+      setSettingsState((prev) => ({
+        ...prev,
+        [installationId]: { ...prev[installationId], settings },
+      }))
+    } catch (err: unknown) {
+      setSettingsState((prev) => ({
+        ...prev,
+        [installationId]: {
+          ...prev[installationId],
+          reinitializing: false,
+          error: err instanceof Error ? err.message : 'Reinitialization failed',
         },
       }))
     }
@@ -203,6 +242,7 @@ export default function Installations() {
                     <InstallationSettingsPanel
                       state={sState ?? null}
                       onUpdate={(updates) => handleSettingsUpdate(inst.id, updates)}
+                      onReinitialize={() => handleReinitialize(inst.id)}
                     />
                     {state && !state.loading && state.repos.length > 0 && (
                       <input
@@ -278,9 +318,10 @@ export default function Installations() {
 interface SettingsPanelProps {
   state: SettingsState | null
   onUpdate: (updates: Partial<InstallationSettings>) => void
+  onReinitialize: () => void
 }
 
-function InstallationSettingsPanel({ state, onUpdate }: SettingsPanelProps) {
+function InstallationSettingsPanel({ state, onUpdate, onReinitialize }: SettingsPanelProps) {
   const currentCron = state?.settings?.pulse_cron ?? '*/30 * * * *'
   const [cronDraft, setCronDraft] = useState(currentCron)
   const [cronDirty, setCronDirty] = useState(false)
@@ -364,6 +405,22 @@ function InstallationSettingsPanel({ state, onUpdate }: SettingsPanelProps) {
       </div>
 
       {state.saving && <p className="muted" style={{ marginTop: '0.5rem' }}>Saving…</p>}
+
+      <div style={{ marginTop: '0.75rem', borderTop: '1px solid var(--border, #333)', paddingTop: '0.75rem' }}>
+        <button
+          className="btn btn-sm"
+          disabled={state.reinitializing || state.saving}
+          onClick={onReinitialize}
+        >
+          {state.reinitializing ? 'Reinitializing…' : 'Reinitialize'}
+        </button>
+        <span className="muted" style={{ marginLeft: '0.5rem', fontSize: '0.85rem' }}>
+          Re-register all repos and sync scheduler
+        </span>
+        {state.reinitResult && (
+          <p className="muted" style={{ marginTop: '0.25rem' }}>✓ {state.reinitResult}</p>
+        )}
+      </div>
     </div>
   )
 }

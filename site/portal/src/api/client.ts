@@ -325,6 +325,22 @@ export async function updateInstallationSettings(
   )
 }
 
+export interface ReinitializeResponse {
+  status: string
+  installation_id: number
+  repos_registered: number
+  repos_total: number
+}
+
+export async function reinitializeInstallation(
+  installationId: number,
+): Promise<ReinitializeResponse> {
+  return request<ReinitializeResponse>(
+    `/api/portal/installations/${installationId}/reinitialize`,
+    { method: 'POST' },
+  )
+}
+
 export function logout(): void {
   clearToken()
 }

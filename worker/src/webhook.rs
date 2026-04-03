@@ -47,6 +47,8 @@ pub enum WebhookEvent {
     PullRequest,
     /// A workflow run has completed (or changed status).
     WorkflowRun,
+    /// GitHub App installed, uninstalled, or repositories changed.
+    Installation,
     /// An event type we do not handle.
     Other(String),
 }
@@ -59,6 +61,7 @@ impl WebhookEvent {
             "push" => Self::Push,
             "pull_request" => Self::PullRequest,
             "workflow_run" => Self::WorkflowRun,
+            "installation" => Self::Installation,
             other => Self::Other(other.to_string()),
         }
     }
@@ -103,6 +106,10 @@ mod tests {
         assert_eq!(
             WebhookEvent::from_header("workflow_run"),
             WebhookEvent::WorkflowRun
+        );
+        assert_eq!(
+            WebhookEvent::from_header("installation"),
+            WebhookEvent::Installation
         );
         assert_eq!(
             WebhookEvent::from_header("ping"),
