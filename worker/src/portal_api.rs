@@ -518,6 +518,11 @@ async fn reinitialize_installation(req: Request, ctx: RouteContext<()>) -> Resul
     let mut all_repos: Vec<serde_json::Value> = Vec::new();
     let per_page = 100u32;
     let mut page = 1u32;
+    // Updated in every loop iteration; clippy flags the initial value as
+    // dead because the loop body always runs, but we need a declaration
+    // before the loop so the variable is available after it.
+    #[allow(clippy::needless_late_init)]
+    let github_total_count: u64;
 
     loop {
         let url = format!(
@@ -538,9 +543,15 @@ async fn reinitialize_installation(req: Request, ctx: RouteContext<()>) -> Resul
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
 
+        let batch_len = repos.len();
         all_repos.extend(repos);
 
-        if (all_repos.len() as u64) >= total_count {
+        // Stop when we have collected all repos or the current page
+        // returned fewer results than requested (last page).
+        if (all_repos.len() as u64) >= total_count
+            || (batch_len as u32) < per_page
+        {
+            github_total_count = total_count;
             break;
         }
         page += 1;
@@ -609,6 +620,7 @@ async fn reinitialize_installation(req: Request, ctx: RouteContext<()>) -> Resul
             "installation_id": installation_id,
             "repos_registered": registered,
             "repos_total": all_repos.len(),
+            "github_total_count": github_total_count,
         }),
         200,
     )
