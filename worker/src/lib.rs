@@ -60,6 +60,10 @@ use worker::*;
 const UNSTUCK_COMMENT: &str = "@copilot The CI checks on this PR are failing. \
     Please investigate the failures and push a fix.";
 
+/// Default pulse interval in seconds (30 minutes) used when the cron
+/// expression cannot be parsed.
+const DEFAULT_PULSE_INTERVAL_SECS: u64 = 30 * 60;
+
 /// Check whether an issue was opened by a trusted author.
 ///
 /// Delegates to the shared [`wreck_it_core::types::is_trusted_issue_author`]
@@ -703,9 +707,16 @@ async fn handle_installation_event(
     // Register every repository from the payload in the pulse registry.
     let mut registered = 0u32;
     for repo in &payload.repositories {
+        // Extract owner from the repo's full_name (owner/repo format) to
+        // handle the unlikely case of repos from different owners.
+        let repo_owner = repo
+            .full_name
+            .split('/')
+            .next()
+            .unwrap_or(&owner);
         let repo_name = &repo.name;
         let reg = types::PulseRegistration {
-            owner: owner.clone(),
+            owner: repo_owner.to_string(),
             repo: repo_name.clone(),
             installation_id,
             default_branch: repo.default_branch.clone(),
@@ -713,7 +724,7 @@ async fn handle_installation_event(
         if let Err(e) = kv_store::upsert_pulse_registration(&kv, &reg).await {
             console_warn!(
                 "[wreck-it] pulse registration upsert failed for {}/{}: {e}",
-                owner,
+                repo_owner,
                 repo_name,
             );
         } else {
@@ -770,7 +781,7 @@ async fn sync_scheduler_do_from_env(
     let stub = id.get_stub().map_err(|e| format!("DO stub failed: {e}"))?;
 
     if settings.pulse_enabled {
-        let interval_secs = portal_api::cron_to_interval_secs(&settings.pulse_cron).unwrap_or(30 * 60);
+        let interval_secs = portal_api::cron_to_interval_secs(&settings.pulse_cron).unwrap_or(DEFAULT_PULSE_INTERVAL_SECS);
 
         let body = serde_json::json!({
             "installation_id": installation_id,
