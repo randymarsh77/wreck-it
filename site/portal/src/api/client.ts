@@ -330,6 +330,7 @@ export interface ReinitializeResponse {
   installation_id: number
   repos_registered: number
   repos_total: number
+  github_total_count: number
 }
 
 export async function reinitializeInstallation(

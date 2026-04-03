@@ -308,6 +308,36 @@ ul {
   font-size: 0.85rem;
 }
 
+/* ── Installation tabs ─────────────────────────────────── */
+.install-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.install-tab {
+  padding: 8px 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: var(--font);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.install-tab:hover {
+  color: var(--text);
+}
+
+.install-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--primary);
+}
+
 /* ── Repo filter ──────────────────────────────────────── */
 .repo-filter {
   width: 100%;

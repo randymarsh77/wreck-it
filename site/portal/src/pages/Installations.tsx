@@ -35,6 +35,7 @@ export default function Installations() {
   const [settingsState, setSettingsState] = useState<Record<number, SettingsState>>({})
   const [filter, setFilter] = useState('')
   const [displayPage, setDisplayPage] = useState(1)
+  const [activeTab, setActiveTab] = useState<'repos' | 'settings'>('repos')
 
   useEffect(() => {
     getInstallations()
@@ -116,6 +117,7 @@ export default function Installations() {
     setExpanded(id)
     setFilter('')
     setDisplayPage(1)
+    setActiveTab('repos')
     if (!repoState[id]) {
       void fetchAllRepos(id)
     }
@@ -164,12 +166,16 @@ export default function Installations() {
 
     try {
       const result = await reinitializeInstallation(installationId)
+      const fetched = result.repos_total
+      const ghTotal = result.github_total_count
+      const extra =
+        fetched < ghTotal ? ` (GitHub reports ${ghTotal} total)` : ''
       setSettingsState((prev) => ({
         ...prev,
         [installationId]: {
           ...prev[installationId],
           reinitializing: false,
-          reinitResult: `Registered ${result.repos_registered} of ${result.repos_total} repo(s)`,
+          reinitResult: `Registered ${result.repos_registered} of ${fetched} repo(s)${extra}`,
         },
       }))
       // Refresh settings after reinitialization.
@@ -239,66 +245,86 @@ export default function Installations() {
                 </button>
                 {expanded === inst.id && (
                   <div className="install-repos">
-                    <InstallationSettingsPanel
-                      state={sState ?? null}
-                      onUpdate={(updates) => handleSettingsUpdate(inst.id, updates)}
-                      onReinitialize={() => handleReinitialize(inst.id)}
-                    />
-                    {state && !state.loading && state.repos.length > 0 && (
-                      <input
-                        type="text"
-                        className="repo-filter"
-                        placeholder="Filter repositories…"
-                        value={filter}
-                        onChange={(e) => {
-                          setFilter(e.target.value)
-                          setDisplayPage(1)
-                        }}
-                      />
-                    )}
-                    {state?.loading ? (
-                      <p className="muted">Loading repos…</p>
-                    ) : !state || state.repos.length === 0 ? (
-                      <p className="muted">No repositories found.</p>
-                    ) : filteredRepos.length === 0 ? (
-                      <p className="muted">No repositories match your filter.</p>
-                    ) : (
+                    <div className="install-tabs">
+                      <button
+                        className={`install-tab${activeTab === 'repos' ? ' active' : ''}`}
+                        onClick={() => setActiveTab('repos')}
+                      >
+                        Repositories
+                      </button>
+                      <button
+                        className={`install-tab${activeTab === 'settings' ? ' active' : ''}`}
+                        onClick={() => setActiveTab('settings')}
+                      >
+                        Settings
+                      </button>
+                    </div>
+                    {activeTab === 'repos' && (
                       <>
-                        <ul className="repo-list">
-                          {displayedRepos.map((r) => (
-                            <li key={r.id}>
-                              <Link to={`/repos/${r.owner.login}/${r.name}/config`}>
-                                {r.full_name}
-                              </Link>
-                              {r.description && (
-                                <span className="muted repo-desc">{r.description}</span>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                        {totalDisplayPages > 1 && (
-                          <div className="pagination">
-                            <button
-                              className="btn btn-sm"
-                              disabled={displayPage <= 1}
-                              onClick={() => setDisplayPage((p) => p - 1)}
-                            >
-                              ← Prev
-                            </button>
-                            <span className="muted pagination-info">
-                              Page {displayPage} of {totalDisplayPages} ({filteredRepos.length}{' '}
-                              repos)
-                            </span>
-                            <button
-                              className="btn btn-sm"
-                              disabled={displayPage >= totalDisplayPages}
-                              onClick={() => setDisplayPage((p) => p + 1)}
-                            >
-                              Next →
-                            </button>
-                          </div>
+                        {state && !state.loading && state.repos.length > 0 && (
+                          <input
+                            type="text"
+                            className="repo-filter"
+                            placeholder="Filter repositories…"
+                            value={filter}
+                            onChange={(e) => {
+                              setFilter(e.target.value)
+                              setDisplayPage(1)
+                            }}
+                          />
+                        )}
+                        {state?.loading ? (
+                          <p className="muted">Loading repos…</p>
+                        ) : !state || state.repos.length === 0 ? (
+                          <p className="muted">No repositories found.</p>
+                        ) : filteredRepos.length === 0 ? (
+                          <p className="muted">No repositories match your filter.</p>
+                        ) : (
+                          <>
+                            <ul className="repo-list">
+                              {displayedRepos.map((r) => (
+                                <li key={r.id}>
+                                  <Link to={`/repos/${r.owner.login}/${r.name}/config`}>
+                                    {r.full_name}
+                                  </Link>
+                                  {r.description && (
+                                    <span className="muted repo-desc">{r.description}</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                            {totalDisplayPages > 1 && (
+                              <div className="pagination">
+                                <button
+                                  className="btn btn-sm"
+                                  disabled={displayPage <= 1}
+                                  onClick={() => setDisplayPage((p) => p - 1)}
+                                >
+                                  ← Prev
+                                </button>
+                                <span className="muted pagination-info">
+                                  Page {displayPage} of {totalDisplayPages} ({filteredRepos.length}{' '}
+                                  repos)
+                                </span>
+                                <button
+                                  className="btn btn-sm"
+                                  disabled={displayPage >= totalDisplayPages}
+                                  onClick={() => setDisplayPage((p) => p + 1)}
+                                >
+                                  Next →
+                                </button>
+                              </div>
+                            )}
+                          </>
                         )}
                       </>
+                    )}
+                    {activeTab === 'settings' && (
+                      <InstallationSettingsPanel
+                        state={sState ?? null}
+                        onUpdate={(updates) => handleSettingsUpdate(inst.id, updates)}
+                        onReinitialize={() => handleReinitialize(inst.id)}
+                      />
                     )}
                   </div>
                 )}
@@ -349,7 +375,7 @@ function InstallationSettingsPanel({ state, onUpdate, onReinitialize }: Settings
   if (!settings) return null
 
   return (
-    <div className="settings-panel card" style={{ marginBottom: '1rem', padding: '0.75rem' }}>
+    <div className="settings-panel" style={{ padding: '0.75rem' }}>
       <h4 style={{ margin: '0 0 0.5rem 0' }}>Installation Settings</h4>
 
       {state.error && <div className="error-text" style={{ marginBottom: '0.5rem' }}>{state.error}</div>}
