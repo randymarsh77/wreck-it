@@ -241,6 +241,11 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
         WebhookEvent::Other(name) if name == "ping" => {
             return Response::ok("pong");
         }
+        WebhookEvent::Installation => {
+            // Handle installation created/new_permissions_accepted events
+            // by registering all repos and initializing the scheduler.
+            return handle_installation_event(&payload, &env).await;
+        }
         WebhookEvent::Issues
         | WebhookEvent::Push
         | WebhookEvent::PullRequest
@@ -638,6 +643,159 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
             Response::error(format!("Processing failed: {e}"), 500)
         }
     }
+}
+
+/// Handle `installation` webhook events.
+///
+/// When a GitHub App is installed (`created`) or its permissions are
+/// accepted (`new_permissions_accepted`), this registers all repositories
+/// from the installation in the pulse registry, saves default settings to
+/// KV, and initialises the `SchedulerAgent` Durable Object.
+///
+/// This ensures the cron-based pulse system picks up repositories without
+/// waiting for an individual webhook event from each repo.
+async fn handle_installation_event(
+    payload: &types::WebhookPayload,
+    env: &Env,
+) -> Result<Response> {
+    let action = payload.action.as_deref().unwrap_or("");
+
+    // Only bootstrap on install / permission-grant events.
+    if !["created", "new_permissions_accepted"].contains(&action) {
+        console_log!(
+            "[wreck-it] installation event action='{}' — ignoring",
+            action,
+        );
+        return Response::ok("installation event ignored");
+    }
+
+    let installation = payload
+        .installation
+        .as_ref()
+        .ok_or_else(|| Error::RustError("Missing installation in payload".into()))?;
+
+    let installation_id = installation.id;
+
+    console_log!(
+        "[wreck-it] installation {} action='{}' — bootstrapping {} repo(s)",
+        installation_id,
+        action,
+        payload.repositories.len(),
+    );
+
+    let kv = env
+        .kv(kv_store::KV_BINDING)
+        .map_err(|e| Error::RustError(format!("KV binding failed: {e}")))?;
+
+    // Determine the owner from the installation account or the first repo.
+    let owner = installation
+        .account
+        .as_ref()
+        .map(|a| a.login.clone())
+        .or_else(|| {
+            payload
+                .repositories
+                .first()
+                .and_then(|r| r.full_name.split('/').next().map(|s| s.to_string()))
+        })
+        .unwrap_or_default();
+
+    // Register every repository from the payload in the pulse registry.
+    let mut registered = 0u32;
+    for repo in &payload.repositories {
+        let repo_name = &repo.name;
+        let reg = types::PulseRegistration {
+            owner: owner.clone(),
+            repo: repo_name.clone(),
+            installation_id,
+            default_branch: repo.default_branch.clone(),
+        };
+        if let Err(e) = kv_store::upsert_pulse_registration(&kv, &reg).await {
+            console_warn!(
+                "[wreck-it] pulse registration upsert failed for {}/{}: {e}",
+                owner,
+                repo_name,
+            );
+        } else {
+            registered += 1;
+        }
+    }
+
+    // Save default settings so that pulse_enabled and events_enabled are
+    // persisted, and sync the SchedulerAgent Durable Object.
+    let settings = kv_store::load_installation_settings(&kv, installation_id)
+        .await
+        .unwrap_or_default();
+
+    kv_store::save_installation_settings(&kv, installation_id, &settings)
+        .await
+        .unwrap_or_else(|e| {
+            console_warn!(
+                "[wreck-it] failed to save installation settings for {}: {e}",
+                installation_id,
+            );
+        });
+
+    // Sync the SchedulerAgent DO.
+    if let Err(e) =
+        sync_scheduler_do_from_env(env, installation_id, &settings).await
+    {
+        console_warn!(
+            "[wreck-it] scheduler sync failed for installation {}: {e}",
+            installation_id,
+        );
+    }
+
+    Response::ok(format!(
+        "installation bootstrapped: registered {registered} repo(s) for installation {installation_id}",
+    ))
+}
+
+/// Sync the `SchedulerAgent` Durable Object from an [`Env`] reference.
+///
+/// This is the same logic as [`portal_api::sync_scheduler_do`] but works
+/// outside the Router context (e.g. from a webhook handler).
+async fn sync_scheduler_do_from_env(
+    env: &Env,
+    installation_id: u64,
+    settings: &types::InstallationSettings,
+) -> std::result::Result<(), String> {
+    let namespace = env
+        .durable_object("SCHEDULER_AGENT")
+        .map_err(|e| format!("DO binding failed: {e}"))?;
+    let do_name = scheduler::scheduler_name(installation_id);
+    let id = namespace
+        .id_from_name(&do_name)
+        .map_err(|e| format!("DO id failed: {e}"))?;
+    let stub = id.get_stub().map_err(|e| format!("DO stub failed: {e}"))?;
+
+    if settings.pulse_enabled {
+        let interval_secs = portal_api::cron_to_interval_secs(&settings.pulse_cron).unwrap_or(30 * 60);
+
+        let body = serde_json::json!({
+            "installation_id": installation_id,
+            "interval_secs": interval_secs,
+        });
+        let body_str = serde_json::to_string(&body)
+            .map_err(|e| format!("JSON serialization failed: {e}"))?;
+
+        let mut init = worker::RequestInit::new();
+        init.with_method(worker::Method::Post);
+        init.with_body(Some(wasm_bindgen::JsValue::from_str(&body_str)));
+        let do_req = worker::Request::new_with_init("https://do/schedule", &init)
+            .map_err(|e| format!("DO request failed: {e}"))?;
+        stub.fetch_with_request(do_req)
+            .await
+            .map_err(|e| format!("DO fetch failed: {e}"))?;
+    } else {
+        let do_req = worker::Request::new("https://do/disable", worker::Method::Post)
+            .map_err(|e| format!("DO request failed: {e}"))?;
+        stub.fetch_with_request(do_req)
+            .await
+            .map_err(|e| format!("DO fetch failed: {e}"))?;
+    }
+
+    Ok(())
 }
 
 /// Resolve the GitHub API token from environment secrets.
@@ -1106,5 +1264,32 @@ mod tests {
         let mut pr = make_pr("copilot-swe-agent[bot]", "Bot");
         pr.draft = Some(false);
         assert!(!is_pr_work_in_progress(&pr));
+    }
+
+    // ---- cron_to_interval_secs ----
+
+    #[test]
+    fn cron_every_30_minutes() {
+        assert_eq!(portal_api::cron_to_interval_secs("*/30 * * * *"), Some(1800));
+    }
+
+    #[test]
+    fn cron_every_15_minutes() {
+        assert_eq!(portal_api::cron_to_interval_secs("*/15 * * * *"), Some(900));
+    }
+
+    #[test]
+    fn cron_every_1_minute() {
+        assert_eq!(portal_api::cron_to_interval_secs("*/1 * * * *"), Some(60));
+    }
+
+    #[test]
+    fn cron_unsupported_expression() {
+        assert_eq!(portal_api::cron_to_interval_secs("0 */2 * * *"), None);
+    }
+
+    #[test]
+    fn cron_invalid_expression() {
+        assert_eq!(portal_api::cron_to_interval_secs("bad"), None);
     }
 }

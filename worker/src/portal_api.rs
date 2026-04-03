@@ -23,6 +23,7 @@
 //! | `GET`     | `/api/portal/installations/:installation_id/repos`    | List repos for an installation    |
 //! | `GET`     | `/api/portal/installations/:installation_id/settings` | Get installation settings         |
 //! | `PUT`     | `/api/portal/installations/:installation_id/settings` | Update installation settings      |
+//! | `POST`    | `/api/portal/installations/:installation_id/reinitialize` | Re-bootstrap installation     |
 //! | `GET`     | `/api/portal/repos/:owner/:repo/config`               | Read repo config (TOML → JSON)    |
 //! | `PUT`     | `/api/portal/repos/:owner/:repo/config`               | Write repo config (JSON → TOML)   |
 //! | `GET`     | `/api/portal/repos/:owner/:repo/ralphs/:name/tasks`   | Read ralph tasks from repo        |
@@ -489,6 +490,130 @@ async fn put_installation_settings(mut req: Request, ctx: RouteContext<()>) -> R
     json_response(&settings, 200)
 }
 
+/// `POST /api/portal/installations/:installation_id/reinitialize`
+///
+/// Re-bootstrap an installation: fetch all repos via the GitHub API,
+/// register them in the pulse registry, persist default settings, and
+/// sync the `SchedulerAgent` Durable Object.
+///
+/// This is the portal equivalent of the `installation` webhook handler
+/// and is useful when the initial webhook was missed or the state needs
+/// to be refreshed.
+async fn reinitialize_installation(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let github_token = verify_portal_session(&req, &ctx)
+        .await
+        .map_err(|e| Error::RustError(format!("auth failed: {}", e.status_code())))?;
+
+    let installation_id: u64 = ctx
+        .param("installation_id")
+        .ok_or_else(|| Error::RustError("Missing installation_id parameter".into()))?
+        .parse()
+        .map_err(|_| Error::RustError("Invalid installation_id".into()))?;
+
+    let kv = ctx
+        .kv(kv_store::KV_BINDING)
+        .map_err(|e| Error::RustError(format!("KV binding failed: {e}")))?;
+
+    // Fetch all repos for the installation from GitHub API (paginated).
+    let mut all_repos: Vec<serde_json::Value> = Vec::new();
+    let per_page = 100u32;
+    let mut page = 1u32;
+
+    loop {
+        let url = format!(
+            "https://api.github.com/user/installations/{installation_id}/repositories?page={page}&per_page={per_page}"
+        );
+        let data = github_api_get(&url, &github_token)
+            .await
+            .map_err(Error::RustError)?;
+
+        let repos = data
+            .get("repositories")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let total_count = data
+            .get("total_count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        all_repos.extend(repos);
+
+        if (all_repos.len() as u64) >= total_count {
+            break;
+        }
+        page += 1;
+    }
+
+    // Register each repo in the pulse registry.
+    let mut registered = 0u32;
+    for repo in &all_repos {
+        let owner = repo
+            .get("owner")
+            .and_then(|o| o.get("login"))
+            .and_then(|l| l.as_str())
+            .unwrap_or_default();
+        let name = repo.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+        let default_branch = repo
+            .get("default_branch")
+            .and_then(|b| b.as_str())
+            .unwrap_or("main");
+
+        if owner.is_empty() || name.is_empty() {
+            continue;
+        }
+
+        let reg = crate::types::PulseRegistration {
+            owner: owner.to_string(),
+            repo: name.to_string(),
+            installation_id,
+            default_branch: default_branch.to_string(),
+        };
+        if let Err(e) = kv_store::upsert_pulse_registration(&kv, &reg).await {
+            worker::console_warn!(
+                "[wreck-it][portal] pulse registration failed for {}/{}: {e}",
+                owner,
+                name,
+            );
+        } else {
+            registered += 1;
+        }
+    }
+
+    // Load-or-default settings, persist them, and sync the scheduler DO.
+    let settings = kv_store::load_installation_settings(&kv, installation_id)
+        .await
+        .unwrap_or_default();
+
+    if let Err(e) =
+        kv_store::save_installation_settings(&kv, installation_id, &settings).await
+    {
+        worker::console_warn!(
+            "[wreck-it][portal] failed to save settings for installation {}: {e}",
+            installation_id,
+        );
+    }
+
+    let do_result = sync_scheduler_do(&ctx, installation_id, &settings).await;
+    if let Err(e) = do_result {
+        worker::console_warn!(
+            "[wreck-it][portal] scheduler sync failed for installation {}: {e}",
+            installation_id,
+        );
+    }
+
+    json_response(
+        &serde_json::json!({
+            "status": "ok",
+            "installation_id": installation_id,
+            "repos_registered": registered,
+            "repos_total": all_repos.len(),
+        }),
+        200,
+    )
+}
+
 /// Sync the `SchedulerAgent` Durable Object with the current settings.
 ///
 /// If `pulse_enabled` is `true`, sends a `/schedule` request to set or
@@ -553,7 +678,7 @@ async fn sync_scheduler_do(
 ///
 /// Supports the common `*/N * * * *` (every N minutes) pattern.
 /// For other expressions, returns `None`.
-fn cron_to_interval_secs(cron: &str) -> Option<u64> {
+pub(crate) fn cron_to_interval_secs(cron: &str) -> Option<u64> {
     let parts: Vec<&str> = cron.split_whitespace().collect();
     if parts.len() != 5 {
         return None;
@@ -1989,6 +2114,10 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
             "/api/portal/installations/:installation_id/settings",
             options_handler,
         )
+        .options_async(
+            "/api/portal/installations/:installation_id/reinitialize",
+            options_handler,
+        )
         .options_async("/api/portal/repos/:owner/:repo/config", options_handler)
         .options_async("/api/portal/templates", options_handler)
         .options_async("/api/portal/ralphs", options_handler)
@@ -2026,6 +2155,10 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .put_async(
             "/api/portal/installations/:installation_id/settings",
             put_installation_settings,
+        )
+        .post_async(
+            "/api/portal/installations/:installation_id/reinitialize",
+            reinitialize_installation,
         )
         // Config endpoints
         .get_async("/api/portal/repos/:owner/:repo/config", get_config)
