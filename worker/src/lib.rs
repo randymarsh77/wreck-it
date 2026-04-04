@@ -360,7 +360,7 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
                 trusted,
                 issue_user,
             );
-            (action == "opened" && has_label || action == "labeled" && has_label) && trusted
+            (action == "opened" || action == "labeled") && has_label && trusted
         }
         WebhookEvent::Push => {
             // Process pushes to the state branch (external state updates).
@@ -443,7 +443,7 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
     let config_file = client
         .get_file(".wreck-it/config.toml", default_branch)
         .await
-        .map_err(|e| Error::RustError(e))?;
+        .map_err(Error::RustError)?;
 
     if config_file.is_none() {
         console_log!(
@@ -611,10 +611,7 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
                     "[wreck-it] workflow_run failure — commenting on PR #{}",
                     wr_pr.number,
                 );
-                match client
-                    .comment_on_pr(wr_pr.number, UNSTUCK_COMMENT)
-                    .await
-                {
+                match client.comment_on_pr(wr_pr.number, UNSTUCK_COMMENT).await {
                     Ok(()) => {
                         commented += 1;
                     }
@@ -658,10 +655,7 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
 ///
 /// This ensures the cron-based pulse system picks up repositories without
 /// waiting for an individual webhook event from each repo.
-async fn handle_installation_event(
-    payload: &types::WebhookPayload,
-    env: &Env,
-) -> Result<Response> {
+async fn handle_installation_event(payload: &types::WebhookPayload, env: &Env) -> Result<Response> {
     let action = payload.action.as_deref().unwrap_or("");
 
     // Only bootstrap on install / permission-grant events.
@@ -709,11 +703,7 @@ async fn handle_installation_event(
     for repo in &payload.repositories {
         // Extract owner from the repo's full_name (owner/repo format) to
         // handle the unlikely case of repos from different owners.
-        let repo_owner = repo
-            .full_name
-            .split('/')
-            .next()
-            .unwrap_or(&owner);
+        let repo_owner = repo.full_name.split('/').next().unwrap_or(&owner);
         let repo_name = &repo.name;
         let reg = types::PulseRegistration {
             owner: repo_owner.to_string(),
@@ -748,9 +738,7 @@ async fn handle_installation_event(
         });
 
     // Sync the SchedulerAgent DO.
-    if let Err(e) =
-        sync_scheduler_do_from_env(env, installation_id, &settings).await
-    {
+    if let Err(e) = sync_scheduler_do_from_env(env, installation_id, &settings).await {
         console_warn!(
             "[wreck-it] scheduler sync failed for installation {}: {e}",
             installation_id,
@@ -781,14 +769,15 @@ async fn sync_scheduler_do_from_env(
     let stub = id.get_stub().map_err(|e| format!("DO stub failed: {e}"))?;
 
     if settings.pulse_enabled {
-        let interval_secs = portal_api::cron_to_interval_secs(&settings.pulse_cron).unwrap_or(DEFAULT_PULSE_INTERVAL_SECS);
+        let interval_secs = portal_api::cron_to_interval_secs(&settings.pulse_cron)
+            .unwrap_or(DEFAULT_PULSE_INTERVAL_SECS);
 
         let body = serde_json::json!({
             "installation_id": installation_id,
             "interval_secs": interval_secs,
         });
-        let body_str = serde_json::to_string(&body)
-            .map_err(|e| format!("JSON serialization failed: {e}"))?;
+        let body_str =
+            serde_json::to_string(&body).map_err(|e| format!("JSON serialization failed: {e}"))?;
 
         let mut init = worker::RequestInit::new();
         init.with_method(worker::Method::Post);
@@ -1281,7 +1270,10 @@ mod tests {
 
     #[test]
     fn cron_every_30_minutes() {
-        assert_eq!(portal_api::cron_to_interval_secs("*/30 * * * *"), Some(1800));
+        assert_eq!(
+            portal_api::cron_to_interval_secs("*/30 * * * *"),
+            Some(1800)
+        );
     }
 
     #[test]

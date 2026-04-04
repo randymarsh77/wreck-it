@@ -124,10 +124,7 @@ impl DurableObject for SchedulerAgent {
         }
 
         // Run pulse for all repos in this installation.
-        if let Err(e) = self
-            .run_installation_pulse(config.installation_id)
-            .await
-        {
+        if let Err(e) = self.run_installation_pulse(config.installation_id).await {
             console_error!(
                 "[wreck-it][scheduler] pulse failed for installation {}: {e}",
                 config.installation_id,
@@ -160,10 +157,7 @@ impl SchedulerAgent {
     async fn schedule_next_alarm(&self, interval_secs: u64) -> Result<()> {
         let ms = (interval_secs as i64) * 1000;
         let at = js_sys::Date::now() as i64 + ms;
-        self.state
-            .storage()
-            .set_alarm(at)
-            .await
+        self.state.storage().set_alarm(at).await
     }
 
     /// `POST /schedule` — set or update the scheduler configuration.
@@ -221,7 +215,10 @@ impl SchedulerAgent {
     }
 
     /// Run pulse iterations for all repos in a given installation.
-    async fn run_installation_pulse(&self, installation_id: u64) -> std::result::Result<(), String> {
+    async fn run_installation_pulse(
+        &self,
+        installation_id: u64,
+    ) -> std::result::Result<(), String> {
         let kv = self
             .env
             .kv(kv_store::KV_BINDING)
