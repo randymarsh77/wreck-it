@@ -10,12 +10,19 @@ import {
   updateRalphTasks,
   getRalphState,
   updateRalphState,
+  getAgentState,
+  agentRun,
+  agentPause,
+  agentResume,
+  agentMigrate,
 } from '../api/client'
 import type {
   RalphConfig,
   RalphTemplate,
   RalphTemplateEntry,
   RalphTask,
+  AgentStateResponse,
+  AgentRalphState,
 } from '../api/client'
 
 export default function RepoConfig() {
@@ -219,7 +226,7 @@ function GuiMode({
   const [customName, setCustomName] = useState('')
   const [customPrompt, setCustomPrompt] = useState('')
   const [expandedRalph, setExpandedRalph] = useState<string | null>(null)
-  const [expandedView, setExpandedView] = useState<'tasks' | 'state' | null>(null)
+  const [expandedView, setExpandedView] = useState<'tasks' | 'state' | 'agent' | null>(null)
 
   const ralphs = (config.ralphs as RalphEntry[] | undefined) ?? []
 
@@ -525,6 +532,20 @@ function GuiMode({
                     State
                   </button>
                   <button
+                    className={`btn btn-sm ${expandedRalph === ralph.name && expandedView === 'agent' ? 'btn-primary' : ''}`}
+                    onClick={() => {
+                      if (expandedRalph === ralph.name && expandedView === 'agent') {
+                        setExpandedRalph(null)
+                        setExpandedView(null)
+                      } else {
+                        setExpandedRalph(ralph.name)
+                        setExpandedView('agent')
+                      }
+                    }}
+                  >
+                    Agent
+                  </button>
+                  <button
                     className="btn btn-sm btn-danger"
                     onClick={() => handleRemoveRalph(ralph.name)}
                     disabled={saving}
@@ -537,6 +558,9 @@ function GuiMode({
                 )}
                 {expandedRalph === ralph.name && expandedView === 'state' && (
                   <RalphStatePanel owner={owner} repo={repo} name={ralph.name} />
+                )}
+                {expandedRalph === ralph.name && expandedView === 'agent' && (
+                  <RalphAgentPanel owner={owner} repo={repo} name={ralph.name} />
                 )}
               </div>
             ))}
@@ -1064,6 +1088,246 @@ function RalphStatePanel({ owner, repo, name }: RalphPanelProps) {
       >
         {saving ? 'Saving…' : 'Save State'}
       </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Ralph Agent Panel component (Durable Object controls)
+// ---------------------------------------------------------------------------
+
+function isInitialized(
+  response: AgentStateResponse,
+): response is AgentRalphState {
+  return !('initialized' in response && response.initialized === false)
+}
+
+function RalphAgentPanel({ owner, repo, name }: RalphPanelProps) {
+  const [agentState, setAgentState] = useState<AgentStateResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [acting, setActing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [successMsg, setSuccessMsg] = useState<string | null>(null)
+
+  const loadState = useCallback(() => {
+    setLoading(true)
+    setError(null)
+    getAgentState(owner, repo, name)
+      .then((data) => setAgentState(data))
+      .catch((err: unknown) =>
+        setError(
+          err instanceof Error ? err.message : 'Failed to load agent state',
+        ),
+      )
+      .finally(() => setLoading(false))
+  }, [owner, repo, name])
+
+  useEffect(() => {
+    loadState()
+  }, [loadState])
+
+  async function handleRun() {
+    setActing(true)
+    setError(null)
+    setSuccessMsg(null)
+    try {
+      const result = await agentRun(owner, repo, name)
+      if (result.result === 'task_started') {
+        setSuccessMsg(`Task started: ${result.task_id}`)
+      } else if (result.result === 'all_complete') {
+        setSuccessMsg('All tasks complete.')
+      } else {
+        setSuccessMsg('No pending tasks.')
+      }
+      loadState()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to run agent')
+    } finally {
+      setActing(false)
+    }
+  }
+
+  async function handlePause() {
+    setActing(true)
+    setError(null)
+    setSuccessMsg(null)
+    try {
+      await agentPause(owner, repo, name)
+      setSuccessMsg('Agent paused.')
+      loadState()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to pause agent')
+    } finally {
+      setActing(false)
+    }
+  }
+
+  async function handleResume() {
+    setActing(true)
+    setError(null)
+    setSuccessMsg(null)
+    try {
+      await agentResume(owner, repo, name)
+      setSuccessMsg('Agent resumed.')
+      loadState()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to resume agent')
+    } finally {
+      setActing(false)
+    }
+  }
+
+  async function handleMigrate() {
+    setActing(true)
+    setError(null)
+    setSuccessMsg(null)
+    try {
+      const tasksData = await getRalphTasks(owner, repo, name)
+      const migrateState: AgentRalphState = {
+        tasks: tasksData.tasks,
+        execution: {
+          status: 'Idle',
+          current_task_id: null,
+          iteration_count: 0,
+          last_run_at: null,
+        },
+        config: {
+          task_file: tasksData._path,
+          state_file: '',
+          owner,
+          repo,
+        },
+      }
+      await agentMigrate(owner, repo, name, migrateState)
+      setSuccessMsg('Agent initialized from task file.')
+      loadState()
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to migrate agent',
+      )
+    } finally {
+      setActing(false)
+    }
+  }
+
+  if (loading)
+    return (
+      <div className="ralph-panel">
+        <p className="muted">Loading agent state…</p>
+      </div>
+    )
+
+  const initialized = agentState !== null && isInitialized(agentState)
+  const execution = initialized ? agentState.execution : null
+
+  return (
+    <div className="ralph-panel">
+      <div className="ralph-panel-header">
+        <h4>Agent (Durable Object)</h4>
+        {execution && (
+          <span
+            className={`agent-status-badge agent-status-${execution.status.toLowerCase()}`}
+          >
+            {execution.status}
+          </span>
+        )}
+      </div>
+
+      {error && <p className="error-text">{error}</p>}
+      {successMsg && <p className="success-text">{successMsg}</p>}
+
+      {!initialized ? (
+        <div className="agent-not-initialized">
+          <p className="muted">
+            Agent not initialized. Migrate tasks from the repository to seed the
+            Durable Object backend.
+          </p>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => void handleMigrate()}
+            disabled={acting}
+          >
+            {acting ? 'Migrating…' : 'Initialize Agent'}
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="agent-details">
+            <div className="ralph-field">
+              <span className="ralph-field-label">Iterations</span>
+              <span className="ralph-field-value">
+                {execution!.iteration_count}
+              </span>
+            </div>
+            {execution!.last_run_at && (
+              <div className="ralph-field">
+                <span className="ralph-field-label">Last run</span>
+                <span className="ralph-field-value">
+                  {new Date(execution!.last_run_at * 1000).toLocaleString()}
+                </span>
+              </div>
+            )}
+            {execution!.current_task_id && (
+              <div className="ralph-field">
+                <span className="ralph-field-label">Current task</span>
+                <span className="ralph-field-value">
+                  {execution!.current_task_id}
+                </span>
+              </div>
+            )}
+            <div className="ralph-field">
+              <span className="ralph-field-label">Tasks</span>
+              <span className="ralph-field-value">
+                {agentState.tasks.length} total
+              </span>
+            </div>
+          </div>
+
+          <div className="agent-actions">
+            {execution!.status === 'Idle' && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => void handleRun()}
+                disabled={acting}
+              >
+                {acting ? 'Running…' : '▶ Run'}
+              </button>
+            )}
+            {execution!.status === 'Running' && (
+              <button
+                className="btn btn-sm btn-warning"
+                onClick={() => void handlePause()}
+                disabled={acting}
+              >
+                {acting ? 'Pausing…' : '⏸ Pause'}
+              </button>
+            )}
+            {execution!.status === 'Paused' && (
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => void handleResume()}
+                disabled={acting}
+              >
+                {acting ? 'Resuming…' : '▶ Resume'}
+              </button>
+            )}
+            <button
+              className="btn btn-sm"
+              onClick={() => void handleMigrate()}
+              disabled={acting}
+            >
+              {acting ? 'Migrating…' : 'Re-sync from Repo'}
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={loadState}
+              disabled={loading}
+            >
+              ↻ Refresh
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
