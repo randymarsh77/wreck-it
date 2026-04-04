@@ -308,18 +308,18 @@
     "iteration 80: agent completed without PR for task Some(\"mcp-server-integration\")"
   ],
   "task_statuses": {
-    "mcp-server-integration": "inprogress",
-    "ideas-agent-output-caching": "inprogress",
     "ideas-dependency-pruning": "inprogress",
+    "llm-cost-optimizer-routing": "inprogress",
+    "natural-language-task-query": "inprogress",
+    "otel-metrics-export": "inprogress",
     "ideas-cloudflare-log-source": "inprogress",
     "ideas-error-classification": "inprogress",
-    "visual-workflow-exporter": "inprogress",
-    "otel-metrics-export": "inprogress",
     "cross-platform-notification-hub": "inprogress",
+    "ideas-agent-output-caching": "inprogress",
     "ideas-html-report": "inprogress",
-    "llm-cost-optimizer-routing": "inprogress",
-    "ideas-task-lifecycle-hooks": "inprogress",
     "adaptive-prompt-optimizer": "inprogress",
-    "natural-language-task-query": "inprogress"
+    "mcp-server-integration": "inprogress",
+    "visual-workflow-exporter": "inprogress",
+    "ideas-task-lifecycle-hooks": "inprogress"
   }
 }
