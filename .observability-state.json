@@ -1,8 +1,11 @@
 {
-  "phase": "agent_working",
+  "phase": "needs_trigger",
   "iteration": 1,
   "current_task_id": "cf-log-triage",
   "issue_number": 942,
+  "memory": [
+    "iteration 1: agent completed without PR for task Some(\"cf-log-triage\")"
+  ],
   "task_statuses": {
     "cf-log-triage": "inprogress"
   }
