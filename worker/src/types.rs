@@ -91,8 +91,11 @@ impl Default for InstallationSettings {
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionStatus {
     #[default]
+    #[serde(alias = "Idle")]
     Idle,
+    #[serde(alias = "Running")]
     Running,
+    #[serde(alias = "Paused")]
     Paused,
 }
 
@@ -565,6 +568,16 @@ state_file = ".docs-state.json"
         assert_eq!(json, r#""running""#);
         let loaded: ExecutionStatus = serde_json::from_str(r#""paused""#).unwrap();
         assert_eq!(loaded, ExecutionStatus::Paused);
+    }
+
+    #[test]
+    fn execution_status_serde_capitalized_aliases() {
+        let idle: ExecutionStatus = serde_json::from_str(r#""Idle""#).unwrap();
+        assert_eq!(idle, ExecutionStatus::Idle);
+        let running: ExecutionStatus = serde_json::from_str(r#""Running""#).unwrap();
+        assert_eq!(running, ExecutionStatus::Running);
+        let paused: ExecutionStatus = serde_json::from_str(r#""Paused""#).unwrap();
+        assert_eq!(paused, ExecutionStatus::Paused);
     }
 
     #[test]

@@ -1,0 +1,11 @@
+[
+  {
+    "id": "cf-log-triage",
+    "description": "Monitor Cloudflare observability logs for the wreck-it worker. When errors or exceptions are detected, assess the root cause and create a fix. Check the worker source code, recent deployments, and related configuration to determine if the error requires a code change, a configuration update, or is transient. If a fix is needed, implement and test it.",
+    "status": "pending",
+    "role": "evaluator",
+    "kind": "recurring",
+    "cooldown_seconds": 3600,
+    "precondition_prompt": "Check if there are any new error or exception log entries from the Cloudflare worker that have not yet been triaged. Look for tasks with the 'log-source:' label prefix to identify already-imported events. Return true if there are new unhandled errors that need investigation, false if all known errors have been addressed."
+  }
+]
