@@ -638,7 +638,8 @@ state_file = ".docs-state.json"
 
     #[test]
     fn installation_repository_parsed() {
-        let json = r#"{"id": 1, "name": "repo", "full_name": "org/repo", "default_branch": "develop"}"#;
+        let json =
+            r#"{"id": 1, "name": "repo", "full_name": "org/repo", "default_branch": "develop"}"#;
         let repo: InstallationRepository = serde_json::from_str(json).unwrap();
         assert_eq!(repo.id, 1);
         assert_eq!(repo.name, "repo");
@@ -667,7 +668,14 @@ state_file = ".docs-state.json"
         assert_eq!(payload.action.as_deref(), Some("created"));
         assert_eq!(payload.installation.as_ref().unwrap().id, 100);
         assert_eq!(
-            payload.installation.as_ref().unwrap().account.as_ref().unwrap().login,
+            payload
+                .installation
+                .as_ref()
+                .unwrap()
+                .account
+                .as_ref()
+                .unwrap()
+                .login,
             "my-org"
         );
         assert_eq!(payload.repositories.len(), 2);

@@ -547,9 +547,7 @@ async fn reinitialize_installation(req: Request, ctx: RouteContext<()>) -> Resul
 
         // Stop when we have collected all repos or the current page
         // returned fewer results than requested (last page).
-        if (all_repos.len() as u64) >= total_count
-            || (batch_len as u32) < per_page
-        {
+        if (all_repos.len() as u64) >= total_count || (batch_len as u32) < per_page {
             github_total_count = total_count;
             break;
         }
@@ -564,7 +562,10 @@ async fn reinitialize_installation(req: Request, ctx: RouteContext<()>) -> Resul
             .and_then(|o| o.get("login"))
             .and_then(|l| l.as_str())
             .unwrap_or_default();
-        let name = repo.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+        let name = repo
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or_default();
         let default_branch = repo
             .get("default_branch")
             .and_then(|b| b.as_str())
@@ -596,9 +597,7 @@ async fn reinitialize_installation(req: Request, ctx: RouteContext<()>) -> Resul
         .await
         .unwrap_or_default();
 
-    if let Err(e) =
-        kv_store::save_installation_settings(&kv, installation_id, &settings).await
-    {
+    if let Err(e) = kv_store::save_installation_settings(&kv, installation_id, &settings).await {
         worker::console_warn!(
             "[wreck-it][portal] failed to save settings for installation {}: {e}",
             installation_id,
@@ -663,8 +662,8 @@ async fn sync_scheduler_do(
             "installation_id": installation_id,
             "interval_secs": interval_secs,
         });
-        let body_str = serde_json::to_string(&body)
-            .map_err(|e| format!("JSON serialization failed: {e}"))?;
+        let body_str =
+            serde_json::to_string(&body).map_err(|e| format!("JSON serialization failed: {e}"))?;
 
         let mut init = RequestInit::new();
         init.with_method(Method::Post);
@@ -846,6 +845,7 @@ async fn list_individual_ralphs(_req: Request, _ctx: RouteContext<()>) -> Result
 
 /// Request body for `POST /api/portal/repos/:owner/:repo/ralphs/deploy`.
 #[derive(serde::Deserialize)]
+#[allow(dead_code)]
 struct RalphDeployRequest {
     /// Ralph name (unique identifier).
     name: String,

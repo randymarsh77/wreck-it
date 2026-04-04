@@ -171,10 +171,9 @@ async fn process_ralph(
 
     // Read state file (defaults if missing).
     let (mut state, state_sha) =
-        match read_json_file::<HeadlessState>(client, state_branch, &ctx.state_file).await? {
-            Some(pair) => pair,
-            None => (HeadlessState::default(), String::new()),
-        };
+        read_json_file::<HeadlessState>(client, state_branch, &ctx.state_file)
+            .await?
+            .unwrap_or_default();
 
     // Use the shared iteration logic from wreck-it-core.
     let now_secs = js_sys_now_secs();
@@ -378,10 +377,9 @@ async fn handle_merged_pr_for_ralph(
 
     // Read state file.
     let (mut state, state_sha) =
-        match read_json_file::<HeadlessState>(client, state_branch, &ctx.state_file).await? {
-            Some(pair) => pair,
-            None => (HeadlessState::default(), String::new()),
-        };
+        read_json_file::<HeadlessState>(client, state_branch, &ctx.state_file)
+            .await?
+            .unwrap_or_default();
 
     // Check if this merged PR matches the current task or any tracked PR.
     let mut task_completed = false;
