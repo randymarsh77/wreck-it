@@ -29,3 +29,10 @@ task_file = "merge-tasks.json"
 state_file = ".merge-state.json"
 command = "merge"
 backend = "cloud_agent"
+
+[[ralphs]]
+name = "observability"
+task_file = "observability-tasks.json"
+state_file = ".observability-state.json"
+backend = "cloud_agent"
+agent = "copilot"
