@@ -10,6 +10,7 @@
   --primary-hover: #79b8ff;
   --success: #3fb950;
   --error: #f85149;
+  --warning: #d2991f;
   --radius: 8px;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
@@ -785,7 +786,7 @@ ul {
 
 .agent-status-paused {
   background: rgba(210, 153, 34, 0.15);
-  color: #d2991f;
+  color: var(--warning);
 }
 
 .agent-not-initialized {
@@ -807,9 +808,9 @@ ul {
 }
 
 .btn-warning {
-  background: #d2991f;
+  background: var(--warning);
   color: #fff;
-  border-color: #d2991f;
+  border-color: var(--warning);
 }
 
 .btn-warning:hover:not(:disabled) {

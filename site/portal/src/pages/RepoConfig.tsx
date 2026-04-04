@@ -1219,6 +1219,8 @@ function RalphAgentPanel({ owner, repo, name }: RalphPanelProps) {
 
   const initialized = agentState !== null && isInitialized(agentState)
   const execution = initialized ? agentState.execution : null
+  const { status, iteration_count, last_run_at, current_task_id } =
+    execution ?? { status: 'Idle' as const, iteration_count: 0, last_run_at: null, current_task_id: null }
 
   return (
     <div className="ralph-panel">
@@ -1226,9 +1228,9 @@ function RalphAgentPanel({ owner, repo, name }: RalphPanelProps) {
         <h4>Agent (Durable Object)</h4>
         {execution && (
           <span
-            className={`agent-status-badge agent-status-${execution.status.toLowerCase()}`}
+            className={`agent-status-badge agent-status-${status.toLowerCase()}`}
           >
-            {execution.status}
+            {status}
           </span>
         )}
       </div>
@@ -1256,22 +1258,22 @@ function RalphAgentPanel({ owner, repo, name }: RalphPanelProps) {
             <div className="ralph-field">
               <span className="ralph-field-label">Iterations</span>
               <span className="ralph-field-value">
-                {execution!.iteration_count}
+                {iteration_count}
               </span>
             </div>
-            {execution!.last_run_at && (
+            {last_run_at && (
               <div className="ralph-field">
                 <span className="ralph-field-label">Last run</span>
                 <span className="ralph-field-value">
-                  {new Date(execution!.last_run_at * 1000).toLocaleString()}
+                  {new Date(last_run_at * 1000).toLocaleString()}
                 </span>
               </div>
             )}
-            {execution!.current_task_id && (
+            {current_task_id && (
               <div className="ralph-field">
                 <span className="ralph-field-label">Current task</span>
                 <span className="ralph-field-value">
-                  {execution!.current_task_id}
+                  {current_task_id}
                 </span>
               </div>
             )}
@@ -1284,7 +1286,7 @@ function RalphAgentPanel({ owner, repo, name }: RalphPanelProps) {
           </div>
 
           <div className="agent-actions">
-            {execution!.status === 'Idle' && (
+            {status === 'Idle' && (
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => void handleRun()}
@@ -1293,7 +1295,7 @@ function RalphAgentPanel({ owner, repo, name }: RalphPanelProps) {
                 {acting ? 'Running…' : '▶ Run'}
               </button>
             )}
-            {execution!.status === 'Running' && (
+            {status === 'Running' && (
               <button
                 className="btn btn-sm btn-warning"
                 onClick={() => void handlePause()}
@@ -1302,7 +1304,7 @@ function RalphAgentPanel({ owner, repo, name }: RalphPanelProps) {
                 {acting ? 'Pausing…' : '⏸ Pause'}
               </button>
             )}
-            {execution!.status === 'Paused' && (
+            {status === 'Paused' && (
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => void handleResume()}
