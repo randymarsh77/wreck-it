@@ -26,6 +26,8 @@
 
 html {
   color-scheme: dark;
+  /* Prevent double-tap zoom on iOS Safari while preserving pinch-to-zoom */
+  touch-action: manipulation;
 }
 
 body {
@@ -992,5 +994,16 @@ ul {
 
   .template-ralph-name {
     min-width: unset;
+  }
+
+  /* Prevent iOS Safari auto-zoom when focusing form elements (requires >= 16px) */
+  .form-input,
+  .form-textarea,
+  .config-editor,
+  .repo-filter,
+  .task-status-select,
+  .task-editor,
+  .state-editor {
+    font-size: 1rem;
   }
 }
