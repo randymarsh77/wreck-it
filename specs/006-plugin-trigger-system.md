@@ -38,7 +38,7 @@ Request headers:
 
 | Header | Required | Description |
 |--------|----------|-------------|
-| `X-Trigger-Signature` | Yes | HMAC-SHA256 signature of the raw body, hex-encoded, prefixed with `sha256=`. Computed using the installation's trigger secret. |
+| `X-Trigger-Signature` | Yes | HMAC-SHA256 signature of the raw body, hex-encoded, prefixed with `sha256=`. Computed using the installation's trigger secret. Example: `sha256=a1b2c3d4e5f6...`. Case-insensitive prefix matching. |
 | `X-Trigger-Source` | No | Human-readable source identifier (e.g. `slack`, `pagerduty`, `jenkins`). Logged for audit. |
 | `Content-Type` | Yes | `application/json` |
 
@@ -64,7 +64,7 @@ Request body:
 | `installation_id` | Yes | GitHub App installation ID. Used to look up credentials and settings. |
 | `owner` | Yes | Repository owner. |
 | `repo` | Yes | Repository name. |
-| `ralph` | No | Ralph context name. If omitted, the trigger is routed using the trigger routing rules (see below). |
+| `ralph` | No | Ralph context name. If omitted, the trigger is routed using the trigger routing rules (see below). If provided, the named ralph is triggered directly and routing rules are bypassed. |
 | `event` | Yes | Namespaced event name. Convention: `source:event-name`. |
 | `payload` | No | Arbitrary JSON object forwarded to the ralph context as trigger metadata. |
 
@@ -113,7 +113,9 @@ trigger callers do not need access to the GitHub webhook secret.
    `triggers_enabled` is `true` in `InstallationSettings`.
 
 4. **Rate limiting** — Per-installation rate limit stored in KV with a
-   sliding-window counter.  Default: 60 requests per minute.
+   sliding-window counter using 1-minute buckets.  The limit applies
+   globally per installation (across all repos).  Default: 60 requests
+   per minute.
 
 ### Trigger Routing
 
@@ -141,7 +143,7 @@ ralph = "catch-all"
 |-------|----------|-------------|
 | `event` | Yes | Event name or glob pattern to match against the incoming `event` field. |
 | `ralph` | Yes | Ralph context to trigger. |
-| `conditions` | No | Key-value pairs that must match fields inside `payload`. Simple equality matching. |
+| `conditions` | No | Key-value pairs that must match top-level fields inside `payload`. Simple equality matching only (no nested path lookups, no regex). Values are compared as strings. |
 
 Routing algorithm:
 
@@ -151,7 +153,8 @@ Routing algorithm:
    match.
 3. Execute an iteration for each matched ralph context.
 4. If no rules match and `ralph` was not provided, return `200` with an
-   empty `iterations` array.
+   empty `iterations` array and `"matched_rules": 0` to distinguish from
+   a successful routing.
 
 ### Installation Settings Extension
 
