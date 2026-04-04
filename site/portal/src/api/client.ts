@@ -342,6 +342,106 @@ export async function reinitializeInstallation(
   )
 }
 
+// ---------------------------------------------------------------------------
+// Agent (Durable Object) endpoints
+// ---------------------------------------------------------------------------
+
+export interface AgentExecutionState {
+  status: 'Idle' | 'Running' | 'Paused'
+  current_task_id: string | null
+  iteration_count: number
+  last_run_at: number | null
+}
+
+export interface AgentConfig {
+  task_file: string
+  state_file: string
+  owner: string
+  repo: string
+}
+
+export interface AgentRalphState {
+  tasks: RalphTask[]
+  execution: AgentExecutionState
+  config: AgentConfig
+}
+
+export type AgentStateResponse =
+  | AgentRalphState
+  | { initialized: false }
+
+export interface AgentRunResponse {
+  result: 'task_started' | 'all_complete' | 'no_pending_tasks'
+  task_id?: string
+}
+
+export interface AgentActionResponse {
+  status: string
+}
+
+export interface AgentMigrateResponse {
+  migrated: boolean
+}
+
+function agentBasePath(owner: string, repo: string, name: string): string {
+  return `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/ralphs/${encodeURIComponent(name)}/agent`
+}
+
+export async function getAgentState(
+  owner: string,
+  repo: string,
+  name: string,
+): Promise<AgentStateResponse> {
+  return request<AgentStateResponse>(
+    `${agentBasePath(owner, repo, name)}/state`,
+  )
+}
+
+export async function agentRun(
+  owner: string,
+  repo: string,
+  name: string,
+): Promise<AgentRunResponse> {
+  return request<AgentRunResponse>(
+    `${agentBasePath(owner, repo, name)}/run`,
+    { method: 'POST' },
+  )
+}
+
+export async function agentPause(
+  owner: string,
+  repo: string,
+  name: string,
+): Promise<AgentActionResponse> {
+  return request<AgentActionResponse>(
+    `${agentBasePath(owner, repo, name)}/pause`,
+    { method: 'POST' },
+  )
+}
+
+export async function agentResume(
+  owner: string,
+  repo: string,
+  name: string,
+): Promise<AgentActionResponse> {
+  return request<AgentActionResponse>(
+    `${agentBasePath(owner, repo, name)}/resume`,
+    { method: 'POST' },
+  )
+}
+
+export async function agentMigrate(
+  owner: string,
+  repo: string,
+  name: string,
+  state: AgentRalphState,
+): Promise<AgentMigrateResponse> {
+  return request<AgentMigrateResponse>(
+    `${agentBasePath(owner, repo, name)}/migrate`,
+    { method: 'POST', body: JSON.stringify(state) },
+  )
+}
+
 export function logout(): void {
   clearToken()
 }

@@ -10,6 +10,7 @@
   --primary-hover: #79b8ff;
   --success: #3fb950;
   --error: #f85149;
+  --warning: #d2991f;
   --radius: 8px;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
@@ -764,6 +765,59 @@ ul {
   min-height: 180px;
   font-size: 0.8rem;
   margin-bottom: 8px;
+}
+
+/* ── Agent panel ─────────────────────────────────────── */
+.agent-status-badge {
+  font-size: 0.75rem;
+  padding: 1px 10px;
+  border-radius: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.agent-status-idle {
+  background: rgba(125, 133, 144, 0.15);
+  color: var(--text-muted);
+}
+
+.agent-status-running {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--primary);
+}
+
+.agent-status-paused {
+  background: rgba(210, 153, 34, 0.15);
+  color: var(--warning);
+}
+
+.agent-not-initialized {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.agent-details {
+  margin-bottom: 10px;
+}
+
+.agent-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.btn-warning {
+  background: var(--warning);
+  color: #fff;
+  border-color: var(--warning);
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #b8841a;
+  border-color: #b8841a;
 }
 
 /* ── Hamburger menu toggle (hidden on desktop) ───────── */
