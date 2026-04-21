@@ -309,17 +309,17 @@
   ],
   "task_statuses": {
     "adaptive-prompt-optimizer": "inprogress",
-    "ideas-html-report": "inprogress",
-    "ideas-agent-output-caching": "inprogress",
-    "ideas-cloudflare-log-source": "inprogress",
     "otel-metrics-export": "inprogress",
     "cross-platform-notification-hub": "inprogress",
-    "ideas-error-classification": "inprogress",
-    "llm-cost-optimizer-routing": "inprogress",
+    "ideas-task-lifecycle-hooks": "inprogress",
+    "ideas-agent-output-caching": "inprogress",
+    "mcp-server-integration": "inprogress",
+    "ideas-html-report": "inprogress",
+    "ideas-cloudflare-log-source": "inprogress",
     "natural-language-task-query": "inprogress",
     "visual-workflow-exporter": "inprogress",
-    "ideas-task-lifecycle-hooks": "inprogress",
     "ideas-dependency-pruning": "inprogress",
-    "mcp-server-integration": "inprogress"
+    "ideas-error-classification": "inprogress",
+    "llm-cost-optimizer-routing": "inprogress"
   }
 }
