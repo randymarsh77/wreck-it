@@ -229,11 +229,12 @@ async fn main() -> Result<()> {
                 {
                     config.api_endpoint = DEFAULT_FUGU_ENDPOINT.to_string();
                 }
+                let is_fugu = config.model_provider == ModelProvider::Fugu;
                 config.api_token = api_token
                     .clone()
                     .or(config.api_token)
-                    .or_else(|| env::var("FUGU_API_KEY").ok())
-                    .or_else(|| env::var("SAKANA_API_KEY").ok())
+                    .or_else(|| is_fugu.then(|| env::var("FUGU_API_KEY").ok()).flatten())
+                    .or_else(|| is_fugu.then(|| env::var("SAKANA_API_KEY").ok()).flatten())
                     .or_else(|| env::var("COPILOT_API_TOKEN").ok())
                     .or_else(|| env::var("GITHUB_TOKEN").ok());
 
@@ -508,10 +509,11 @@ async fn main() -> Result<()> {
                 {
                     config.api_endpoint = DEFAULT_FUGU_ENDPOINT.to_string();
                 }
+                let is_fugu = config.model_provider == ModelProvider::Fugu;
                 config.api_token = api_token
                     .or(config.api_token)
-                    .or_else(|| env::var("FUGU_API_KEY").ok())
-                    .or_else(|| env::var("SAKANA_API_KEY").ok())
+                    .or_else(|| is_fugu.then(|| env::var("FUGU_API_KEY").ok()).flatten())
+                    .or_else(|| is_fugu.then(|| env::var("SAKANA_API_KEY").ok()).flatten())
                     .or_else(|| env::var("COPILOT_API_TOKEN").ok())
                     .or_else(|| env::var("GITHUB_TOKEN").ok());
 
