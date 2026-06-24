@@ -71,8 +71,8 @@ use repo_config::{
 use std::env;
 use tui::TuiApp;
 use types::{
-    ModelProvider, Task, TaskStatus, DEFAULT_COPILOT_ENDPOINT, DEFAULT_GITHUB_MODELS_ENDPOINT,
-    DEFAULT_LLAMA_ENDPOINT,
+    ModelProvider, Task, TaskStatus, DEFAULT_COPILOT_ENDPOINT, DEFAULT_FUGU_ENDPOINT,
+    DEFAULT_GITHUB_MODELS_ENDPOINT, DEFAULT_LLAMA_ENDPOINT,
 };
 
 #[tokio::main]
@@ -224,9 +224,17 @@ async fn main() -> Result<()> {
                 {
                     config.api_endpoint = DEFAULT_GITHUB_MODELS_ENDPOINT.to_string();
                 }
+                if config.model_provider == ModelProvider::Fugu
+                    && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
+                {
+                    config.api_endpoint = DEFAULT_FUGU_ENDPOINT.to_string();
+                }
+                let is_fugu = config.model_provider == ModelProvider::Fugu;
                 config.api_token = api_token
                     .clone()
                     .or(config.api_token)
+                    .or_else(|| is_fugu.then(|| env::var("FUGU_API_KEY").ok()).flatten())
+                    .or_else(|| is_fugu.then(|| env::var("SAKANA_API_KEY").ok()).flatten())
                     .or_else(|| env::var("COPILOT_API_TOKEN").ok())
                     .or_else(|| env::var("GITHUB_TOKEN").ok());
 
@@ -496,8 +504,16 @@ async fn main() -> Result<()> {
                 {
                     config.api_endpoint = DEFAULT_GITHUB_MODELS_ENDPOINT.to_string();
                 }
+                if config.model_provider == ModelProvider::Fugu
+                    && config.api_endpoint == DEFAULT_COPILOT_ENDPOINT
+                {
+                    config.api_endpoint = DEFAULT_FUGU_ENDPOINT.to_string();
+                }
+                let is_fugu = config.model_provider == ModelProvider::Fugu;
                 config.api_token = api_token
                     .or(config.api_token)
+                    .or_else(|| is_fugu.then(|| env::var("FUGU_API_KEY").ok()).flatten())
+                    .or_else(|| is_fugu.then(|| env::var("SAKANA_API_KEY").ok()).flatten())
                     .or_else(|| env::var("COPILOT_API_TOKEN").ok())
                     .or_else(|| env::var("GITHUB_TOKEN").ok());
 

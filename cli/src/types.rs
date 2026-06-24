@@ -51,6 +51,14 @@ pub const DEFAULT_LLAMA_MODEL: &str = "llama3.2";
 pub const DEFAULT_GITHUB_MODELS_MODEL: &str = "anthropic/claude-opus-4.6";
 pub const DEFAULT_GITHUB_MODELS_NAMING_MODEL: &str = "openai/gpt-4o-mini";
 pub const LLAMA_PROVIDER_TYPE: &str = "openai";
+/// Default base URL for the Sakana AI Fugu inference service.
+///
+/// Fugu exposes an OpenAI-compatible chat-completions API, so it is wired
+/// through the same code path as the local Llama provider.  Override via the
+/// `--api-endpoint` flag or the `api_endpoint` config field.
+pub const DEFAULT_FUGU_ENDPOINT: &str = "https://api.sakana.ai/fugu/v1";
+/// Default model identifier requested from the Fugu service.
+pub const DEFAULT_FUGU_MODEL: &str = "fugu";
 pub const DEFAULT_COMPLETION_MARKER: &str = ".task-complete";
 pub const DEFAULT_PRECONDITION_MARKER: &str = ".task-precondition-met";
 pub const DEFAULT_REFLECTION_ROUNDS: u8 = 2;
@@ -71,6 +79,15 @@ pub enum ModelProvider {
     #[serde(alias = "copilot-autopilot")]
     #[value(alias = "copilot-autopilot")]
     CopilotAutopilot,
+    /// Use the Sakana AI Fugu inference service (https://sakana.ai/fugu/).
+    ///
+    /// Fugu exposes an OpenAI-compatible chat-completions API, so it is driven
+    /// through the same OpenAI wire protocol as the local Llama provider.
+    /// Supply the API key via `--api-token` or the `FUGU_API_KEY` /
+    /// `SAKANA_API_KEY` environment variables.
+    #[serde(alias = "sakana-fugu")]
+    #[value(alias = "sakana-fugu")]
+    Fugu,
 }
 
 /// How task completeness is evaluated after the agent finishes work.
@@ -1075,5 +1092,33 @@ mod tests {
         let mut state = LoopState::new(10);
         state.semantic_scores.insert("my-task".to_string(), 85);
         assert_eq!(state.semantic_scores.get("my-task").copied(), Some(85));
+    }
+
+    #[test]
+    fn model_provider_fugu_serde_roundtrip_and_aliases() {
+        // Canonical lowercase name.
+        let p: ModelProvider = serde_json::from_str("\"fugu\"").unwrap();
+        assert_eq!(p, ModelProvider::Fugu);
+        // Alias accepted on deserialization.
+        let aliased: ModelProvider = serde_json::from_str("\"sakana-fugu\"").unwrap();
+        assert_eq!(aliased, ModelProvider::Fugu);
+        // Serializes back to the canonical name.
+        assert_eq!(
+            serde_json::to_string(&ModelProvider::Fugu).unwrap(),
+            "\"fugu\""
+        );
+    }
+
+    #[test]
+    fn model_provider_fugu_parses_from_cli_value() {
+        use clap::ValueEnum;
+        assert_eq!(
+            ModelProvider::from_str("fugu", true).unwrap(),
+            ModelProvider::Fugu
+        );
+        assert_eq!(
+            ModelProvider::from_str("sakana-fugu", true).unwrap(),
+            ModelProvider::Fugu
+        );
     }
 }

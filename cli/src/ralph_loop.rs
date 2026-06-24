@@ -17,7 +17,7 @@ use crate::security_gate;
 use crate::task_manager::{get_next_task, load_tasks, save_tasks};
 use crate::types::{
     AgentRole, BudgetStrategy, Config, EvaluationMode, LoopState, ModelProvider, Task, TaskStatus,
-    DEFAULT_AUTOPILOT_MODEL, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
+    DEFAULT_AUTOPILOT_MODEL, DEFAULT_FUGU_MODEL, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
@@ -34,6 +34,7 @@ fn model_name(provider: &ModelProvider) -> String {
         ModelProvider::Llama => DEFAULT_LLAMA_MODEL.to_string(),
         ModelProvider::GithubModels => DEFAULT_GITHUB_MODELS_MODEL.to_string(),
         ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL.to_string(),
+        ModelProvider::Fugu => DEFAULT_FUGU_MODEL.to_string(),
     }
 }
 
@@ -238,6 +239,7 @@ impl RalphLoop {
             ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
             ModelProvider::Copilot => "copilot",
             ModelProvider::CopilotAutopilot => DEFAULT_AUTOPILOT_MODEL,
+            ModelProvider::Fugu => DEFAULT_FUGU_MODEL,
         };
         let (inp, out) = model_pricing(model_str);
         let cost_tracker = Arc::new(Mutex::new(CostTracker::new(inp, out)));

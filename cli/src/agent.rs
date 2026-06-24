@@ -4,8 +4,9 @@ use crate::cost_tracker::{CostTracker, TokenUsage};
 use crate::prompt_loader;
 use crate::semantic_eval::{self, SemanticVerdict};
 use crate::types::{
-    CriticResult, EvaluationMode, ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL,
-    DEFAULT_LLAMA_MODEL, DEFAULT_PRECONDITION_MARKER, LLAMA_PROVIDER_TYPE,
+    CriticResult, EvaluationMode, ModelProvider, Task, DEFAULT_FUGU_MODEL,
+    DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL, DEFAULT_PRECONDITION_MARKER,
+    LLAMA_PROVIDER_TYPE,
 };
 use anyhow::{bail, Context, Result};
 use copilot_sdk_supercharged::*;
@@ -318,6 +319,36 @@ impl AgentClient {
         self.work_dir = work_dir;
     }
 
+    /// Default model identifier to request when the provider speaks the OpenAI
+    /// wire protocol through the Copilot SDK (Llama and Sakana Fugu).
+    ///
+    /// Returns `None` for providers (Copilot, GitHub Models, Copilot autopilot)
+    /// that do not accept an explicit model in the SDK session config.
+    fn openai_compatible_model(&self) -> Option<String> {
+        match self.model_provider {
+            ModelProvider::Llama => Some(DEFAULT_LLAMA_MODEL.to_string()),
+            ModelProvider::Fugu => Some(DEFAULT_FUGU_MODEL.to_string()),
+            _ => None,
+        }
+    }
+
+    /// Build the SDK [`ProviderConfig`] for OpenAI-compatible HTTP providers
+    /// (Llama and Sakana Fugu), pointing the SDK at `self.api_endpoint` with the
+    /// configured API token.  Returns `None` for all other providers.
+    fn openai_compatible_provider(&self) -> Option<ProviderConfig> {
+        match self.model_provider {
+            ModelProvider::Llama | ModelProvider::Fugu => Some(ProviderConfig {
+                provider_type: Some(LLAMA_PROVIDER_TYPE.to_string()),
+                wire_api: None,
+                base_url: self.api_endpoint.clone(),
+                api_key: self.api_token.clone(),
+                bearer_token: None,
+                azure: None,
+            }),
+            _ => None,
+        }
+    }
+
     /// Return the configured evaluation mode.
     pub fn evaluation_mode(&self) -> EvaluationMode {
         self.evaluation_mode
@@ -444,23 +475,8 @@ impl AgentClient {
         let config = SessionConfig {
             request_permission: Some(false), // Auto-approve for autonomous mode
             request_user_input: Some(false), // No user input in autonomous mode
-            model: if self.model_provider == ModelProvider::Llama {
-                Some(DEFAULT_LLAMA_MODEL.to_string())
-            } else {
-                None
-            },
-            provider: if self.model_provider == ModelProvider::Llama {
-                Some(ProviderConfig {
-                    provider_type: Some(LLAMA_PROVIDER_TYPE.to_string()),
-                    wire_api: None,
-                    base_url: self.api_endpoint.clone(),
-                    api_key: self.api_token.clone(),
-                    bearer_token: None,
-                    azure: None,
-                })
-            } else {
-                None
-            },
+            model: self.openai_compatible_model(),
+            provider: self.openai_compatible_provider(),
             ..Default::default()
         };
 
@@ -966,23 +982,8 @@ impl AgentClient {
         let config = SessionConfig {
             request_permission: Some(false),
             request_user_input: Some(false),
-            model: if self.model_provider == ModelProvider::Llama {
-                Some(DEFAULT_LLAMA_MODEL.to_string())
-            } else {
-                None
-            },
-            provider: if self.model_provider == ModelProvider::Llama {
-                Some(ProviderConfig {
-                    provider_type: Some(LLAMA_PROVIDER_TYPE.to_string()),
-                    wire_api: None,
-                    base_url: self.api_endpoint.clone(),
-                    api_key: self.api_token.clone(),
-                    bearer_token: None,
-                    azure: None,
-                })
-            } else {
-                None
-            },
+            model: self.openai_compatible_model(),
+            provider: self.openai_compatible_provider(),
             ..Default::default()
         };
 
@@ -1116,23 +1117,8 @@ impl AgentClient {
         let config = SessionConfig {
             request_permission: Some(false),
             request_user_input: Some(false),
-            model: if self.model_provider == ModelProvider::Llama {
-                Some(DEFAULT_LLAMA_MODEL.to_string())
-            } else {
-                None
-            },
-            provider: if self.model_provider == ModelProvider::Llama {
-                Some(ProviderConfig {
-                    provider_type: Some(LLAMA_PROVIDER_TYPE.to_string()),
-                    wire_api: None,
-                    base_url: self.api_endpoint.clone(),
-                    api_key: self.api_token.clone(),
-                    bearer_token: None,
-                    azure: None,
-                })
-            } else {
-                None
-            },
+            model: self.openai_compatible_model(),
+            provider: self.openai_compatible_provider(),
             ..Default::default()
         };
 
@@ -1308,23 +1294,8 @@ impl AgentClient {
         let config = SessionConfig {
             request_permission: Some(false),
             request_user_input: Some(false),
-            model: if self.model_provider == ModelProvider::Llama {
-                Some(DEFAULT_LLAMA_MODEL.to_string())
-            } else {
-                None
-            },
-            provider: if self.model_provider == ModelProvider::Llama {
-                Some(ProviderConfig {
-                    provider_type: Some(LLAMA_PROVIDER_TYPE.to_string()),
-                    wire_api: None,
-                    base_url: self.api_endpoint.clone(),
-                    api_key: self.api_token.clone(),
-                    bearer_token: None,
-                    azure: None,
-                })
-            } else {
-                None
-            },
+            model: self.openai_compatible_model(),
+            provider: self.openai_compatible_provider(),
             ..Default::default()
         };
 
@@ -1684,6 +1655,60 @@ mod tests {
         // GithubModels provider should not initialize a copilot client
         assert!(client.copilot_client.is_none());
         assert_eq!(client.model_provider, ModelProvider::GithubModels);
+    }
+
+    #[test]
+    fn fugu_provider_creates_client() {
+        let client = AgentClient::with_evaluation(
+            ModelProvider::Fugu,
+            crate::types::DEFAULT_FUGU_ENDPOINT.to_string(),
+            Some("test-token".to_string()),
+            ".".to_string(),
+            None,
+            EvaluationMode::Command,
+            None,
+            ".task-complete".to_string(),
+        );
+        // Fugu is an HTTP/OpenAI-compatible provider and must not eagerly
+        // initialize a Copilot SDK client.
+        assert!(client.copilot_client.is_none());
+        assert_eq!(client.model_provider, ModelProvider::Fugu);
+    }
+
+    #[test]
+    fn fugu_provider_uses_openai_compatible_session_config() {
+        let client = AgentClient::new(
+            ModelProvider::Fugu,
+            "https://example.test/fugu/v1".to_string(),
+            Some("fugu-key".to_string()),
+            ".".to_string(),
+            None,
+        );
+        // Fugu mirrors the Llama branch: an explicit model plus an OpenAI
+        // provider config pointing at the configured endpoint and token.
+        assert_eq!(
+            client.openai_compatible_model(),
+            Some(crate::types::DEFAULT_FUGU_MODEL.to_string())
+        );
+        let provider = client
+            .openai_compatible_provider()
+            .expect("Fugu should produce an OpenAI provider config");
+        assert_eq!(provider.provider_type.as_deref(), Some(LLAMA_PROVIDER_TYPE));
+        assert_eq!(provider.base_url, "https://example.test/fugu/v1");
+        assert_eq!(provider.api_key.as_deref(), Some("fugu-key"));
+    }
+
+    #[test]
+    fn non_openai_providers_have_no_session_provider_config() {
+        let client = AgentClient::new(
+            ModelProvider::Copilot,
+            "https://api.githubcopilot.com".to_string(),
+            None,
+            ".".to_string(),
+            None,
+        );
+        assert!(client.openai_compatible_model().is_none());
+        assert!(client.openai_compatible_provider().is_none());
     }
 
     #[tokio::test]

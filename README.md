@@ -65,6 +65,8 @@ wreck-it supports multiple model providers. Choose one:
 
 3. **Local Llama**: Use a local Ollama instance. No subscription needed.
 
+4. **Sakana Fugu**: Use the [Sakana AI Fugu](https://sakana.ai/fugu/) inference service via its OpenAI-compatible API. Supply the API key through `--api-token` or the `FUGU_API_KEY` (or `SAKANA_API_KEY`) environment variable.
+
 ### Using Nix Flakes (Recommended)
 
 ```bash
@@ -90,6 +92,7 @@ Choose a model provider:
 - **GitHub Models** *(recommended)*: Set `GITHUB_TOKEN` in your environment.
 - **Copilot SDK**: Run `copilot auth login` and verify with `copilot --version`.
 - **Local Llama**: Start Ollama and use `--model-provider llama --api-endpoint http://localhost:11434/v1`.
+- **Sakana Fugu**: Set `FUGU_API_KEY` (or `SAKANA_API_KEY`) and use `--model-provider fugu` (override the endpoint with `--api-endpoint` if needed).
 
 ### Initialize a Task File
 
@@ -110,7 +113,7 @@ Options:
 - `-m, --max-iterations <NUM>`: Maximum iterations (default: `100`)
 - `-w, --work-dir <PATH>`: Working directory (default: `.`)
 - `--work-dir-map <ROLE_OR_ID=PATH>`: Override the working directory for tasks matching a role or ID (may be repeated; see `docs/multi-repo.md`)
-- `--model-provider <github-models|copilot|llama>`: Model provider
+- `--model-provider <github-models|copilot|llama|fugu>`: Model provider
 - `--api-endpoint <URL>`: Provider endpoint (for local llama use `http://localhost:11434/v1`)
 - `--api-token <TOKEN>`: API token (can also be set via `COPILOT_API_TOKEN` env var)
 - `--verify-command <COMMAND>`: Custom shell command/script to verify completion (non-zero exit marks task failed; only use trusted commands)
@@ -488,7 +491,7 @@ A **Personal Access Token** (`PAT_TOKEN` secret) with `repo` and `models:read` s
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `model_provider` | Model provider (`github-models`, `copilot`, or `llama`) | `github-models` |
+| `model_provider` | Model provider (`github-models`, `copilot`, `llama`, or `fugu`) | `github-models` |
 | `max_iterations` | Maximum loop iterations | `100` |
 | `verify_command` | Shell command to verify task completion | *(none)* |
 | `state_branch` | Git branch for wreck-it state | `wreck-it-state` |

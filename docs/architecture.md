@@ -144,7 +144,7 @@ Terminal UI for monitoring:
 - `--work-dir`: Repository directory (default: .)
 - `--api-endpoint`: API endpoint
 - `--api-token`: API token (or set `COPILOT_API_TOKEN` env var)
-- `--model-provider`: `github-models`, `copilot`, `copilot-autopilot`, or `llama`
+- `--model-provider`: `github-models`, `copilot`, `copilot-autopilot`, `llama`, or `fugu`
 - `--verify-command`: Custom verification command
 - `--evaluation-mode`: `command` or `agent-file`
 - `--headless`: Run without TUI for CI environments
