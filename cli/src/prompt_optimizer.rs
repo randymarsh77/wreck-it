@@ -10,7 +10,9 @@
 //!    success / failure patterns across all tasks as a Markdown artefact.
 
 use crate::provenance::load_provenance_records;
-use crate::types::{ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL};
+use crate::types::{
+    ModelProvider, Task, DEFAULT_FUGU_MODEL, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
+};
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 
@@ -66,6 +68,7 @@ impl PromptOptimizer {
         match self.model_provider {
             ModelProvider::GithubModels
             | ModelProvider::Llama
+            | ModelProvider::Fugu
             | ModelProvider::CopilotAutopilot => self.call_via_http(prompt).await,
             ModelProvider::Copilot => self.call_via_copilot_sdk(prompt).await,
         }
@@ -79,6 +82,7 @@ impl PromptOptimizer {
 
         let model = match self.model_provider {
             ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
+            ModelProvider::Fugu => DEFAULT_FUGU_MODEL,
             _ => DEFAULT_GITHUB_MODELS_MODEL,
         };
 

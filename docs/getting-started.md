@@ -25,6 +25,8 @@ Before installing wreck-it, choose a model provider:
 
 3. **Local Llama**: Run a local Ollama instance. No subscription needed.
 
+4. **Sakana Fugu**: Use the [Sakana AI Fugu](https://sakana.ai/fugu/) inference service via its OpenAI-compatible API. Select it with `--model-provider fugu` and provide the API key through `--api-token` or the `FUGU_API_KEY` (or `SAKANA_API_KEY`) environment variable. Override the default endpoint with `--api-endpoint` if Sakana publishes a different URL for your account.
+
 ### Using Nix (Recommended)
 
 ```bash

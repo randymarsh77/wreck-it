@@ -1,5 +1,7 @@
 use crate::task_manager::save_tasks;
-use crate::types::{ModelProvider, Task, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL};
+use crate::types::{
+    ModelProvider, Task, DEFAULT_FUGU_MODEL, DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_LLAMA_MODEL,
+};
 use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Command;
@@ -55,6 +57,7 @@ impl TaskReplanner {
         match self.model_provider {
             ModelProvider::GithubModels
             | ModelProvider::Llama
+            | ModelProvider::Fugu
             | ModelProvider::CopilotAutopilot => self.call_via_http(prompt).await,
             ModelProvider::Copilot => self.call_via_copilot_sdk(prompt).await,
         }
@@ -68,6 +71,7 @@ impl TaskReplanner {
 
         let model = match self.model_provider {
             ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
+            ModelProvider::Fugu => DEFAULT_FUGU_MODEL,
             _ => DEFAULT_GITHUB_MODELS_MODEL,
         };
 

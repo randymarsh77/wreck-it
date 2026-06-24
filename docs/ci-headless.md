@@ -74,7 +74,7 @@ Push the workflow file. You can trigger the first run immediately via **Actions 
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `model_provider` | Model provider (`github-models`, `copilot`, or `llama`) | `github-models` |
+| `model_provider` | Model provider (`github-models`, `copilot`, `llama`, or `fugu`) | `github-models` |
 | `max_iterations` | Maximum loop iterations per run | `100` |
 | `verify_command` | Shell command to verify task completion | *(none)* |
 | `state_branch` | Orphan branch used to persist state between runs | `wreck-it-state` |

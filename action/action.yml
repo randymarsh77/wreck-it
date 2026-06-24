@@ -5,7 +5,7 @@ inputs:
     description: 'Command to run (default runs the headless ralph loop; set to "unstuck" to scan PRs for failing CI)'
     required: false
   model_provider:
-    description: 'Model provider to use (github-models, copilot, or llama)'
+    description: 'Model provider to use (github-models, copilot, llama, or fugu)'
     required: false
     default: 'github-models'
   max_iterations:

@@ -1,6 +1,6 @@
 use crate::types::{
-    AgentRole, ModelProvider, Task, TaskKind, TaskStatus, DEFAULT_GITHUB_MODELS_MODEL,
-    DEFAULT_GITHUB_MODELS_NAMING_MODEL, DEFAULT_LLAMA_MODEL,
+    AgentRole, ModelProvider, Task, TaskKind, TaskStatus, DEFAULT_FUGU_MODEL,
+    DEFAULT_GITHUB_MODELS_MODEL, DEFAULT_GITHUB_MODELS_NAMING_MODEL, DEFAULT_LLAMA_MODEL,
 };
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -74,6 +74,7 @@ impl TaskPlanner {
         match self.model_provider {
             ModelProvider::GithubModels
             | ModelProvider::Llama
+            | ModelProvider::Fugu
             | ModelProvider::CopilotAutopilot => self.call_via_http(prompt, model_override).await,
             ModelProvider::Copilot => self.call_via_copilot_sdk(prompt).await,
         }
@@ -89,6 +90,7 @@ impl TaskPlanner {
             Some(m) => m,
             None => match self.model_provider {
                 ModelProvider::Llama => DEFAULT_LLAMA_MODEL,
+                ModelProvider::Fugu => DEFAULT_FUGU_MODEL,
                 _ => DEFAULT_GITHUB_MODELS_MODEL,
             },
         };
