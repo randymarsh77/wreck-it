@@ -17,8 +17,8 @@ use crate::types::WorkflowRunPayload;
 use worker::{console_log, console_warn};
 use wreck_it_core::config::TriageConfig;
 use wreck_it_core::triage::{
-    resolve_ci_items_for_success, truncate_detail, upsert_item, TriageItem, TriageSource,
-    TriageStatus, TriageUpsert, MAX_DETAIL_BYTES,
+    resolve_ci_items_for_success, resolve_items_for_pr, truncate_detail, upsert_item, TriageItem,
+    TriageSource, TriageStatus, TriageUpsert, MAX_DETAIL_BYTES,
 };
 
 /// Label applied to triage-dispatched fix issues.
@@ -327,6 +327,104 @@ async fn collect_evidence(client: &GitHubClient, run: &WorkflowRunPayload) -> St
     truncate_detail(evidence)
 }
 
+/// Resolve open triage items linked to a merged PR.
+///
+/// Returns the number of items resolved.  Best-effort caller side: a KV
+/// failure here must not fail the surrounding webhook handling.
+pub async fn handle_merged_pr(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    now: u64,
+) -> Result<usize, String> {
+    let mut items = kv_store::load_triage(kv, owner, repo).await?;
+    let resolved = resolve_items_for_pr(&mut items, pr_number, now);
+    if resolved > 0 {
+        kv_store::save_triage(kv, owner, repo, &items).await?;
+    }
+    Ok(resolved)
+}
+
+/// Link a trusted PR to the triage items whose fix issues it references.
+///
+/// Scans the PR body for `#N` issue references (coding agents reliably
+/// write `Fixes #N` for assigned issues) and transitions matching
+/// `Investigating` items to `PrOpen`.  Returns the number of items linked.
+pub async fn handle_pr_linkage(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    pr_body: Option<&str>,
+    now: u64,
+) -> Result<usize, String> {
+    let refs = match pr_body {
+        Some(body) => extract_issue_refs(body),
+        None => return Ok(0),
+    };
+    if refs.is_empty() {
+        return Ok(0);
+    }
+    let mut items = kv_store::load_triage(kv, owner, repo).await?;
+    let linked = link_pr_to_items(&mut items, pr_number, &refs, now);
+    if linked > 0 {
+        kv_store::save_triage(kv, owner, repo, &items).await?;
+    }
+    Ok(linked)
+}
+
+/// Extract `#123`-style issue references from text (deduplicated, in order).
+pub fn extract_issue_refs(text: &str) -> Vec<u64> {
+    let mut refs = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'#' {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
+                end += 1;
+            }
+            if end > start {
+                if let Ok(n) = text[start..end].parse::<u64>() {
+                    if !refs.contains(&n) {
+                        refs.push(n);
+                    }
+                }
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    refs
+}
+
+/// Transition `Investigating` items whose fix issue appears in `issue_refs`
+/// to `PrOpen`, recording the PR number.  Returns the number linked.
+pub fn link_pr_to_items(
+    items: &mut [TriageItem],
+    pr_number: u64,
+    issue_refs: &[u64],
+    now: u64,
+) -> usize {
+    let mut linked = 0;
+    for item in items.iter_mut() {
+        if item.status == TriageStatus::Investigating {
+            if let Some(issue) = item.issue_number {
+                if issue_refs.contains(&issue) {
+                    item.status = TriageStatus::PrOpen;
+                    item.pr_number = Some(pr_number);
+                    item.updated_at = now;
+                    linked += 1;
+                }
+            }
+        }
+    }
+    linked
+}
+
 /// Strip ANSI escape sequences (CSI and simple two-byte escapes) from `s`.
 ///
 /// Job logs are frequently colorized; the sequences are noise in issue
@@ -552,6 +650,66 @@ mod tests {
     fn strip_ansi_handles_trailing_escape() {
         assert_eq!(strip_ansi("abc\u{1b}"), "abc");
         assert_eq!(strip_ansi("abc\u{1b}[31"), "abc");
+    }
+
+    #[test]
+    fn extract_issue_refs_finds_and_dedupes() {
+        assert_eq!(
+            extract_issue_refs("Fixes #12 and closes #7, also #12 again"),
+            vec![12, 7]
+        );
+        assert_eq!(
+            extract_issue_refs("no refs here # or #x"),
+            Vec::<u64>::new()
+        );
+        assert_eq!(extract_issue_refs(""), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn link_pr_transitions_only_investigating_items() {
+        let mut item = TriageItem::new(
+            workflow_run_source(&run(Some("failure"), Some("main"))),
+            "t".to_string(),
+            None,
+            1000,
+        );
+        item.status = TriageStatus::Investigating;
+        item.issue_number = Some(55);
+
+        let mut other = TriageItem::new(
+            TriageSource::LogEvent {
+                provider: "seq".to_string(),
+                event_id: "9".to_string(),
+            },
+            "other".to_string(),
+            None,
+            1000,
+        );
+        other.issue_number = Some(56); // still New — must not link
+
+        let mut items = vec![item, other];
+        let linked = link_pr_to_items(&mut items, 88, &[55, 56], 2000);
+        assert_eq!(linked, 1);
+        assert_eq!(items[0].status, TriageStatus::PrOpen);
+        assert_eq!(items[0].pr_number, Some(88));
+        assert_eq!(items[0].updated_at, 2000);
+        assert_eq!(items[1].status, TriageStatus::New);
+        assert_eq!(items[1].pr_number, None);
+    }
+
+    #[test]
+    fn link_pr_ignores_unreferenced_issues() {
+        let mut item = TriageItem::new(
+            workflow_run_source(&run(Some("failure"), Some("main"))),
+            "t".to_string(),
+            None,
+            1000,
+        );
+        item.status = TriageStatus::Investigating;
+        item.issue_number = Some(55);
+        let mut items = vec![item];
+        assert_eq!(link_pr_to_items(&mut items, 88, &[99], 2000), 0);
+        assert_eq!(items[0].status, TriageStatus::Investigating);
     }
 
     #[test]

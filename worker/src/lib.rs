@@ -448,6 +448,19 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
 
     console_log!("[wreck-it] config found — proceeding with event handling");
 
+    // Parse the repo config once — the workflow_run branch and the triage
+    // PR hooks below both need it.
+    let repo_config: types::RepoConfig = config_file
+        .as_ref()
+        .and_then(|f| github::GitHubClient::decode_content(f).ok())
+        .and_then(|content| toml::from_str(&content).ok())
+        .unwrap_or_default();
+    let triage_enabled = repo_config
+        .triage
+        .as_ref()
+        .map(|t| t.enabled)
+        .unwrap_or(false);
+
     // Workflow-run handling combines two independent responders:
     //
     //   1. CI-failure triage — failing runs on triaged branches become
@@ -462,12 +475,6 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
             .workflow_run
             .as_ref()
             .ok_or_else(|| Error::RustError("Missing workflow_run in payload".into()))?;
-
-        let repo_config: types::RepoConfig = config_file
-            .as_ref()
-            .and_then(|f| github::GitHubClient::decode_content(f).ok())
-            .and_then(|content| toml::from_str(&content).ok())
-            .unwrap_or_default();
 
         let mut summaries: Vec<String> = Vec::new();
 
@@ -572,7 +579,66 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
             let action = payload.action.as_deref().unwrap_or("");
             let merged = pr.merged.unwrap_or(false);
 
+            // Triage linkage: connect an agent's fix PR to the triage items
+            // whose dispatched issues it references (Investigating → PrOpen).
+            // Gated on triage being enabled so other repos pay no KV cost.
+            if triage_enabled && action != "closed" {
+                if let Ok(kv) = env.kv(kv_store::KV_BINDING) {
+                    match triage::handle_pr_linkage(
+                        &kv,
+                        owner,
+                        repo_name,
+                        pr.number,
+                        pr.body.as_deref(),
+                        js_sys_now_secs(),
+                    )
+                    .await
+                    {
+                        Ok(n) if n > 0 => {
+                            console_log!(
+                                "[wreck-it][triage] linked PR #{} to {} triage item(s)",
+                                pr.number,
+                                n,
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            console_warn!("[wreck-it][triage] PR linkage failed: {e}");
+                        }
+                    }
+                }
+            }
+
             if action == "closed" && merged {
+                // Triage resolution: a merged fix PR resolves its items.
+                if triage_enabled {
+                    if let Ok(kv) = env.kv(kv_store::KV_BINDING) {
+                        match triage::handle_merged_pr(
+                            &kv,
+                            owner,
+                            repo_name,
+                            pr.number,
+                            js_sys_now_secs(),
+                        )
+                        .await
+                        {
+                            Ok(n) if n > 0 => {
+                                console_log!(
+                                    "[wreck-it][triage] resolved {} item(s) via merged PR #{}",
+                                    n,
+                                    pr.number,
+                                );
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                console_warn!(
+                                    "[wreck-it][triage] merged-PR resolution failed: {e}"
+                                );
+                            }
+                        }
+                    }
+                }
+
                 // Merged PR — handle task completion.
                 console_log!("[wreck-it] handling merged PR #{}", pr.number);
                 match processor::process_merged_pr(&client, default_branch, pr.number).await {
