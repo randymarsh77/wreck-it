@@ -287,6 +287,12 @@ export default function Installations() {
                                   <Link to={`/repos/${r.owner.login}/${r.name}/config`}>
                                     {r.full_name}
                                   </Link>
+                                  <Link
+                                    to={`/repos/${r.owner.login}/${r.name}/triage`}
+                                    className="muted repo-triage-link"
+                                  >
+                                    triage
+                                  </Link>
                                   {r.description && (
                                     <span className="muted repo-desc">{r.description}</span>
                                   )}

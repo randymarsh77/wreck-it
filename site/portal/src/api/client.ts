@@ -342,6 +342,62 @@ export async function reinitializeInstallation(
   )
 }
 
+export type TriageStatus =
+  | 'new'
+  | 'investigating'
+  | 'pr_open'
+  | 'resolved'
+  | 'dismissed'
+  | 'stale'
+
+export type TriageSeverity = 'low' | 'medium' | 'high' | 'critical'
+
+export interface TriageSource {
+  type: 'ci_failure' | 'log_event' | 'slack_mention' | 'security_finding'
+  run_id?: number
+  workflow_name?: string
+  branch?: string
+  head_sha?: string
+  conclusion?: string
+  run_url?: string
+  run_attempt?: number
+  provider?: string
+  event_id?: string
+  [key: string]: unknown
+}
+
+export interface TriageItem {
+  id: string
+  source: TriageSource
+  status: TriageStatus
+  severity: TriageSeverity
+  title: string
+  detail?: string
+  correlation_key: string
+  occurrences: number
+  created_at: number
+  updated_at: number
+  issue_number?: number
+  pr_number?: number
+}
+
+export async function getTriage(owner: string, repo: string): Promise<TriageItem[]> {
+  return request<TriageItem[]>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/triage`,
+  )
+}
+
+export async function dismissTriageItem(
+  owner: string,
+  repo: string,
+  id: string,
+): Promise<TriageItem> {
+  return request<TriageItem>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/triage/${encodeURIComponent(id)}/dismiss`,
+    { method: 'POST' },
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Agent (Durable Object) endpoints
 // ---------------------------------------------------------------------------
@@ -404,6 +460,17 @@ export async function agentRun(
 ): Promise<AgentRunResponse> {
   return request<AgentRunResponse>(
     `${agentBasePath(owner, repo, name)}/run`,
+    { method: 'POST' },
+  )
+}
+
+export async function retryTriageItem(
+  owner: string,
+  repo: string,
+  id: string,
+): Promise<TriageItem> {
+  return request<TriageItem>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/triage/${encodeURIComponent(id)}/retry`,
     { method: 'POST' },
   )
 }
