@@ -320,7 +320,8 @@ pub async fn delete_slack_link(
     team_id: &str,
     channel_id: &str,
 ) -> Result<bool, String> {
-    let link: Option<SlackChannelLink> = load_json(kv, &slack_link_key(team_id, channel_id)).await?;
+    let link: Option<SlackChannelLink> =
+        load_json(kv, &slack_link_key(team_id, channel_id)).await?;
     let link = match link {
         Some(l) => l,
         None => return Ok(false),
@@ -363,7 +364,9 @@ pub struct SlackTeamRef {
 
 /// Load the installed-teams index.
 pub async fn load_slack_teams(kv: &worker::kv::KvStore) -> Result<Vec<SlackTeamRef>, String> {
-    Ok(load_json(kv, SLACK_TEAMS_INDEX_KEY).await?.unwrap_or_default())
+    Ok(load_json(kv, SLACK_TEAMS_INDEX_KEY)
+        .await?
+        .unwrap_or_default())
 }
 
 /// Upsert a team into the installed-teams index.
@@ -508,7 +511,10 @@ mod tests {
     fn slack_key_formats() {
         assert_eq!(slack_team_key("T123"), "_slack/team/T123");
         assert_eq!(slack_link_key("T123", "C9"), "_slack/link/T123/C9");
-        assert_eq!(slack_links_index_key("octo", "repo"), "octo/repo/slack_links");
+        assert_eq!(
+            slack_links_index_key("octo", "repo"),
+            "octo/repo/slack_links"
+        );
         assert_eq!(slack_event_key("Ev1"), "_slack/event/Ev1");
     }
 

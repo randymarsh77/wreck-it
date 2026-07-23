@@ -223,9 +223,7 @@ pub fn build_mention_issue_body(
          ````text\n{text}\n````\n"
     );
     if !thread_context.is_empty() {
-        body.push_str(
-            "\n## Thread context (untrusted, most recent last)\n\n````text\n",
-        );
+        body.push_str("\n## Thread context (untrusted, most recent last)\n\n````text\n");
         for line in thread_context {
             body.push_str(line);
             body.push('\n');
@@ -288,7 +286,10 @@ async fn process_mention(
         .channel
         .clone()
         .ok_or_else(|| "mention has no channel".to_string())?;
-    let ts = event.ts.clone().ok_or_else(|| "mention has no ts".to_string())?;
+    let ts = event
+        .ts
+        .clone()
+        .ok_or_else(|| "mention has no ts".to_string())?;
     let thread_root = event.thread_ts.clone().unwrap_or_else(|| ts.clone());
     let user = event.user.clone().unwrap_or_else(|| "unknown".to_string());
 
@@ -302,8 +303,7 @@ async fn process_mention(
         None => {
             let text = "⚠️ This channel isn't linked to a repository yet. \
                         Connect it from the wreck-it portal (Repo Config → Slack).";
-            let blocks =
-                serde_json::json!([{ "type": "section", "text": { "type": "mrkdwn", "text": text } }]);
+            let blocks = serde_json::json!([{ "type": "section", "text": { "type": "mrkdwn", "text": text } }]);
             slack
                 .post_message(&channel, &blocks, text, Some(&thread_root))
                 .await?;
@@ -315,8 +315,7 @@ async fn process_mention(
     match parse_mention_command(&stripped) {
         MentionCommand::Help => {
             let text = help_text();
-            let blocks =
-                serde_json::json!([{ "type": "section", "text": { "type": "mrkdwn", "text": text } }]);
+            let blocks = serde_json::json!([{ "type": "section", "text": { "type": "mrkdwn", "text": text } }]);
             slack
                 .post_message(&channel, &blocks, "wreck-it help", Some(&thread_root))
                 .await?;
@@ -325,8 +324,7 @@ async fn process_mention(
         MentionCommand::Status => {
             let items = kv_store::load_triage(kv, &link.owner, &link.repo).await?;
             let text = status_summary(&link.owner, &link.repo, &items);
-            let blocks =
-                serde_json::json!([{ "type": "section", "text": { "type": "mrkdwn", "text": text } }]);
+            let blocks = serde_json::json!([{ "type": "section", "text": { "type": "mrkdwn", "text": text } }]);
             slack
                 .post_message(&channel, &blocks, "triage status", Some(&thread_root))
                 .await?;
@@ -394,8 +392,7 @@ async fn create_from_mention(
                 ),
                 None => "👀 Already tracking this thread as a triage item.".to_string(),
             };
-            let blocks =
-                serde_json::json!([{ "type": "section", "text": { "type": "mrkdwn", "text": text } }]);
+            let blocks = serde_json::json!([{ "type": "section", "text": { "type": "mrkdwn", "text": text } }]);
             slack
                 .post_message(channel, &blocks, "already tracking", Some(thread_root))
                 .await?;
@@ -436,9 +433,7 @@ async fn create_from_mention(
         .create_issue(&issue_title, &issue_body, &[TRIAGE_ISSUE_LABEL])
         .await?;
     if !github.assign_agent(issue_number, node_id.as_deref()).await {
-        console_warn!(
-            "[wreck-it][slack] could not assign a coding agent to issue #{issue_number}",
-        );
+        console_warn!("[wreck-it][slack] could not assign a coding agent to issue #{issue_number}",);
     }
 
     // Update the freshly created item and record the announcement thread.

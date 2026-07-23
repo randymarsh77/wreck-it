@@ -221,7 +221,7 @@ pub async fn run_security_ingest(
     }
 
     if created + updated + resolved > 0 {
-        kv_store::save_triage(kv, owner, repo, &items).await?;
+        crate::slack_notify::sync_and_save(kv, owner, repo, &mut items).await?;
     }
 
     let mut summary =
@@ -282,7 +282,7 @@ pub async fn handle_dep_update_pr(
             candidate.pr_number = Some(pr.number);
 
             let upsert = upsert_item(&mut items, candidate, config.effective_max_items());
-            kv_store::save_triage(kv, owner, repo, &items).await?;
+            crate::slack_notify::sync_and_save(kv, owner, repo, &mut items).await?;
 
             if action == "opened" && matches!(upsert, wreck_it_core::triage::TriageUpsert::Created)
             {
@@ -317,7 +317,7 @@ pub async fn handle_dep_update_pr(
                 }
             }
             if changed > 0 {
-                kv_store::save_triage(kv, owner, repo, &items).await?;
+                crate::slack_notify::sync_and_save(kv, owner, repo, &mut items).await?;
             }
             Ok(format!(
                 "dep-update PR #{} closed ({}) — {changed} item(s) updated",

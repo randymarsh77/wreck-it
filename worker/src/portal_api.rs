@@ -2262,7 +2262,7 @@ async fn dismiss_triage_item(req: Request, ctx: RouteContext<()>) -> Result<Resp
     item.updated_at = js_sys::Date::now() as u64 / 1000;
     let updated = item.clone();
 
-    kv_store::save_triage(&kv, &owner, &repo, &items)
+    crate::slack_notify::sync_and_save(&kv, &owner, &repo, &mut items)
         .await
         .map_err(Error::RustError)?;
     json_response(&updated, 200)
@@ -2309,7 +2309,7 @@ async fn retry_triage_item(req: Request, ctx: RouteContext<()>) -> Result<Respon
         Ok(issue_number) => {
             item.updated_at = js_sys::Date::now() as u64 / 1000;
             let updated = item.clone();
-            kv_store::save_triage(&kv, &owner, &repo, &items)
+            crate::slack_notify::sync_and_save(&kv, &owner, &repo, &mut items)
                 .await
                 .map_err(Error::RustError)?;
             console_log!("[wreck-it][portal] retried triage item {id} → issue #{issue_number}");
@@ -2365,7 +2365,10 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .options_async("/api/portal/slack/install-url", options_handler)
         .options_async("/api/portal/slack/workspaces", options_handler)
         .options_async("/api/portal/slack/:team_id/channels", options_handler)
-        .options_async("/api/portal/repos/:owner/:repo/slack-links", options_handler)
+        .options_async(
+            "/api/portal/repos/:owner/:repo/slack-links",
+            options_handler,
+        )
         .options_async("/api/portal/repos/:owner/:repo/slack-link", options_handler)
         .options_async("/api/portal/repos/:owner/:repo/triage", options_handler)
         .options_async("/api/portal/repos/:owner/:repo/triage/:id", options_handler)
@@ -2476,7 +2479,10 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
             agent_websocket,
         )
         // Slack endpoints
-        .get_async("/api/portal/slack/install-url", crate::slack_oauth::install_url)
+        .get_async(
+            "/api/portal/slack/install-url",
+            crate::slack_oauth::install_url,
+        )
         .get_async(
             "/api/portal/slack/workspaces",
             crate::slack_oauth::list_workspaces,

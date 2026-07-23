@@ -94,7 +94,7 @@ pub async fn handle_workflow_run(
             let mut items = kv_store::load_triage(kv, owner, repo).await?;
             let resolved = resolve_ci_items_for_success(&mut items, workflow_name, branch, now);
             if resolved > 0 {
-                kv_store::save_triage(kv, owner, repo, &items).await?;
+                crate::slack_notify::sync_and_save(kv, owner, repo, &mut items).await?;
             }
             Ok(format!(
                 "success run: resolved {resolved} triage item(s) for '{workflow_name}' on {branch}"
@@ -115,7 +115,7 @@ pub async fn handle_workflow_run(
                 TriageUpsert::UpdatedExisting { id } => {
                     // Repeat failure of an open item: the occurrence counter
                     // was bumped; the existing issue (if any) stays in play.
-                    kv_store::save_triage(kv, owner, repo, &items).await?;
+                    crate::slack_notify::sync_and_save(kv, owner, repo, &mut items).await?;
                     console_log!(
                         "[wreck-it][triage] repeat failure absorbed by {id} \
                          ('{workflow_name}' on {branch})",
@@ -148,7 +148,7 @@ pub async fn handle_workflow_run(
                             }
                         }
                     }
-                    kv_store::save_triage(kv, owner, repo, &items).await?;
+                    crate::slack_notify::sync_and_save(kv, owner, repo, &mut items).await?;
                     Ok(summary)
                 }
             }
@@ -356,7 +356,7 @@ pub async fn handle_merged_pr(
     let mut items = kv_store::load_triage(kv, owner, repo).await?;
     let resolved = resolve_items_for_pr(&mut items, pr_number, now);
     if resolved > 0 {
-        kv_store::save_triage(kv, owner, repo, &items).await?;
+        crate::slack_notify::sync_and_save(kv, owner, repo, &mut items).await?;
     }
     Ok(resolved)
 }
@@ -384,7 +384,7 @@ pub async fn handle_pr_linkage(
     let mut items = kv_store::load_triage(kv, owner, repo).await?;
     let linked = link_pr_to_items(&mut items, pr_number, &refs, now);
     if linked > 0 {
-        kv_store::save_triage(kv, owner, repo, &items).await?;
+        crate::slack_notify::sync_and_save(kv, owner, repo, &mut items).await?;
     }
     Ok(linked)
 }

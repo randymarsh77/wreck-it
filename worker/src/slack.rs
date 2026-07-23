@@ -252,9 +252,12 @@ impl SlackClient {
 
     /// `conversations.join` — join a public channel so the bot can post.
     pub async fn conversations_join(&self, channel: &str) -> Result<(), String> {
-        self.call("conversations.join", &serde_json::json!({ "channel": channel }))
-            .await
-            .map(|_| ())
+        self.call(
+            "conversations.join",
+            &serde_json::json!({ "channel": channel }),
+        )
+        .await
+        .map(|_| ())
     }
 }
 
@@ -453,7 +456,10 @@ pub fn mention_ack_message(
     let blocks = serde_json::json!([
         { "type": "section", "text": { "type": "mrkdwn", "text": text } }
     ]);
-    (blocks, format!("Filed issue #{issue_number} in {owner}/{repo}"))
+    (
+        blocks,
+        format!("Filed issue #{issue_number} in {owner}/{repo}"),
+    )
 }
 
 #[cfg(test)]
@@ -471,9 +477,13 @@ mod tests {
     #[test]
     fn valid_signature_passes() {
         let sig = signed("secret", 1000, b"payload");
-        assert!(verify_slack_signature(&sig, "1000", "secret", b"payload", 1000));
+        assert!(verify_slack_signature(
+            &sig, "1000", "secret", b"payload", 1000
+        ));
         // Within the skew window.
-        assert!(verify_slack_signature(&sig, "1000", "secret", b"payload", 1299));
+        assert!(verify_slack_signature(
+            &sig, "1000", "secret", b"payload", 1299
+        ));
     }
 
     #[test]

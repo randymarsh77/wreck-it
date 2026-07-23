@@ -28,7 +28,8 @@ use worker::{console_log, console_warn, Env, Request, Response, RouteContext};
 type HmacSha256 = Hmac<Sha256>;
 
 /// Bot scopes requested at install time.
-pub const BOT_SCOPES: &str = "app_mentions:read,chat:write,channels:read,channels:join,channels:history";
+pub const BOT_SCOPES: &str =
+    "app_mentions:read,chat:write,channels:read,channels:join,channels:history";
 
 /// State lifetime: 15 minutes.
 const STATE_TTL_SECS: u64 = 15 * 60;
@@ -102,7 +103,10 @@ pub fn sign_state(state: &InstallState, secret: &str) -> Result<String, String> 
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
         .map_err(|e| format!("HMAC init failed: {e}"))?;
     mac.update(encoded.as_bytes());
-    Ok(format!("{encoded}.{}", hex::encode(mac.finalize().into_bytes())))
+    Ok(format!(
+        "{encoded}.{}",
+        hex::encode(mac.finalize().into_bytes())
+    ))
 }
 
 /// Verify and decode an install state.  Checks the HMAC and expiry.
@@ -169,7 +173,12 @@ pub async fn handle_callback(req: Request, env: Env) -> worker::Result<Response>
         .map_err(|_| worker::Error::RustError("Missing PORTAL_SESSION_SECRET".into()))?;
     let state = match verify_state(&state_raw, &session_secret, crate::js_sys_now_secs()) {
         Some(s) => s,
-        None => return html_page("Invalid or expired install link — restart from the portal.", 400),
+        None => {
+            return html_page(
+                "Invalid or expired install link — restart from the portal.",
+                400,
+            )
+        }
     };
 
     let client_id = env
@@ -182,15 +191,14 @@ pub async fn handle_callback(req: Request, env: Env) -> worker::Result<Response>
         .map_err(|_| worker::Error::RustError("Missing SLACK_CLIENT_SECRET".into()))?;
 
     let redirect_uri = callback_url_from(&req)?;
-    let access = match slack::oauth_access(&client_id, &client_secret, &code, Some(&redirect_uri))
-        .await
-    {
-        Ok(a) => a,
-        Err(e) => {
-            console_warn!("[wreck-it][slack] oauth exchange failed: {e}");
-            return html_page("Token exchange with Slack failed — try again.", 502);
-        }
-    };
+    let access =
+        match slack::oauth_access(&client_id, &client_secret, &code, Some(&redirect_uri)).await {
+            Ok(a) => a,
+            Err(e) => {
+                console_warn!("[wreck-it][slack] oauth exchange failed: {e}");
+                return html_page("Token exchange with Slack failed — try again.", 502);
+            }
+        };
 
     let kv = env
         .kv(kv_store::KV_BINDING)
@@ -343,7 +351,8 @@ pub async fn list_channels(req: Request, ctx: RouteContext<()>) -> worker::Resul
 pub async fn list_repo_links(req: Request, ctx: RouteContext<()>) -> worker::Result<Response> {
     let owner = ctx.param("owner").unwrap().clone();
     let repo = ctx.param("repo").unwrap().clone();
-    if let Err(resp) = crate::portal_api::require_repo_access(&req, &ctx, &owner, &repo, false).await
+    if let Err(resp) =
+        crate::portal_api::require_repo_access(&req, &ctx, &owner, &repo, false).await
     {
         return Ok(resp);
     }

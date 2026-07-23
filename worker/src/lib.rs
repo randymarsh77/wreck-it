@@ -50,6 +50,7 @@ mod scheduler;
 mod security_ingest;
 mod slack;
 mod slack_events;
+mod slack_notify;
 mod slack_oauth;
 mod triage;
 mod types;
