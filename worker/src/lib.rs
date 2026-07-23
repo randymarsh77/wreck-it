@@ -47,6 +47,7 @@ mod portal_api;
 mod processor;
 mod pulse;
 mod scheduler;
+mod security_ingest;
 mod triage;
 mod types;
 mod webhook;
@@ -370,17 +371,23 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
         }
         WebhookEvent::PullRequest => {
             let action = payload.action.as_deref().unwrap_or("");
-            let result = payload
-                .pull_request
-                .as_ref()
-                .map(|pr| should_process_pr_event(action, pr, auth_login_ref))
-                .unwrap_or(false);
             let pr_user = payload
                 .pull_request
                 .as_ref()
                 .and_then(|pr| pr.user.as_ref())
                 .map(|u| u.login.as_str())
                 .unwrap_or("(no user)");
+            // Dependency-update bots are not trusted authors, but their PRs
+            // get dedicated observe-only handling (see security_ingest).
+            let result = if security_ingest::is_dep_update_author(pr_user) {
+                ["opened", "synchronize", "closed"].contains(&action)
+            } else {
+                payload
+                    .pull_request
+                    .as_ref()
+                    .map(|pr| should_process_pr_event(action, pr, auth_login_ref))
+                    .unwrap_or(false)
+            };
             console_log!(
                 "[wreck-it] PR filter: action={} user={} should_process={}",
                 action,
@@ -562,6 +569,49 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
             return Response::ok("workflow run ignored");
         }
         return Response::ok(summaries.join("; "));
+    }
+
+    // Dependency-update PRs (Dependabot/Renovate): observe-only handling.
+    // Must return before the trusted-PR machinery below — these authors are
+    // not trusted, and dependency PRs must never get workflow approval or
+    // auto-merge from us.
+    if event == WebhookEvent::PullRequest {
+        if let Some(pr) = &payload.pull_request {
+            let author_is_dep_bot = pr
+                .user
+                .as_ref()
+                .map(|u| security_ingest::is_dep_update_author(&u.login))
+                .unwrap_or(false);
+            if author_is_dep_bot {
+                let triage_config = repo_config.triage.clone().unwrap_or_default();
+                let kv = env
+                    .kv(kv_store::KV_BINDING)
+                    .map_err(|e| Error::RustError(format!("KV binding unavailable: {e}")))?;
+                let action = payload.action.as_deref().unwrap_or("");
+
+                return match security_ingest::handle_dep_update_pr(
+                    &client,
+                    &kv,
+                    owner,
+                    repo_name,
+                    pr,
+                    action,
+                    &triage_config,
+                    js_sys_now_secs(),
+                )
+                .await
+                {
+                    Ok(summary) => {
+                        console_log!("[wreck-it][security] {}", summary);
+                        Response::ok(summary)
+                    }
+                    Err(e) => {
+                        console_error!("[wreck-it][security] ✗ {e}");
+                        Response::error(format!("Dep-update handling failed: {e}"), 500)
+                    }
+                };
+            }
+        }
     }
 
     // For PR events from trusted authors, approve pending workflow runs
@@ -1230,6 +1280,22 @@ mod tests {
     fn reject_pr_synchronize_untrusted() {
         let pr = make_pr("attacker", "User");
         assert!(!should_process_pr_event("synchronize", &pr, None));
+    }
+
+    #[test]
+    fn dep_update_bots_stay_untrusted_in_normal_pr_path() {
+        // Dependabot/Renovate PRs are handled by the dedicated observe-only
+        // security_ingest branch. They must NEVER pass the trusted filter,
+        // which gates workflow approval and auto-merge.
+        for login in security_ingest::DEP_UPDATE_AUTHORS {
+            let pr = make_pr(login, "Bot");
+            for action in ["opened", "synchronize", "ready_for_review", "closed"] {
+                assert!(
+                    !should_process_pr_event(action, &pr, None),
+                    "{login} must not be trusted for action {action}"
+                );
+            }
+        }
     }
 
     #[test]
