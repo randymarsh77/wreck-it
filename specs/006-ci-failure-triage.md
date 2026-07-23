@@ -1,6 +1,6 @@
 # Spec 006: Triage Items & CI-Failure Triage (Mendral-style Cloud Harness)
 
-**Status:** Phase 1 implemented
+**Status:** Phases 1 (CI-failure triage) and 4 (supply-chain) implemented
 **Depends on:** GitHub App worker (docs/github-app.md), spec 001 (LLM strategy)
 
 ## Motivation
@@ -94,17 +94,34 @@ token is stored only in KV via a write-only portal endpoint, never in the
 repo config. Polling over Sentry webhooks in v1 (30-min cron latency is
 acceptable; per-org internal integrations are not).
 
-## Phase 4: Supply-chain security (planned)
+## Phase 4: Supply-chain security (implemented)
 
-Dependabot alerts API (`Dependabot alerts: Read` App permission) polled from
-pulse → `security_finding` triage items with advisory severity;
-reconciliation resolves items whose alerts are fixed/dismissed; first-sync
-capped to critical/high. Dependency-update PRs (dependabot/renovate authors,
-currently ignored by the trust filter) get a dedicated observe-only branch:
-triage item + one structured comment; **no** workflow approval or auto-merge
-in v1. The local `security_gate` role is unchanged — complementary.
+`worker/src/security_ingest.rs`, hooked into the pulse loop and the webhook
+path; both entry points gated on `[triage].enabled`.
+
+- **Alerts**: each pulse polls `GET /repos/{o}/{r}/dependabot/alerts?state=open`
+  (`Dependabot alerts: Read` App permission; 403/404 degrades to a warning)
+  and upserts `security_finding` items keyed `sec:dependabot:{number}` with
+  advisory severity and GHSA/CVE/range/patched-version detail.
+  Reconciliation resolves items whose alerts left the open state — skipped
+  when a full 100-alert page suggests pagination, so an incomplete open set
+  can never mass-resolve items. First sync ingests critical/high only
+  (flood cap for legacy repos); later syncs ingest everything.
+- **Dependency-update PRs**: `dependabot[bot]`/`renovate[bot]`/`renovate-bot`
+  authors (one tested const list) branch to observe-only handling **before**
+  the trusted-PR machinery: a `sec:dep-pr:{pr_number}` item (severity hint
+  parsed from the PR body) plus one structured comment on open; merged →
+  resolved, closed unmerged → dismissed. Explicitly no workflow approval or
+  auto-merge; a guard test asserts these authors never pass
+  `should_process_pr_event`.
+- The local `security_gate` role is unchanged — complementary.
+
+Deferred to v2: lockfile-diff review via cloud agent
+(`[security] review_dependency_prs`), opt-in patch-semver auto-merge
+(`[security] auto_merge_patch_updates`), `workflow_dispatch`-based scans
+with a findings-callback endpoint for private-registry repos, Slack
+notification of new critical/high findings (lands with phase 2).
 
 ## Execution order
 
-Phase 1 ✅ → Phase 4 (smallest; needs only an alerts client) → Phase 2 →
-Phase 3.
+Phase 1 ✅ → Phase 4 ✅ → Phase 2 (Slack) → Phase 3 (Sentry).

@@ -51,6 +51,7 @@ GitHub Event (webhook)          Cron Trigger (pulse)
 | `push` | any | Triggers iteration (external state updates) |
 | `pull_request` | `closed` (merged) | Marks task complete, updates state |
 | `pull_request` | `opened` / `ready_for_review` / `synchronize` | Approves pending workflow runs and enables auto-merge for trusted PRs |
+| `pull_request` | `opened` / `synchronize` / `closed` (Dependabot/Renovate author) | Observe-only supply-chain tracking: triage item + one structured comment; never workflow approval or auto-merge |
 | `workflow_run` | `completed` (failure / timed out) | Creates or updates a triage item and dispatches a fix issue to a coding agent (requires `[triage]` in `.wreck-it/config.toml`) |
 | `workflow_run` | `completed` (success) | Auto-resolves open triage items for the same workflow + branch |
 | `ping` | — | Responds with `pong` (app setup verification) |
@@ -84,6 +85,27 @@ run of the same workflow succeeds. The portal exposes the queue at
 `/repos/{owner}/{repo}/triage` (list, dismiss, retry), and the CLI via
 `wreck-it triage list|show`. The `wreck-it-triage` label is deliberately
 distinct from `wreck-it` so triage issues never trigger a ralph iteration.
+
+## Supply-Chain Security
+
+For repos with `[triage]` enabled, each pulse also polls the **Dependabot
+alerts API** and syncs open alerts into the triage queue as
+`security_finding` items (correlation key `sec:dependabot:{alert_number}`,
+severity from the advisory). Items resolve automatically when the alert is
+fixed or dismissed upstream. The first sync ingests critical/high alerts
+only, to avoid flooding legacy repositories; later syncs ingest all
+severities.
+
+Requires the **Dependabot alerts: Read** App permission and the repo's
+dependency graph. Without them the API answers 403/404 and ingestion
+degrades to a logged warning.
+
+Pull requests authored by `dependabot[bot]` / `renovate[bot]` /
+`renovate-bot` — which the trusted-author filter deliberately ignores — are
+tracked observe-only: a `sec:dep-pr:{pr_number}` triage item plus one
+structured comment. The worker **never** approves workflows or enables
+auto-merge for dependency updates; merging stays a human (or explicitly
+configured) decision. Merged → item resolved; closed unmerged → dismissed.
 
 ## Pulse Trigger
 
@@ -175,6 +197,8 @@ Point the GitHub App's webhook URL to your deployed worker URL (e.g. `https://wr
 - **Issues** — Read & write
 - **Pull requests** — Read & write
 - **Actions** — Read & write
+- **Dependabot alerts** — Read (for supply-chain triage; optional —
+  ingestion degrades gracefully without it)
 
 **Subscribe to these events:**
 - **Issues** — to trigger on issue creation / labeling
