@@ -384,6 +384,42 @@ pub enum Commands {
         #[arg(short, long)]
         work_dir: Option<PathBuf>,
     },
+
+    /// Inspect cloud triage items (CI failures, log events, callouts).
+    ///
+    /// Reads from the wreck-it worker REST API.  Requires the
+    /// `WRECK_IT_API_URL` and `WRECK_IT_API_TOKEN` environment variables to
+    /// point at a deployed worker.
+    Triage {
+        #[command(subcommand)]
+        action: TriageAction,
+    },
+}
+
+/// Sub-commands for `wreck-it triage`.
+#[derive(Subcommand)]
+pub enum TriageAction {
+    /// List a repository's triage items (newest activity first).
+    List {
+        /// Repository in 'owner/name' form
+        #[arg(long)]
+        repo: String,
+
+        /// Show only items with the given status (new, investigating,
+        /// pr-open, resolved, dismissed, stale)
+        #[arg(long)]
+        status: Option<String>,
+    },
+
+    /// Show a single triage item, including its stored evidence.
+    Show {
+        /// Triage item id (e.g. tri-1712345678-8842213)
+        id: String,
+
+        /// Repository in 'owner/name' form
+        #[arg(long)]
+        repo: String,
+    },
 }
 
 /// Sub-commands for `wreck-it tasks`.

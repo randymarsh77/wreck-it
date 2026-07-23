@@ -45,6 +45,7 @@ mod state_worktree;
 mod task_cli;
 mod task_manager;
 mod templates;
+mod triage_cli;
 mod tui;
 mod types;
 mod unstuck;
@@ -61,7 +62,7 @@ mod test_helpers {
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands, TasksAction};
+use cli::{Cli, Commands, TasksAction, TriageAction};
 use config_manager::{load_user_config, save_user_config};
 use ralph_loop::RalphLoop;
 use repo_config::{
@@ -1102,6 +1103,16 @@ async fn main() -> Result<()> {
         } => {
             mcp_server::run_mcp_server(task_file, work_dir)?;
         }
+
+        // ── triage ───────────────────────────────────────────────────────────
+        Commands::Triage { action } => match action {
+            TriageAction::List { repo, status } => {
+                triage_cli::run_list(&repo, status.as_deref()).await?;
+            }
+            TriageAction::Show { id, repo } => {
+                triage_cli::run_show(&repo, &id).await?;
+            }
+        },
     }
 
     Ok(())
