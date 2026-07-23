@@ -210,6 +210,58 @@ pub async fn save_triage(
 }
 
 // ---------------------------------------------------------------------------
+// Log-source secrets
+// ---------------------------------------------------------------------------
+
+/// KV key for a repository's log-source auth token.
+///
+/// The token is written through the portal and never stored in the
+/// repository's config file.
+pub fn log_source_token_key(owner: &str, repo: &str) -> String {
+    format!("{owner}/{repo}/secrets/log_source_token")
+}
+
+/// Load a repository's log-source token, if configured.
+pub async fn load_log_source_token(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+) -> Result<Option<String>, String> {
+    let key = log_source_token_key(owner, repo);
+    kv.get(&key)
+        .text()
+        .await
+        .map_err(|e| format!("KV get failed for {key}: {e}"))
+}
+
+/// Store a repository's log-source token.
+pub async fn save_log_source_token(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+    token: &str,
+) -> Result<(), String> {
+    let key = log_source_token_key(owner, repo);
+    kv.put(&key, token)
+        .map_err(|e| format!("KV put build failed for {key}: {e}"))?
+        .execute()
+        .await
+        .map_err(|e| format!("KV put execute failed for {key}: {e}"))
+}
+
+/// Delete a repository's log-source token.
+pub async fn delete_log_source_token(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+) -> Result<(), String> {
+    let key = log_source_token_key(owner, repo);
+    kv.delete(&key)
+        .await
+        .map_err(|e| format!("KV delete failed for {key}: {e}"))
+}
+
+// ---------------------------------------------------------------------------
 // Slack integration
 // ---------------------------------------------------------------------------
 
@@ -505,6 +557,14 @@ mod tests {
     #[test]
     fn triage_key_format() {
         assert_eq!(triage_key("octo", "repo"), "octo/repo/triage");
+    }
+
+    #[test]
+    fn log_source_token_key_format() {
+        assert_eq!(
+            log_source_token_key("octo", "repo"),
+            "octo/repo/secrets/log_source_token"
+        );
     }
 
     #[test]

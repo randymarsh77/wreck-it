@@ -43,6 +43,7 @@ mod durable_object;
 mod github;
 mod github_app;
 mod kv_store;
+mod log_ingest;
 mod portal_api;
 mod processor;
 mod pulse;

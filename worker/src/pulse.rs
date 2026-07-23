@@ -115,15 +115,21 @@ async fn process_registration(
         Err(e) => return Err(format!("{}/{}: iteration failed: {e}", reg.owner, reg.repo)),
     };
 
-    // Supply-chain ingestion (Dependabot alerts → triage items).
+    // Triage-gated ingestion passes (supply-chain alerts, log sources).
     // Best-effort: a failure here must never fail the pulse iteration.
-    if let Some(triage_config) = read_triage_config(&client, &reg.default_branch).await {
+    let repo_config = read_repo_config(&client, &reg.default_branch).await;
+    let triage_config = repo_config
+        .as_ref()
+        .and_then(|c| c.triage.clone())
+        .filter(|t| t.enabled);
+
+    if let Some(triage_config) = &triage_config {
         match security_ingest::run_security_ingest(
             &client,
             kv,
             &reg.owner,
             &reg.repo,
-            &triage_config,
+            triage_config,
             crate::js_sys_now_secs(),
         )
         .await
@@ -140,22 +146,44 @@ async fn process_registration(
                 );
             }
         }
+
+        // Log-source polling (Sentry → triage items).
+        if let Some(settings) = repo_config.as_ref().and_then(|c| c.log_source.as_ref()) {
+            match crate::log_ingest::run_log_ingest(
+                kv,
+                &reg.owner,
+                &reg.repo,
+                settings,
+                triage_config,
+                crate::js_sys_now_secs(),
+            )
+            .await
+            {
+                Ok(s) => {
+                    summary.push_str("; ");
+                    summary.push_str(&s);
+                }
+                Err(e) => {
+                    worker::console_warn!(
+                        "[wreck-it][pulse] log ingest failed for {}/{}: {e}",
+                        reg.owner,
+                        reg.repo,
+                    );
+                }
+            }
+        }
     }
 
     Ok(summary)
 }
 
-/// Read the `[triage]` section of `.wreck-it/config.toml`, when present and
-/// enabled.  Any read/parse failure answers `None` (repo not opted in).
-async fn read_triage_config(
-    client: &GitHubClient,
-    default_branch: &str,
-) -> Option<wreck_it_core::config::TriageConfig> {
+/// Read and parse `.wreck-it/config.toml` from the default branch.  Any
+/// read/parse failure answers `None` (repo not opted in / misconfigured).
+async fn read_repo_config(client: &GitHubClient, default_branch: &str) -> Option<RepoConfig> {
     let file = client
         .get_file(".wreck-it/config.toml", default_branch)
         .await
         .ok()??;
     let content = GitHubClient::decode_content(&file).ok()?;
-    let config: RepoConfig = toml::from_str(&content).ok()?;
-    config.triage.filter(|t| t.enabled)
+    toml::from_str(&content).ok()
 }

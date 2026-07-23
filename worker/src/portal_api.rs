@@ -2320,6 +2320,68 @@ async fn retry_triage_item(req: Request, ctx: RouteContext<()>) -> Result<Respon
 }
 
 // ---------------------------------------------------------------------------
+// Log-source token endpoints
+// ---------------------------------------------------------------------------
+
+/// Request body for `PUT …/log-source-token`.
+#[derive(serde::Deserialize)]
+struct LogSourceTokenRequest {
+    token: String,
+}
+
+/// `GET /api/portal/repos/:owner/:repo/log-source-token`
+///
+/// Write-only secret: answers only `{"configured": bool}` — the token value
+/// is never returned.
+async fn get_log_source_token(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, false).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    match kv_store::load_log_source_token(&kv, &owner, &repo).await {
+        Ok(token) => json_response(&serde_json::json!({ "configured": token.is_some() }), 200),
+        Err(e) => error_response(&e, 500),
+    }
+}
+
+/// `PUT /api/portal/repos/:owner/:repo/log-source-token`
+async fn put_log_source_token(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, true).await {
+        return Ok(r);
+    }
+    let body: LogSourceTokenRequest = match req.json().await {
+        Ok(b) => b,
+        Err(e) => return error_response(&format!("Invalid JSON: {e}"), 400),
+    };
+    if body.token.trim().is_empty() {
+        return error_response("token must not be empty", 400);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    match kv_store::save_log_source_token(&kv, &owner, &repo, body.token.trim()).await {
+        Ok(()) => json_response(&serde_json::json!({ "configured": true }), 200),
+        Err(e) => error_response(&e, 500),
+    }
+}
+
+/// `DELETE /api/portal/repos/:owner/:repo/log-source-token`
+async fn delete_log_source_token(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, true).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    match kv_store::delete_log_source_token(&kv, &owner, &repo).await {
+        Ok(()) => json_response(&serde_json::json!({ "configured": false }), 200),
+        Err(e) => error_response(&e, 500),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Router registration
 // ---------------------------------------------------------------------------
 
@@ -2370,6 +2432,10 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
             options_handler,
         )
         .options_async("/api/portal/repos/:owner/:repo/slack-link", options_handler)
+        .options_async(
+            "/api/portal/repos/:owner/:repo/log-source-token",
+            options_handler,
+        )
         .options_async("/api/portal/repos/:owner/:repo/triage", options_handler)
         .options_async("/api/portal/repos/:owner/:repo/triage/:id", options_handler)
         .options_async(
@@ -2502,6 +2568,19 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .delete_async(
             "/api/portal/repos/:owner/:repo/slack-link",
             crate::slack_oauth::delete_repo_link,
+        )
+        // Log-source token endpoints
+        .get_async(
+            "/api/portal/repos/:owner/:repo/log-source-token",
+            get_log_source_token,
+        )
+        .put_async(
+            "/api/portal/repos/:owner/:repo/log-source-token",
+            put_log_source_token,
+        )
+        .delete_async(
+            "/api/portal/repos/:owner/:repo/log-source-token",
+            delete_log_source_token,
         )
         // Triage endpoints
         .get_async("/api/portal/repos/:owner/:repo/triage", list_triage)
