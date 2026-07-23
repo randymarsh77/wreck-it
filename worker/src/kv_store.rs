@@ -5,6 +5,7 @@
 //! Values are stored as JSON strings.
 
 use crate::types::{HeadlessState, InstallationSettings, PulseRegistration, Task};
+use wreck_it_core::triage::TriageItem;
 
 /// KV binding name expected in `wrangler.toml`.
 pub const KV_BINDING: &str = "WRECK_IT_STORE";
@@ -159,6 +160,56 @@ pub async fn save_installation_settings(
 }
 
 // ---------------------------------------------------------------------------
+// Triage items
+// ---------------------------------------------------------------------------
+
+/// Build the KV key for a repository's triage item list.
+pub fn triage_key(owner: &str, repo: &str) -> String {
+    format!("{}/{}/triage", owner, repo)
+}
+
+/// Load all triage items from KV for the given repository.
+///
+/// Returns an empty `Vec` when the key does not exist.
+pub async fn load_triage(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+) -> Result<Vec<TriageItem>, String> {
+    let key = triage_key(owner, repo);
+    match kv.get(&key).text().await {
+        Ok(Some(json)) => {
+            serde_json::from_str(&json).map_err(|e| format!("failed to parse triage JSON: {e}"))
+        }
+        Ok(None) => Ok(Vec::new()),
+        Err(e) => Err(format!("KV get failed for {key}: {e}")),
+    }
+}
+
+/// Persist the full triage item list to KV, replacing any previous value.
+///
+/// Like the tasks document, this is a read-modify-write over a single JSON
+/// document: concurrent webhook deliveries for the same repository can lose
+/// an update.  That is accepted for v1 — a lost CI-failure upsert is
+/// recreated by the next failing run — and the Durable Object backend
+/// (spec 001) is the long-term fix.
+pub async fn save_triage(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+    items: &[TriageItem],
+) -> Result<(), String> {
+    let key = triage_key(owner, repo);
+    let json =
+        serde_json::to_string(items).map_err(|e| format!("failed to serialize triage: {e}"))?;
+    kv.put(&key, json)
+        .map_err(|e| format!("KV put build failed for {key}: {e}"))?
+        .execute()
+        .await
+        .map_err(|e| format!("KV put execute failed for {key}: {e}"))
+}
+
+// ---------------------------------------------------------------------------
 // Pulse registry
 // ---------------------------------------------------------------------------
 
@@ -250,6 +301,11 @@ mod tests {
     #[test]
     fn state_key_named_context() {
         assert_eq!(state_key("octo", "repo", "docs"), "octo/repo/state/docs");
+    }
+
+    #[test]
+    fn triage_key_format() {
+        assert_eq!(triage_key("octo", "repo"), "octo/repo/triage");
     }
 
     #[test]

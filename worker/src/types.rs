@@ -171,11 +171,40 @@ pub struct WebhookPayload {
     pub installation: Option<Installation>,
     pub issue: Option<Issue>,
     pub pull_request: Option<PullRequest>,
+    pub workflow_run: Option<WorkflowRunPayload>,
     pub sender: Option<User>,
-    pub workflow_run: Option<WorkflowRun>,
     /// Repositories included in `installation` webhook events.
     #[serde(default)]
     pub repositories: Vec<InstallationRepository>,
+}
+
+/// A GitHub Actions workflow run as delivered in `workflow_run` webhook
+/// payloads.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct WorkflowRunPayload {
+    pub id: u64,
+    /// Workflow name (e.g. `"CI"`).
+    pub name: Option<String>,
+    pub head_branch: Option<String>,
+    /// Always present in real deliveries; defaulted so minimal payloads
+    /// (and the unstuck ralph's trimmed fixtures) still parse.
+    #[serde(default)]
+    pub head_sha: String,
+    /// `"completed"`, `"in_progress"`, ...
+    pub status: Option<String>,
+    /// `"success"`, `"failure"`, `"timed_out"`, `"cancelled"`, ... — only
+    /// present once the run has completed.
+    pub conclusion: Option<String>,
+    pub html_url: Option<String>,
+    pub run_attempt: Option<u32>,
+    /// The event that triggered the run (`"push"`, `"schedule"`, ...).
+    pub event: Option<String>,
+    pub actor: Option<User>,
+    /// Pull requests associated with the head branch of this run (used by
+    /// the unstuck ralph to comment on failing PRs).
+    #[serde(default)]
+    pub pull_requests: Vec<WorkflowRunPr>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -260,19 +289,6 @@ pub struct PullRequest {
     pub user: Option<User>,
 }
 
-/// A workflow run as represented in `workflow_run` webhook payloads.
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct WorkflowRun {
-    pub id: u64,
-    /// The outcome of the workflow run: `"success"`, `"failure"`,
-    /// `"cancelled"`, `"timed_out"`, etc.
-    pub conclusion: Option<String>,
-    /// Pull requests associated with the head branch of this run.
-    #[serde(default)]
-    pub pull_requests: Vec<WorkflowRunPr>,
-}
-
 /// Minimal pull request reference inside a `workflow_run` payload.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
@@ -283,6 +299,49 @@ pub struct WorkflowRunPr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workflow_run_payload_parse() {
+        // Trimmed from a real `workflow_run` (completed/failure) delivery.
+        let json = r#"{
+            "action": "completed",
+            "workflow_run": {
+                "id": 9987654321,
+                "name": "CI",
+                "head_branch": "master",
+                "head_sha": "d6fde92930d4715a2b49857d24b940956b26d2d3",
+                "status": "completed",
+                "conclusion": "failure",
+                "html_url": "https://github.com/octo/repo/actions/runs/9987654321",
+                "run_attempt": 2,
+                "event": "push",
+                "actor": {"login": "octocat", "type": "User"}
+            },
+            "repository": {
+                "full_name": "octo/repo",
+                "name": "repo",
+                "owner": {"login": "octo"},
+                "default_branch": "master"
+            },
+            "installation": {"id": 12345}
+        }"#;
+        let payload: WebhookPayload = serde_json::from_str(json).unwrap();
+        assert_eq!(payload.action.as_deref(), Some("completed"));
+        let run = payload.workflow_run.expect("workflow_run present");
+        assert_eq!(run.id, 9987654321);
+        assert_eq!(run.name.as_deref(), Some("CI"));
+        assert_eq!(run.head_branch.as_deref(), Some("master"));
+        assert_eq!(run.conclusion.as_deref(), Some("failure"));
+        assert_eq!(run.run_attempt, Some(2));
+        assert_eq!(run.actor.as_ref().map(|a| a.login.as_str()), Some("octocat"));
+    }
+
+    #[test]
+    fn workflow_run_payload_absent_in_other_events() {
+        let json = r#"{"action": "opened"}"#;
+        let payload: WebhookPayload = serde_json::from_str(json).unwrap();
+        assert!(payload.workflow_run.is_none());
+    }
 
     #[test]
     fn task_roundtrip_json() {
@@ -497,7 +556,7 @@ state_file = ".docs-state.json"
             "conclusion": "success",
             "pull_requests": []
         }"#;
-        let wr: WorkflowRun = serde_json::from_str(json).unwrap();
+        let wr: WorkflowRunPayload = serde_json::from_str(json).unwrap();
         assert_eq!(wr.id, 100);
         assert_eq!(wr.conclusion.as_deref(), Some("success"));
         assert!(wr.pull_requests.is_empty());
@@ -506,7 +565,7 @@ state_file = ".docs-state.json"
     #[test]
     fn workflow_run_missing_prs_defaults_to_empty() {
         let json = r#"{"id": 100, "conclusion": null}"#;
-        let wr: WorkflowRun = serde_json::from_str(json).unwrap();
+        let wr: WorkflowRunPayload = serde_json::from_str(json).unwrap();
         assert!(wr.pull_requests.is_empty());
         assert!(wr.conclusion.is_none());
     }

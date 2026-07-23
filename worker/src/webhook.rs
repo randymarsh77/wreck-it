@@ -45,7 +45,8 @@ pub enum WebhookEvent {
     Push,
     /// Pull request created, closed, merged, etc.
     PullRequest,
-    /// A workflow run has completed (or changed status).
+    /// A workflow run has completed (or changed status).  Used for the
+    /// unstuck ralph and CI-failure triage.
     WorkflowRun,
     /// GitHub App installed, uninstalled, or repositories changed.
     Installation,
