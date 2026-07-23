@@ -49,6 +49,7 @@ mod pulse;
 mod scheduler;
 mod security_ingest;
 mod slack;
+mod slack_events;
 mod triage;
 mod types;
 mod webhook;
@@ -142,9 +143,22 @@ fn should_process_pr_event(
 }
 
 #[event(fetch)]
-async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     let url = req.url()?;
     let path = url.path();
+
+    // Slack endpoints are handled outside the Router: signature
+    // verification needs the raw body, and event processing needs
+    // `ctx.wait_until` for post-ack work.
+    if path == "/slack/events" {
+        return match slack_events::handle(req, env, ctx).await {
+            Ok(resp) => Ok(resp),
+            Err(e) => {
+                console_error!("[wreck-it][slack] ✗ unhandled error: {e}");
+                Response::error(format!("Internal error: {e}"), 500)
+            }
+        };
+    }
 
     // Route API requests through the Router.
     if path.starts_with("/api/") {
