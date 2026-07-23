@@ -48,6 +48,7 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 📡 **OTEL Tracing**: Export task lifecycle spans to any OTLP-compatible collector (Jaeger, Honeycomb, Grafana Cloud) via the `[otel]` config section
 - 📋 **Kanban Integration**: Sync task status with Linear, JIRA, or Trello boards via the `kanban_provider` config option
 - 📊 **Log Source Ingest**: Pull error/exception log entries from Seq (or Cloudflare Workers) and automatically create wreck-it tasks to triage and fix them
+- 🚨 **CI-Failure Triage**: The GitHub App turns failing workflow runs into first-class triage items — evidence collected from job logs, a fix issue dispatched to a cloud coding agent, and auto-resolution when the fix PR merges or the workflow goes green (`[triage]` in `.wreck-it/config.toml`)
 - 📈 **HTML Run Reports**: Generate a self-contained HTML summary of any run (`wreck-it report`) with task timeline, dependency graph, and cost breakdown
 - 🔌 **MCP Server**: Expose the task pipeline over the Model Context Protocol so AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can manage tasks directly
 - 🔧 **Unstuck Helper**: Scan open PRs and the default branch for failing CI checks and automatically comment `@copilot` to request fixes (`wreck-it unstuck`)

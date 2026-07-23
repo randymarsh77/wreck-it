@@ -51,8 +51,39 @@ GitHub Event (webhook)          Cron Trigger (pulse)
 | `push` | any | Triggers iteration (external state updates) |
 | `pull_request` | `closed` (merged) | Marks task complete, updates state |
 | `pull_request` | `opened` / `ready_for_review` / `synchronize` | Approves pending workflow runs and enables auto-merge for trusted PRs |
+| `workflow_run` | `completed` (failure / timed out) | Creates or updates a triage item and dispatches a fix issue to a coding agent (requires `[triage]` in `.wreck-it/config.toml`) |
+| `workflow_run` | `completed` (success) | Auto-resolves open triage items for the same workflow + branch |
 | `ping` | — | Responds with `pong` (app setup verification) |
 | `scheduled` | cron | Iterates all registered repos (pulse trigger) |
+
+## CI-Failure Triage
+
+When a repository opts in via `.wreck-it/config.toml`:
+
+```toml
+[triage]
+enabled = true
+# auto_dispatch = true   # create + assign a fix issue automatically
+# branches = []          # empty = default branch only
+# max_items = 200        # stored-items cap (terminal items pruned first)
+```
+
+failing workflow runs on triaged branches become **triage items** stored in
+KV (`{owner}/{repo}/triage`). Repeat failures of the same workflow+branch
+collapse into one open item. For each new item the worker collects evidence
+(failed jobs, steps, ANSI-stripped log tails) and — with `auto_dispatch` —
+opens a fix issue labeled `wreck-it-triage` and assigns a cloud coding
+agent. The item lifecycle is:
+
+```
+new → investigating → pr_open → resolved   (or dismissed / stale)
+```
+
+Items resolve automatically when the linked fix PR merges or when a later
+run of the same workflow succeeds. The portal exposes the queue at
+`/repos/{owner}/{repo}/triage` (list, dismiss, retry), and the CLI via
+`wreck-it triage list|show`. The `wreck-it-triage` label is deliberately
+distinct from `wreck-it` so triage issues never trigger a ralph iteration.
 
 ## Pulse Trigger
 
@@ -149,6 +180,8 @@ Point the GitHub App's webhook URL to your deployed worker URL (e.g. `https://wr
 - **Issues** — to trigger on issue creation / labeling
 - **Push** — to react to state branch changes
 - **Pull requests** — to detect merged PRs
+- **Workflow runs** — to triage failing CI runs (existing installations
+  must re-approve if permissions change)
 
 ## Development
 
