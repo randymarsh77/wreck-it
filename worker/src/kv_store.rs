@@ -350,6 +350,40 @@ pub async fn load_slack_links_for_repo(
         .unwrap_or_default())
 }
 
+/// KV key for the index of installed Slack teams (KV cannot enumerate keys
+/// without `list()`, which this codebase avoids).
+const SLACK_TEAMS_INDEX_KEY: &str = "_slack/teams";
+
+/// Summary entry in the installed-teams index.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct SlackTeamRef {
+    pub team_id: String,
+    pub team_name: String,
+}
+
+/// Load the installed-teams index.
+pub async fn load_slack_teams(kv: &worker::kv::KvStore) -> Result<Vec<SlackTeamRef>, String> {
+    Ok(load_json(kv, SLACK_TEAMS_INDEX_KEY).await?.unwrap_or_default())
+}
+
+/// Upsert a team into the installed-teams index.
+pub async fn upsert_slack_team(
+    kv: &worker::kv::KvStore,
+    team_id: &str,
+    team_name: &str,
+) -> Result<(), String> {
+    let mut teams = load_slack_teams(kv).await?;
+    if let Some(existing) = teams.iter_mut().find(|t| t.team_id == team_id) {
+        existing.team_name = team_name.to_string();
+    } else {
+        teams.push(SlackTeamRef {
+            team_id: team_id.to_string(),
+            team_name: team_name.to_string(),
+        });
+    }
+    save_json(kv, SLACK_TEAMS_INDEX_KEY, &teams).await
+}
+
 /// Record a Slack event id as processed (1h TTL).  Returns `false` when the
 /// id was already recorded — the caller should skip the duplicate delivery.
 pub async fn mark_slack_event_processed(

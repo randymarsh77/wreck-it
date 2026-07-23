@@ -506,6 +506,68 @@ export async function agentMigrate(
   return request<AgentMigrateResponse>(
     `${agentBasePath(owner, repo, name)}/migrate`,
     { method: 'POST', body: JSON.stringify(state) },
+export interface SlackTeam {
+  team_id: string
+  team_name: string
+}
+
+export interface SlackChannel {
+  id: string
+  name: string
+  is_member: boolean
+}
+
+export interface SlackLink {
+  team_id: string
+  channel_id: string
+  notify_triage: boolean
+  notify_pr: boolean
+  notify_security: boolean
+}
+
+export async function getSlackInstallUrl(owner: string, repo: string): Promise<string> {
+  const data = await request<{ url: string }>(
+    `/api/portal/slack/install-url?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+  )
+  return data.url
+}
+
+export async function getSlackWorkspaces(): Promise<SlackTeam[]> {
+  return request<SlackTeam[]>('/api/portal/slack/workspaces')
+}
+
+export async function getSlackChannels(teamId: string): Promise<SlackChannel[]> {
+  return request<SlackChannel[]>(
+    `/api/portal/slack/${encodeURIComponent(teamId)}/channels`,
+  )
+}
+
+export async function getSlackLinks(owner: string, repo: string): Promise<SlackLink[]> {
+  return request<SlackLink[]>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/slack-links`,
+  )
+}
+
+export async function putSlackLink(
+  owner: string,
+  repo: string,
+  link: Omit<SlackLink, never>,
+): Promise<void> {
+  await request(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/slack-link`,
+    { method: 'PUT', body: JSON.stringify(link) },
+  )
+}
+
+export async function deleteSlackLink(
+  owner: string,
+  repo: string,
+  teamId: string,
+  channelId: string,
+): Promise<void> {
+  await request(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/slack-link?team_id=${encodeURIComponent(teamId)}&channel_id=${encodeURIComponent(channelId)}`,
+    { method: 'DELETE' },
   )
 }
 

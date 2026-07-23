@@ -266,13 +266,17 @@ pub async fn oauth_access(
     client_id: &str,
     client_secret: &str,
     code: &str,
+    redirect_uri: Option<&str>,
 ) -> Result<OAuthAccess, String> {
-    let form = format!(
+    let mut form = format!(
         "client_id={}&client_secret={}&code={}",
         urlencoding_encode(client_id),
         urlencoding_encode(client_secret),
         urlencoding_encode(code),
     );
+    if let Some(uri) = redirect_uri {
+        form.push_str(&format!("&redirect_uri={}", urlencoding_encode(uri)));
+    }
 
     let headers = worker::Headers::new();
     headers

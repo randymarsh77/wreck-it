@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import SlackPanel from '../components/SlackPanel'
 import {
   getRepoConfig,
   updateRepoConfig,
@@ -174,6 +175,8 @@ export default function RepoConfig() {
       ) : (
         !error && <p className="muted">No configuration found.</p>
       )}
+
+      <SlackPanel owner={owner!} repo={repo!} />
     </div>
   )
 }

@@ -50,6 +50,7 @@ mod scheduler;
 mod security_ingest;
 mod slack;
 mod slack_events;
+mod slack_oauth;
 mod triage;
 mod types;
 mod webhook;
@@ -155,6 +156,15 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
             Ok(resp) => Ok(resp),
             Err(e) => {
                 console_error!("[wreck-it][slack] ✗ unhandled error: {e}");
+                Response::error(format!("Internal error: {e}"), 500)
+            }
+        };
+    }
+    if path == "/slack/oauth/callback" {
+        return match slack_oauth::handle_callback(req, env).await {
+            Ok(resp) => Ok(resp),
+            Err(e) => {
+                console_error!("[wreck-it][slack] ✗ oauth callback error: {e}");
                 Response::error(format!("Internal error: {e}"), 500)
             }
         };

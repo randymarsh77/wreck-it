@@ -108,9 +108,15 @@ fn json_response<T: serde::Serialize>(value: &T, status: u16) -> Result<Response
 }
 
 /// Build a plain-text error response with CORS headers.
-fn error_response(msg: &str, status: u16) -> Result<Response> {
+pub(crate) fn error_response(msg: &str, status: u16) -> Result<Response> {
     let resp = Response::error(msg, status)?;
     cors_headers(resp)
+}
+
+/// Build a 200 JSON response with CORS headers (crate-visible helper for
+/// endpoint modules like `slack_oauth`).
+pub(crate) fn json_ok<T: serde::Serialize>(value: &T) -> Result<Response> {
+    json_response(value, 200)
 }
 
 // ---------------------------------------------------------------------------
@@ -746,6 +752,62 @@ async fn get_installation_token(
     github_app::vend_installation_token(installation_id, &jwt, repo)
         .await
         .map_err(|e| error_response(&format!("Token vending failed: {e}"), 500).unwrap())
+}
+
+/// Discover the GitHub App installation id for `owner/repo` via an App JWT.
+pub(crate) async fn discover_installation_id(
+    ctx: &RouteContext<()>,
+    owner: &str,
+    repo: &str,
+) -> std::result::Result<u64, Response> {
+    let app_id = ctx
+        .secret("GITHUB_APP_ID")
+        .map(|s| s.to_string())
+        .map_err(|_| error_response("GITHUB_APP_ID not configured", 500).unwrap())?;
+    let private_key = ctx
+        .secret("GITHUB_APP_PRIVATE_KEY")
+        .map(|s| s.to_string())
+        .map_err(|_| error_response("GITHUB_APP_PRIVATE_KEY not configured", 500).unwrap())?;
+
+    let now_secs = js_sys::Date::now() as u64 / 1000;
+    let jwt = github_app::generate_jwt(&app_id, &private_key, now_secs)
+        .map_err(|e| error_response(&format!("JWT generation failed: {e}"), 500).unwrap())?;
+
+    let install_url = format!("https://api.github.com/repos/{owner}/{repo}/installation");
+    let install_info = github_api_get(&install_url, &jwt)
+        .await
+        .map_err(|e| error_response(&format!("Failed to get installation: {e}"), 500).unwrap())?;
+
+    install_info["id"]
+        .as_u64()
+        .ok_or_else(|| error_response("Missing installation id", 500).unwrap())
+}
+
+/// Verify the portal session and return the authenticated GitHub login.
+pub(crate) async fn session_login(
+    req: &Request,
+    ctx: &RouteContext<()>,
+) -> std::result::Result<String, Response> {
+    let github_token = verify_portal_session(req, ctx).await?;
+    let user = github_api_get("https://api.github.com/user", &github_token)
+        .await
+        .map_err(|_| error_response("Failed to resolve user", 502).unwrap())?;
+    user["login"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| error_response("Corrupt user response", 502).unwrap())
+}
+
+/// Verify the portal session AND repository access (crate-visible wrapper
+/// around the triage-endpoint helper).
+pub(crate) async fn require_repo_access(
+    req: &Request,
+    ctx: &RouteContext<()>,
+    owner: &str,
+    repo: &str,
+    require_push: bool,
+) -> std::result::Result<(), Response> {
+    verify_repo_access(req, ctx, owner, repo, require_push).await
 }
 
 // ---------------------------------------------------------------------------
@@ -2300,6 +2362,11 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
             "/api/portal/repos/:owner/:repo/ralphs/:name/state",
             options_handler,
         )
+        .options_async("/api/portal/slack/install-url", options_handler)
+        .options_async("/api/portal/slack/workspaces", options_handler)
+        .options_async("/api/portal/slack/:team_id/channels", options_handler)
+        .options_async("/api/portal/repos/:owner/:repo/slack-links", options_handler)
+        .options_async("/api/portal/repos/:owner/:repo/slack-link", options_handler)
         .options_async("/api/portal/repos/:owner/:repo/triage", options_handler)
         .options_async("/api/portal/repos/:owner/:repo/triage/:id", options_handler)
         .options_async(
@@ -2407,6 +2474,28 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .get_async(
             "/api/portal/repos/:owner/:repo/ralphs/:name/agent/websocket",
             agent_websocket,
+        )
+        // Slack endpoints
+        .get_async("/api/portal/slack/install-url", crate::slack_oauth::install_url)
+        .get_async(
+            "/api/portal/slack/workspaces",
+            crate::slack_oauth::list_workspaces,
+        )
+        .get_async(
+            "/api/portal/slack/:team_id/channels",
+            crate::slack_oauth::list_channels,
+        )
+        .get_async(
+            "/api/portal/repos/:owner/:repo/slack-links",
+            crate::slack_oauth::list_repo_links,
+        )
+        .put_async(
+            "/api/portal/repos/:owner/:repo/slack-link",
+            crate::slack_oauth::put_repo_link,
+        )
+        .delete_async(
+            "/api/portal/repos/:owner/:repo/slack-link",
+            crate::slack_oauth::delete_repo_link,
         )
         // Triage endpoints
         .get_async("/api/portal/repos/:owner/:repo/triage", list_triage)
