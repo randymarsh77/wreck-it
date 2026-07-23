@@ -108,8 +108,7 @@ fn default_true() -> bool {
 impl TriageConfig {
     /// Effective per-repo item cap.
     pub fn effective_max_items(&self) -> usize {
-        self.max_items
-            .unwrap_or(crate::triage::DEFAULT_MAX_ITEMS)
+        self.max_items.unwrap_or(crate::triage::DEFAULT_MAX_ITEMS)
     }
 
     /// Whether workflow runs on `branch` should be triaged.
