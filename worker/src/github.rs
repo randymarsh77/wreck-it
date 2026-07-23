@@ -68,6 +68,48 @@ pub struct GitRefObject {
     pub sha: String,
 }
 
+/// Maximum job-log size we are willing to download for evidence collection.
+pub const MAX_LOG_FETCH_BYTES: usize = 2 * 1024 * 1024;
+
+/// Response envelope of `GET /actions/runs/{id}/jobs`.
+#[derive(Debug, Deserialize)]
+struct RunJobsResponse {
+    jobs: Vec<RunJob>,
+}
+
+/// A single job within a workflow run.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct RunJob {
+    pub id: u64,
+    pub name: String,
+    /// `"success"`, `"failure"`, `"skipped"`, ... — absent while running.
+    pub conclusion: Option<String>,
+    #[serde(default)]
+    pub steps: Vec<RunJobStep>,
+}
+
+/// A single step within a job.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct RunJobStep {
+    pub name: String,
+    pub conclusion: Option<String>,
+    pub number: u64,
+}
+
+/// Return the last `max_bytes` of `s`, respecting UTF-8 boundaries.
+fn tail_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut start = s.len() - max_bytes;
+    while !s.is_char_boundary(start) {
+        start += 1;
+    }
+    &s[start..]
+}
+
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -338,6 +380,110 @@ impl GitHubClient {
         let node_id = issue["node_id"].as_str().map(|s| s.to_string());
 
         Ok((number, node_id))
+    }
+
+    // -----------------------------------------------------------------------
+    // Actions runs (CI-failure triage evidence)
+    // -----------------------------------------------------------------------
+
+    /// List the jobs of a workflow run (latest attempt only).
+    pub async fn list_run_jobs(&self, run_id: u64) -> Result<Vec<RunJob>, String> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/actions/runs/{}/jobs?filter=latest&per_page=100",
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            run_id,
+        );
+
+        let headers = worker::Headers::new();
+        headers.set("Accept", "application/vnd.github+json").ok();
+        headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        headers.set("User-Agent", "wreck-it-worker").ok();
+        headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+        let request = worker::Request::new_with_init(
+            &url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Get)
+                .with_headers(headers),
+        )
+        .map_err(|e| format!("Failed to create request: {e}"))?;
+
+        let mut response = Fetch::Request(request)
+            .send()
+            .await
+            .map_err(|e| format!("GitHub API request failed: {e}"))?;
+
+        let status = response.status_code();
+        if status != 200 {
+            let body = response.text().await.unwrap_or_default();
+            return Err(format!("Failed to list run jobs ({status}): {body}"));
+        }
+
+        let body: RunJobsResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse jobs response: {e}"))?;
+        Ok(body.jobs)
+    }
+
+    /// Fetch the tail of a job's log, up to `max_bytes` bytes.
+    ///
+    /// The logs endpoint answers `302` with a short-lived signed blob URL;
+    /// the Workers fetch follows the redirect automatically.  Logs above
+    /// [`MAX_LOG_FETCH_BYTES`] (per `Content-Length`, when present) are not
+    /// downloaded — callers fall back to a jobs/steps summary.
+    pub async fn get_job_log_tail(&self, job_id: u64, max_bytes: usize) -> Result<String, String> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/actions/jobs/{}/logs",
+            url_encode(&self.owner),
+            url_encode(&self.repo),
+            job_id,
+        );
+
+        let headers = worker::Headers::new();
+        headers.set("Accept", "application/vnd.github+json").ok();
+        headers
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .ok();
+        headers.set("User-Agent", "wreck-it-worker").ok();
+        headers.set("X-GitHub-Api-Version", "2022-11-28").ok();
+
+        let request = worker::Request::new_with_init(
+            &url,
+            worker::RequestInit::new()
+                .with_method(worker::Method::Get)
+                .with_headers(headers),
+        )
+        .map_err(|e| format!("Failed to create request: {e}"))?;
+
+        let mut response = Fetch::Request(request)
+            .send()
+            .await
+            .map_err(|e| format!("Log fetch failed: {e}"))?;
+
+        let status = response.status_code();
+        if status != 200 {
+            return Err(format!("Log fetch returned {status}"));
+        }
+
+        if let Ok(Some(len)) = response.headers().get("Content-Length") {
+            if let Ok(len) = len.parse::<usize>() {
+                if len > MAX_LOG_FETCH_BYTES {
+                    return Err(format!(
+                        "log too large to fetch ({len} bytes > {MAX_LOG_FETCH_BYTES})"
+                    ));
+                }
+            }
+        }
+
+        let text = response
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read log body: {e}"))?;
+        Ok(tail_str(&text, max_bytes).to_string())
     }
 
     // -----------------------------------------------------------------------
@@ -1830,5 +1976,41 @@ mod tests {
         assert_eq!(url_encode("a?b=c"), "a%3Fb%3Dc");
         assert_eq!(url_encode("a#b"), "a%23b");
         assert_eq!(url_encode("a&b"), "a%26b");
+    }
+
+    #[test]
+    fn tail_str_short_input_unchanged() {
+        assert_eq!(tail_str("hello", 100), "hello");
+    }
+
+    #[test]
+    fn tail_str_takes_tail_on_utf8_boundary() {
+        let s = format!("{}é-tail", "x".repeat(100));
+        let tail = tail_str(&s, 7);
+        assert_eq!(tail, "é-tail");
+        // Cutting mid-'é' advances to the next boundary.
+        let tail = tail_str(&s, 6);
+        assert_eq!(tail, "-tail");
+    }
+
+    #[test]
+    fn run_jobs_response_parse() {
+        let json = r#"{
+            "total_count": 1,
+            "jobs": [{
+                "id": 42,
+                "name": "build",
+                "conclusion": "failure",
+                "steps": [
+                    {"name": "checkout", "conclusion": "success", "number": 1},
+                    {"name": "cargo test", "conclusion": "failure", "number": 2}
+                ]
+            }]
+        }"#;
+        let parsed: RunJobsResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.jobs.len(), 1);
+        assert_eq!(parsed.jobs[0].id, 42);
+        assert_eq!(parsed.jobs[0].conclusion.as_deref(), Some("failure"));
+        assert_eq!(parsed.jobs[0].steps[1].name, "cargo test");
     }
 }

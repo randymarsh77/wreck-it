@@ -47,6 +47,7 @@ mod portal_api;
 mod processor;
 mod pulse;
 mod scheduler;
+mod triage;
 mod types;
 mod webhook;
 
@@ -389,26 +390,18 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
             result
         }
         WebhookEvent::WorkflowRun => {
-            // Process completed workflow runs that have a failure conclusion
-            // and at least one associated pull request.
+            // Accept all completed runs: the unstuck path needs
+            // failure-with-PRs, and the triage path applies its
+            // fine-grained branch/config filter after
+            // `.wreck-it/config.toml` has been fetched.
             let action = payload.action.as_deref().unwrap_or("");
-            let conclusion = payload
-                .workflow_run
-                .as_ref()
-                .and_then(|wr| wr.conclusion.as_deref())
-                .unwrap_or("");
-            let pr_count = payload
-                .workflow_run
-                .as_ref()
-                .map(|wr| wr.pull_requests.len())
-                .unwrap_or(0);
+            let result = action == "completed" && payload.workflow_run.is_some();
             console_log!(
-                "[wreck-it] workflow_run filter: action={} conclusion={} pull_requests={}",
+                "[wreck-it] workflow_run filter: action={} should_process={}",
                 action,
-                conclusion,
-                pr_count,
+                result,
             );
-            action == "completed" && conclusion == "failure" && pr_count > 0
+            result
         }
         _ => false,
     };
@@ -454,6 +447,115 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
     }
 
     console_log!("[wreck-it] config found — proceeding with event handling");
+
+    // Workflow-run handling combines two independent responders:
+    //
+    //   1. CI-failure triage — failing runs on triaged branches become
+    //      triage items with a dispatched fix issue; successful runs
+    //      resolve matching open items (`[triage]` config).
+    //   2. The unstuck ralph — failing runs with associated PRs get a
+    //      `@copilot` comment on each PR (ralph with `command = "unstuck"`).
+    //
+    // Both get a chance to act; neither's opt-in gates the other.
+    if event == WebhookEvent::WorkflowRun {
+        let run = payload
+            .workflow_run
+            .as_ref()
+            .ok_or_else(|| Error::RustError("Missing workflow_run in payload".into()))?;
+
+        let repo_config: types::RepoConfig = config_file
+            .as_ref()
+            .and_then(|f| github::GitHubClient::decode_content(f).ok())
+            .and_then(|content| toml::from_str(&content).ok())
+            .unwrap_or_default();
+
+        let mut summaries: Vec<String> = Vec::new();
+
+        // --- Triage pass ---------------------------------------------------
+        match &repo_config.triage {
+            Some(triage_config) if triage_config.enabled => {
+                let action = payload.action.as_deref().unwrap_or("");
+                let disposition = triage::workflow_run_disposition(
+                    action,
+                    run,
+                    triage_config,
+                    default_branch,
+                    &repo_config.state_branch,
+                );
+                if disposition == triage::WorkflowRunDisposition::Ignore {
+                    console_log!("[wreck-it] workflow run not triaged (branch/conclusion filter)");
+                } else {
+                    let kv = env
+                        .kv(kv_store::KV_BINDING)
+                        .map_err(|e| Error::RustError(format!("KV binding unavailable: {e}")))?;
+                    match triage::handle_workflow_run(
+                        &client,
+                        &kv,
+                        owner,
+                        repo_name,
+                        triage_config,
+                        run,
+                        disposition,
+                        js_sys_now_secs(),
+                    )
+                    .await
+                    {
+                        Ok(summary) => {
+                            console_log!("[wreck-it][triage] {}", summary);
+                            summaries.push(summary);
+                        }
+                        Err(e) => {
+                            console_error!("[wreck-it][triage] ✗ {e}");
+                            summaries.push(format!("triage failed: {e}"));
+                        }
+                    }
+                }
+            }
+            _ => {
+                console_log!("[wreck-it] triage not enabled for {}/{}", owner, repo_name);
+            }
+        }
+
+        // --- Unstuck pass ----------------------------------------------------
+        let failure = run.conclusion.as_deref() == Some("failure");
+        if failure && !run.pull_requests.is_empty() {
+            let has_unstuck = repo_config
+                .ralphs
+                .iter()
+                .any(|r| r.command.as_deref() == Some("unstuck"));
+            if has_unstuck {
+                let mut commented = 0u32;
+                for wr_pr in &run.pull_requests {
+                    console_log!(
+                        "[wreck-it] workflow_run failure — commenting on PR #{}",
+                        wr_pr.number,
+                    );
+                    match client.comment_on_pr(wr_pr.number, UNSTUCK_COMMENT).await {
+                        Ok(()) => {
+                            commented += 1;
+                        }
+                        Err(e) => {
+                            console_warn!(
+                                "[wreck-it] failed to comment on PR #{}: {}",
+                                wr_pr.number,
+                                e,
+                            );
+                        }
+                    }
+                }
+                summaries.push(format!("unstuck: commented on {commented} PR(s)"));
+            } else {
+                console_log!(
+                    "[wreck-it] no unstuck ralph configured — ignoring workflow_run failure"
+                );
+            }
+        }
+
+        if summaries.is_empty() {
+            return Response::ok("workflow run ignored");
+        }
+        return Response::ok(summaries.join("; "));
+    }
 
     // For PR events from trusted authors, approve pending workflow runs
     // and enable auto-merge when required checks are detected.  This
@@ -577,58 +679,6 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
                     pr_number, action,
                 ));
             }
-        }
-    }
-
-    // For workflow_run events with a failure conclusion, check if the repo
-    // has an "unstuck" ralph configured and, if so, comment `@copilot` on
-    // each associated PR to request fixes.
-    if event == WebhookEvent::WorkflowRun {
-        if let Some(workflow_run) = &payload.workflow_run {
-            let config_content = config_file
-                .as_ref()
-                .and_then(|f| github::GitHubClient::decode_content(f).ok());
-            let has_unstuck = config_content
-                .as_deref()
-                .and_then(|c| toml::from_str::<types::RepoConfig>(c).ok())
-                .map(|cfg| {
-                    cfg.ralphs
-                        .iter()
-                        .any(|r| r.command.as_deref() == Some("unstuck"))
-                })
-                .unwrap_or(false);
-
-            if !has_unstuck {
-                console_log!(
-                    "[wreck-it] no unstuck ralph configured — ignoring workflow_run failure"
-                );
-                return Response::ok("workflow_run failure ignored: no unstuck ralph configured");
-            }
-
-            let mut commented = 0u32;
-            for wr_pr in &workflow_run.pull_requests {
-                console_log!(
-                    "[wreck-it] workflow_run failure — commenting on PR #{}",
-                    wr_pr.number,
-                );
-                match client.comment_on_pr(wr_pr.number, UNSTUCK_COMMENT).await {
-                    Ok(()) => {
-                        commented += 1;
-                    }
-                    Err(e) => {
-                        console_warn!(
-                            "[wreck-it] failed to comment on PR #{}: {}",
-                            wr_pr.number,
-                            e,
-                        );
-                    }
-                }
-            }
-
-            return Response::ok(format!(
-                "workflow_run failure: commented on {} PR(s)",
-                commented,
-            ));
         }
     }
 

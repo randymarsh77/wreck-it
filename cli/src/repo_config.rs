@@ -96,6 +96,7 @@ mod tests {
     #[test]
     fn test_repo_config_roundtrip() {
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "my-state".to_string(),
             task_branch: None,
             tasks_dir: None,
@@ -111,6 +112,7 @@ mod tests {
     fn test_save_and_load_repo_config() {
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "custom-branch".to_string(),
             task_branch: None,
             tasks_dir: None,
@@ -175,6 +177,7 @@ mod tests {
     #[test]
     fn test_repo_config_with_ralphs_roundtrip() {
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
             tasks_dir: None,
@@ -246,6 +249,7 @@ name = "docs"
     #[test]
     fn test_find_ralph_returns_match() {
         let cfg = RepoConfig {
+            triage: None,
             ralphs: vec![
                 RalphConfig {
                     name: "docs".to_string(),
@@ -294,6 +298,7 @@ name = "docs"
     fn test_save_and_load_repo_config_with_ralphs() {
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
             tasks_dir: None,
@@ -337,6 +342,7 @@ state_file = ".docs-state.json"
     fn test_ralph_config_with_branch_roundtrip() {
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
             tasks_dir: None,
@@ -369,6 +375,7 @@ state_file = ".docs-state.json"
     #[test]
     fn test_ralph_config_branch_omitted_when_none() {
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
             tasks_dir: None,
@@ -446,6 +453,7 @@ reviewers = ["alice", "bob"]
     fn test_ralph_config_agent_and_reviewers_roundtrip() {
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
             tasks_dir: None,
@@ -476,6 +484,7 @@ reviewers = ["alice", "bob"]
     #[test]
     fn test_ralph_config_agent_omitted_when_none() {
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
             tasks_dir: None,
@@ -531,6 +540,7 @@ command = "unstuck"
     fn test_ralph_config_command_roundtrip() {
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
             tasks_dir: None,
@@ -560,6 +570,7 @@ command = "unstuck"
     fn test_ralph_config_brute_mode_roundtrip() {
         let dir = tempdir().unwrap();
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
             tasks_dir: None,
@@ -588,6 +599,7 @@ command = "unstuck"
     #[test]
     fn test_ralph_config_brute_mode_omitted_when_none() {
         let cfg = RepoConfig {
+            triage: None,
             state_branch: "wreck-it-state".to_string(),
             task_branch: None,
             tasks_dir: None,

@@ -333,7 +333,10 @@ mod tests {
         assert_eq!(run.head_branch.as_deref(), Some("master"));
         assert_eq!(run.conclusion.as_deref(), Some("failure"));
         assert_eq!(run.run_attempt, Some(2));
-        assert_eq!(run.actor.as_ref().map(|a| a.login.as_str()), Some("octocat"));
+        assert_eq!(
+            run.actor.as_ref().map(|a| a.login.as_str()),
+            Some("octocat")
+        );
     }
 
     #[test]

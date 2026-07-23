@@ -598,6 +598,7 @@ async fn main() -> Result<()> {
                             tasks_dir: None,
                             state_root: root,
                             ralphs: vec![],
+                            triage: None,
                         }
                     } else {
                         RepoConfig::default()
