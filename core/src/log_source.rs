@@ -236,7 +236,9 @@ mod tests {
         assert!(entry.message.contains("TypeError"));
         assert!(entry.message.contains("[WEB-APP-1A]"));
         assert!(entry.message.contains("app/checkout in submitOrder"));
-        assert!(entry.message.contains("https://acme.sentry.io/issues/1234567890/"));
+        assert!(entry
+            .message
+            .contains("https://acme.sentry.io/issues/1234567890/"));
     }
 
     #[test]

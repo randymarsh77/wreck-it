@@ -1,6 +1,6 @@
 # Spec 006: Triage Items & CI-Failure Triage (Mendral-style Cloud Harness)
 
-**Status:** Phases 1 (CI-failure triage), 4 (supply-chain), and 2 (Slack) implemented
+**Status:** All phases implemented (1 CI-failure triage, 4 supply-chain, 2 Slack, 3 Sentry)
 **Depends on:** GitHub App worker (docs/github-app.md), spec 001 (LLM strategy)
 
 ## Motivation
@@ -101,16 +101,30 @@ Deferred to v2: private channels, slash commands/shortcuts/interactivity,
 `ModelRouter` intent parsing, multi-channel announcements per item,
 bot-token encryption at rest (shared question with portal sessions).
 
-## Phase 3: Sentry + server-side log ingestion (planned)
+## Phase 3: Sentry + server-side log ingestion (implemented)
 
-`core/src/log_source.rs` gains pure Sentry request builders/parsers shared
-by both transports; `cli/src/log_source/sentry.rs` implements
-`LogSourceProvider` (`LogSourceBackend::Sentry`, config gains
-`organization`/`project`). Worker-side: pulse-driven polling per configured
-repo creating `log_event` triage items (dedup by Sentry issue id); the auth
-token is stored only in KV via a write-only portal endpoint, never in the
-repo config. Polling over Sentry webhooks in v1 (30-min cron latency is
-acceptable; per-org internal integrations are not).
+Polling over Sentry webhooks in v1 (30-min cron latency is acceptable;
+per-org internal integrations are not).
+
+- **`core/src/log_source.rs`**: pure request builders/parsers (no I/O) so
+  the reqwest CLI and Fetch worker share one implementation. Mapping: id =
+  Sentry **issue** id (grouped events = exactly triage's dedup granularity),
+  timestamp = `lastSeen`, message = `"{title} [{shortId}] {culprit}
+  {permalink}"`.
+- **CLI**: `cli/src/log_source/sentry.rs` implements `LogSourceProvider`
+  (`LogSourceBackend::Sentry`; config gained `organization`/`project`). The
+  existing `sync_log_source_inbound` task flow is unchanged.
+- **Worker**: `worker/src/log_ingest.rs`, hooked into the pulse after the
+  iteration, gated on `[triage].enabled` + a complete `[log_source]` section
+  in `RepoConfig` + a token in KV
+  (`{owner}/{repo}/secrets/log_source_token`, written via write-only portal
+  endpoints that never echo the value). Entries upsert `log_event` items
+  keyed `log:sentry:{issue_id}` (`fatal` → high severity) and flow through
+  the Slack notification sweep. **Deviation from the sketch:** no pagination
+  cursor — the query window (`statsPeriod=24h`, limit ≤ 100) is bounded and
+  correlation-key dedup makes repeat fetches harmless.
+- Portal RepoConfig gained a Log source panel (write-only token field;
+  non-secret settings edited in the config itself).
 
 ## Phase 4: Supply-chain security (implemented)
 
@@ -142,4 +156,6 @@ notification of new critical/high findings (lands with phase 2).
 
 ## Execution order
 
-Phase 1 ✅ → Phase 4 ✅ → Phase 2 (Slack) → Phase 3 (Sentry).
+Phase 1 ✅ → Phase 4 ✅ → Phase 2 ✅ → Phase 3 ✅. The Mendral-style cloud
+harness is feature-complete; remaining ideas live in the per-phase
+"deferred to v2" notes.

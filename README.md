@@ -47,7 +47,7 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 🔒 **Security Gate**: Dedicated `security_gate` role runs `cargo audit` or `npm audit` automatically and persists findings as an artefact for downstream tasks
 - 📡 **OTEL Tracing**: Export task lifecycle spans to any OTLP-compatible collector (Jaeger, Honeycomb, Grafana Cloud) via the `[otel]` config section
 - 📋 **Kanban Integration**: Sync task status with Linear, JIRA, or Trello boards via the `kanban_provider` config option
-- 📊 **Log Source Ingest**: Pull error/exception log entries from Seq (or Cloudflare Workers) and automatically create wreck-it tasks to triage and fix them
+- 📊 **Log Source Ingest**: Pull error/exception log entries from Seq, Cloudflare Workers, or Sentry and automatically create wreck-it tasks to triage and fix them — the cloud harness also polls Sentry server-side into triage items
 - 🚨 **CI-Failure Triage**: The GitHub App turns failing workflow runs into first-class triage items — evidence collected from job logs, a fix issue dispatched to a cloud coding agent, and auto-resolution when the fix PR merges or the workflow goes green (`[triage]` in `.wreck-it/config.toml`)
 - 🛡️ **Supply-Chain Triage**: Dependabot alerts sync into the triage queue with advisory severity and auto-resolve when fixed upstream; Dependabot/Renovate PRs are tracked observe-only — never auto-merged
 - 💬 **Slack Integration**: Triage announcements thread into linked channels, and @wreck-it mentions file triage items with dispatched fix agents — replies land in the thread where you asked

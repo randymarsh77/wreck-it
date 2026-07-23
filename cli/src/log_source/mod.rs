@@ -269,9 +269,10 @@ pub fn provider_from_config(cfg: &LogSourceConfig) -> Option<LogSourceClient> {
                 .api_base_url
                 .clone()
                 .unwrap_or_else(|| sentry::DEFAULT_SENTRY_API.to_string());
-            let query = cfg.filter.clone().unwrap_or_else(|| {
-                wreck_it_core::log_source::DEFAULT_SENTRY_QUERY.to_string()
-            });
+            let query = cfg
+                .filter
+                .clone()
+                .unwrap_or_else(|| wreck_it_core::log_source::DEFAULT_SENTRY_QUERY.to_string());
             let api_token = cfg.api_token.clone().unwrap_or_default();
             Some(LogSourceClient::Sentry(sentry::SentryProvider::new(
                 api_token,

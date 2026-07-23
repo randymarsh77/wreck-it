@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import SlackPanel from '../components/SlackPanel'
+import LogSourcePanel from '../components/LogSourcePanel'
 import {
   getRepoConfig,
   updateRepoConfig,
@@ -177,6 +178,7 @@ export default function RepoConfig() {
       )}
 
       <SlackPanel owner={owner!} repo={repo!} />
+      <LogSourcePanel owner={owner!} repo={repo!} />
     </div>
   )
 }

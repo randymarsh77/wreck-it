@@ -571,6 +571,34 @@ export async function deleteSlackLink(
   )
 }
 
+export async function getLogSourceTokenStatus(
+  owner: string,
+  repo: string,
+): Promise<boolean> {
+  const data = await request<{ configured: boolean }>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/log-source-token`,
+  )
+  return data.configured
+}
+
+export async function putLogSourceToken(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<void> {
+  await request(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/log-source-token`,
+    { method: 'PUT', body: JSON.stringify({ token }) },
+  )
+}
+
+export async function deleteLogSourceToken(owner: string, repo: string): Promise<void> {
+  await request(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/log-source-token`,
+    { method: 'DELETE' },
+  )
+}
+
 export function logout(): void {
   clearToken()
 }

@@ -116,6 +116,16 @@ threaded triage-lifecycle announcements, and `@wreck-it` mentions file
 triage items with dispatched fix agents. Setup runbook and app manifest:
 [docs/slack-app.md](../docs/slack-app.md).
 
+## Log Sources
+
+For repos with `[triage]` enabled and a `[log_source]` section in
+`.wreck-it/config.toml` (v1: `provider = "sentry"` with `organization` and
+`project` slugs), each pulse polls the tracker and syncs matching issues
+into the triage queue as `log_event` items — recurring issues update their
+open item rather than duplicating. The auth token is stored write-only in
+KV via the portal (`Repo Config → Log source`); it never appears in the
+repository or in API responses.
+
 ## Pulse Trigger
 
 The pulse trigger system ensures that iterations run even when no webhook events arrive. This is critical for:
