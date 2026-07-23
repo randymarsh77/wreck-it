@@ -37,6 +37,10 @@
 //! | `POST`    | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/resume`    | Resume agent execution   |
 //! | `POST`    | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/migrate`   | Seed agent from KV/file  |
 //! | `GET`     | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/websocket` | WebSocket for live state |
+//! | `GET`     | `/api/portal/repos/:owner/:repo/triage`               | List triage items                 |
+//! | `GET`     | `/api/portal/repos/:owner/:repo/triage/:id`           | Get a single triage item          |
+//! | `POST`    | `/api/portal/repos/:owner/:repo/triage/:id/dismiss`   | Dismiss a triage item             |
+//! | `POST`    | `/api/portal/repos/:owner/:repo/triage/:id/retry`     | (Re-)dispatch a fix for an item   |
 //!
 //! ## Required secrets
 //!
@@ -2106,6 +2110,154 @@ async fn agent_websocket(req: Request, ctx: RouteContext<()>) -> Result<Response
 }
 
 // ---------------------------------------------------------------------------
+// Triage endpoints
+// ---------------------------------------------------------------------------
+
+/// Verify the portal session AND that the user can access `owner/repo`.
+///
+/// Triage data lives in KV (not behind the user's own GitHub token like the
+/// config endpoints), so an explicit repository-access check is required to
+/// stop a logged-in user from reading another installation's triage items.
+/// When `require_push` is set, the user must also have push permission
+/// (used for mutating endpoints).
+async fn verify_repo_access(
+    req: &Request,
+    ctx: &RouteContext<()>,
+    owner: &str,
+    repo: &str,
+    require_push: bool,
+) -> std::result::Result<(), Response> {
+    let github_token = verify_portal_session(req, ctx).await?;
+    let url = format!("https://api.github.com/repos/{owner}/{repo}");
+    let repo_info = github_api_get(&url, &github_token)
+        .await
+        .map_err(|_| error_response("Repository not found or not accessible", 404).unwrap())?;
+    if require_push {
+        let can_push = repo_info
+            .pointer("/permissions/push")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !can_push {
+            return Err(error_response("Push permission required", 403).unwrap());
+        }
+    }
+    Ok(())
+}
+
+/// `GET /api/portal/repos/:owner/:repo/triage`
+async fn list_triage(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, false).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    match kv_store::load_triage(&kv, &owner, &repo).await {
+        Ok(items) => json_response(&items, 200),
+        Err(e) => error_response(&e, 500),
+    }
+}
+
+/// `GET /api/portal/repos/:owner/:repo/triage/:id`
+async fn get_triage_item(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    let id = ctx.param("id").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, false).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    match kv_store::load_triage(&kv, &owner, &repo).await {
+        Ok(items) => match items.iter().find(|i| i.id == id) {
+            Some(item) => json_response(item, 200),
+            None => error_response("Triage item not found", 404),
+        },
+        Err(e) => error_response(&e, 500),
+    }
+}
+
+/// `POST /api/portal/repos/:owner/:repo/triage/:id/dismiss`
+async fn dismiss_triage_item(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    let id = ctx.param("id").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, true).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    let mut items = kv_store::load_triage(&kv, &owner, &repo)
+        .await
+        .map_err(Error::RustError)?;
+
+    let item = match items.iter_mut().find(|i| i.id == id) {
+        Some(item) => item,
+        None => return error_response("Triage item not found", 404),
+    };
+    if item.status.is_terminal() {
+        return error_response("Triage item is already in a terminal state", 409);
+    }
+    item.status = wreck_it_core::triage::TriageStatus::Dismissed;
+    item.updated_at = js_sys::Date::now() as u64 / 1000;
+    let updated = item.clone();
+
+    kv_store::save_triage(&kv, &owner, &repo, &items)
+        .await
+        .map_err(Error::RustError)?;
+    json_response(&updated, 200)
+}
+
+/// `POST /api/portal/repos/:owner/:repo/triage/:id/retry`
+///
+/// (Re-)dispatches a fix issue for a `New`, `Dismissed`, or `Stale`
+/// CI-failure item using an installation token, transitioning it to
+/// `Investigating`.  Items already being worked (`Investigating`/`PrOpen`)
+/// or `Resolved` answer 409.
+async fn retry_triage_item(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    use wreck_it_core::triage::TriageStatus;
+
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    let id = ctx.param("id").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, true).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    let mut items = kv_store::load_triage(&kv, &owner, &repo)
+        .await
+        .map_err(Error::RustError)?;
+
+    let item = match items.iter_mut().find(|i| i.id == id) {
+        Some(item) => item,
+        None => return error_response("Triage item not found", 404),
+    };
+    if !matches!(
+        item.status,
+        TriageStatus::New | TriageStatus::Dismissed | TriageStatus::Stale
+    ) {
+        return error_response("Only new, dismissed, or stale items can be dispatched", 409);
+    }
+
+    let installation_token = match get_installation_token(&ctx, &owner, &repo).await {
+        Ok(t) => t,
+        Err(r) => return Ok(r),
+    };
+    let client = crate::github::GitHubClient::new(&owner, &repo, &installation_token);
+
+    match crate::triage::dispatch_fix_issue_with_stored_evidence(&client, item).await {
+        Ok(issue_number) => {
+            item.updated_at = js_sys::Date::now() as u64 / 1000;
+            let updated = item.clone();
+            kv_store::save_triage(&kv, &owner, &repo, &items)
+                .await
+                .map_err(Error::RustError)?;
+            console_log!("[wreck-it][portal] retried triage item {id} → issue #{issue_number}");
+            json_response(&updated, 200)
+        }
+        Err(e) => error_response(&format!("Dispatch failed: {e}"), 502),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Router registration
 // ---------------------------------------------------------------------------
 
@@ -2146,6 +2298,16 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         )
         .options_async(
             "/api/portal/repos/:owner/:repo/ralphs/:name/state",
+            options_handler,
+        )
+        .options_async("/api/portal/repos/:owner/:repo/triage", options_handler)
+        .options_async("/api/portal/repos/:owner/:repo/triage/:id", options_handler)
+        .options_async(
+            "/api/portal/repos/:owner/:repo/triage/:id/dismiss",
+            options_handler,
+        )
+        .options_async(
+            "/api/portal/repos/:owner/:repo/triage/:id/retry",
             options_handler,
         )
         // Auth endpoints
@@ -2245,6 +2407,17 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .get_async(
             "/api/portal/repos/:owner/:repo/ralphs/:name/agent/websocket",
             agent_websocket,
+        )
+        // Triage endpoints
+        .get_async("/api/portal/repos/:owner/:repo/triage", list_triage)
+        .get_async("/api/portal/repos/:owner/:repo/triage/:id", get_triage_item)
+        .post_async(
+            "/api/portal/repos/:owner/:repo/triage/:id/dismiss",
+            dismiss_triage_item,
+        )
+        .post_async(
+            "/api/portal/repos/:owner/:repo/triage/:id/retry",
+            retry_triage_item,
         )
 }
 

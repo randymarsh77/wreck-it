@@ -212,6 +212,21 @@ async fn dispatch_fix_issue(
     Ok(issue_number)
 }
 
+/// Dispatch a fix issue for an existing item using its stored evidence.
+///
+/// Used by the portal "retry" endpoint, where the original evidence was
+/// captured at ingestion time and lives in [`TriageItem::detail`].
+pub async fn dispatch_fix_issue_with_stored_evidence(
+    client: &GitHubClient,
+    item: &mut TriageItem,
+) -> Result<u64, String> {
+    let evidence = item
+        .detail
+        .clone()
+        .unwrap_or_else(|| "(no stored evidence; see the run link above)".to_string());
+    dispatch_fix_issue(client, item, &evidence).await
+}
+
 /// Build the body of a dispatched fix issue.
 ///
 /// Includes a summary table, the evidence excerpt, agent instructions, and a
