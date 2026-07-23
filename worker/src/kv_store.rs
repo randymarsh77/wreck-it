@@ -210,6 +210,168 @@ pub async fn save_triage(
 }
 
 // ---------------------------------------------------------------------------
+// Slack integration
+// ---------------------------------------------------------------------------
+
+use crate::slack::{SlackChannelLink, SlackLinkRef, SlackWorkspace};
+
+/// KV key for an installed Slack workspace.
+pub fn slack_team_key(team_id: &str) -> String {
+    format!("_slack/team/{team_id}")
+}
+
+/// KV key for a channel→repo link.
+pub fn slack_link_key(team_id: &str, channel_id: &str) -> String {
+    format!("_slack/link/{team_id}/{channel_id}")
+}
+
+/// KV key for a repository's reverse index of linked channels.
+pub fn slack_links_index_key(owner: &str, repo: &str) -> String {
+    format!("{owner}/{repo}/slack_links")
+}
+
+/// KV key marking a processed Slack event id (retry dedup, 1h TTL).
+pub fn slack_event_key(event_id: &str) -> String {
+    format!("_slack/event/{event_id}")
+}
+
+async fn load_json<T: serde::de::DeserializeOwned>(
+    kv: &worker::kv::KvStore,
+    key: &str,
+) -> Result<Option<T>, String> {
+    match kv.get(key).text().await {
+        Ok(Some(json)) => serde_json::from_str(&json)
+            .map(Some)
+            .map_err(|e| format!("failed to parse {key}: {e}")),
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("KV get failed for {key}: {e}")),
+    }
+}
+
+async fn save_json<T: serde::Serialize>(
+    kv: &worker::kv::KvStore,
+    key: &str,
+    value: &T,
+) -> Result<(), String> {
+    let json = serde_json::to_string(value).map_err(|e| format!("failed to serialize: {e}"))?;
+    kv.put(key, json)
+        .map_err(|e| format!("KV put build failed for {key}: {e}"))?
+        .execute()
+        .await
+        .map_err(|e| format!("KV put execute failed for {key}: {e}"))
+}
+
+/// Load an installed Slack workspace by team id.
+pub async fn load_slack_workspace(
+    kv: &worker::kv::KvStore,
+    team_id: &str,
+) -> Result<Option<SlackWorkspace>, String> {
+    load_json(kv, &slack_team_key(team_id)).await
+}
+
+/// Persist an installed Slack workspace.
+pub async fn save_slack_workspace(
+    kv: &worker::kv::KvStore,
+    workspace: &SlackWorkspace,
+) -> Result<(), String> {
+    save_json(kv, &slack_team_key(&workspace.team_id), workspace).await
+}
+
+/// Load a channel→repo link.
+pub async fn load_slack_link(
+    kv: &worker::kv::KvStore,
+    team_id: &str,
+    channel_id: &str,
+) -> Result<Option<SlackChannelLink>, String> {
+    load_json(kv, &slack_link_key(team_id, channel_id)).await
+}
+
+/// Persist a channel→repo link and maintain the repo's reverse index.
+///
+/// The link is written first, the reverse index second; a crash in between
+/// leaves an orphaned link that outbound notification simply never finds —
+/// tolerated rather than transactional (KV has no transactions).
+pub async fn save_slack_link(
+    kv: &worker::kv::KvStore,
+    team_id: &str,
+    channel_id: &str,
+    link: &SlackChannelLink,
+) -> Result<(), String> {
+    save_json(kv, &slack_link_key(team_id, channel_id), link).await?;
+
+    let index_key = slack_links_index_key(&link.owner, &link.repo);
+    let mut index: Vec<SlackLinkRef> = load_json(kv, &index_key).await?.unwrap_or_default();
+    if !index
+        .iter()
+        .any(|r| r.team_id == team_id && r.channel_id == channel_id)
+    {
+        index.push(SlackLinkRef {
+            team_id: team_id.to_string(),
+            channel_id: channel_id.to_string(),
+        });
+        save_json(kv, &index_key, &index).await?;
+    }
+    Ok(())
+}
+
+/// Remove a channel→repo link (and its reverse-index entry).
+pub async fn delete_slack_link(
+    kv: &worker::kv::KvStore,
+    team_id: &str,
+    channel_id: &str,
+) -> Result<bool, String> {
+    let link: Option<SlackChannelLink> = load_json(kv, &slack_link_key(team_id, channel_id)).await?;
+    let link = match link {
+        Some(l) => l,
+        None => return Ok(false),
+    };
+    kv.delete(&slack_link_key(team_id, channel_id))
+        .await
+        .map_err(|e| format!("KV delete failed: {e}"))?;
+
+    let index_key = slack_links_index_key(&link.owner, &link.repo);
+    let mut index: Vec<SlackLinkRef> = load_json(kv, &index_key).await?.unwrap_or_default();
+    let before = index.len();
+    index.retain(|r| !(r.team_id == team_id && r.channel_id == channel_id));
+    if index.len() != before {
+        save_json(kv, &index_key, &index).await?;
+    }
+    Ok(true)
+}
+
+/// Load a repository's linked channels (reverse index).
+pub async fn load_slack_links_for_repo(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+) -> Result<Vec<SlackLinkRef>, String> {
+    Ok(load_json(kv, &slack_links_index_key(owner, repo))
+        .await?
+        .unwrap_or_default())
+}
+
+/// Record a Slack event id as processed (1h TTL).  Returns `false` when the
+/// id was already recorded — the caller should skip the duplicate delivery.
+pub async fn mark_slack_event_processed(
+    kv: &worker::kv::KvStore,
+    event_id: &str,
+) -> Result<bool, String> {
+    let key = slack_event_key(event_id);
+    match kv.get(&key).text().await {
+        Ok(Some(_)) => return Ok(false),
+        Ok(None) => {}
+        Err(e) => return Err(format!("KV get failed for {key}: {e}")),
+    }
+    kv.put(&key, "1")
+        .map_err(|e| format!("KV put build failed for {key}: {e}"))?
+        .expiration_ttl(3600)
+        .execute()
+        .await
+        .map_err(|e| format!("KV put execute failed for {key}: {e}"))?;
+    Ok(true)
+}
+
+// ---------------------------------------------------------------------------
 // Pulse registry
 // ---------------------------------------------------------------------------
 
@@ -306,6 +468,14 @@ mod tests {
     #[test]
     fn triage_key_format() {
         assert_eq!(triage_key("octo", "repo"), "octo/repo/triage");
+    }
+
+    #[test]
+    fn slack_key_formats() {
+        assert_eq!(slack_team_key("T123"), "_slack/team/T123");
+        assert_eq!(slack_link_key("T123", "C9"), "_slack/link/T123/C9");
+        assert_eq!(slack_links_index_key("octo", "repo"), "octo/repo/slack_links");
+        assert_eq!(slack_event_key("Ev1"), "_slack/event/Ev1");
     }
 
     #[test]
