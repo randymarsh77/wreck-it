@@ -66,6 +66,44 @@ pub struct RepoConfig {
     /// CI-failure triage configuration.  Absent section = disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub triage: Option<TriageConfig>,
+
+    /// Server-side log-source polling (`[log_source]`).  Absent = disabled.
+    ///
+    /// Non-secret settings only — the auth token is stored in worker KV via
+    /// the portal, never committed to the repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_source: Option<LogSourceSettings>,
+}
+
+/// Server-side log-source settings (`[log_source]` in `.wreck-it/config.toml`).
+///
+/// Consumed by the worker's pulse loop to poll an external error tracker and
+/// create triage items.  v1 supports `provider = "sentry"`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct LogSourceSettings {
+    /// Provider name (`"sentry"` in v1).  Absent/unknown = disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+
+    /// Sentry organization slug.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<String>,
+
+    /// Sentry project slug.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+
+    /// Instance base URL (defaults to `https://sentry.io`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base_url: Option<String>,
+
+    /// Search query (defaults to `is:unresolved level:error`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+
+    /// Maximum entries ingested per pulse (defaults to 20).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_entries: Option<usize>,
 }
 
 /// Configuration for CI-failure triage (`[triage]` in `.wreck-it/config.toml`).
@@ -277,6 +315,7 @@ impl Default for RepoConfig {
             state_root: default_state_root(),
             ralphs: Vec::new(),
             triage: None,
+            log_source: None,
         }
     }
 }
@@ -473,6 +512,35 @@ agent = "copilot"
         assert_eq!(triage.agent.as_deref(), Some("copilot"));
         let serialized = toml::to_string_pretty(&cfg).unwrap();
         assert!(serialized.contains("[triage]"));
+    }
+
+    #[test]
+    fn log_source_section_roundtrips_via_toml() {
+        let toml_str = r#"
+[log_source]
+provider = "sentry"
+organization = "acme"
+project = "web-app"
+query = "is:unresolved level:error"
+max_entries = 10
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        let ls = cfg.log_source.as_ref().expect("log_source present");
+        assert_eq!(ls.provider.as_deref(), Some("sentry"));
+        assert_eq!(ls.organization.as_deref(), Some("acme"));
+        assert_eq!(ls.project.as_deref(), Some("web-app"));
+        assert_eq!(ls.max_entries, Some(10));
+        assert!(ls.api_base_url.is_none());
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(serialized.contains("[log_source]"));
+    }
+
+    #[test]
+    fn log_source_section_absent_by_default() {
+        let cfg = RepoConfig::default();
+        assert!(cfg.log_source.is_none());
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        assert!(!toml_str.contains("log_source"));
     }
 
     #[test]

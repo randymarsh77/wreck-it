@@ -600,6 +600,7 @@ async fn main() -> Result<()> {
                             state_root: root,
                             ralphs: vec![],
                             triage: None,
+                            log_source: None,
                         }
                     } else {
                         RepoConfig::default()
