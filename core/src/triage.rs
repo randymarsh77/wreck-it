@@ -174,6 +174,26 @@ pub struct TriageItem {
     /// Linked wreck-it task ids (unused in v1; reserved for the DO backend).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub task_ids: Vec<String>,
+
+    /// Slack thread where this item's lifecycle is being announced.
+    ///
+    /// Set by the worker's Slack notifier on the first post for the item;
+    /// later lifecycle updates thread onto it and record the last status
+    /// announced so repeated saves never double-post.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slack_thread: Option<SlackThreadRef>,
+}
+
+/// Reference to the Slack thread announcing a triage item.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SlackThreadRef {
+    pub team_id: String,
+    pub channel: String,
+    /// `ts` of the root message — replies thread onto this.
+    pub thread_ts: String,
+    /// Last [`TriageStatus`] posted to the thread (dedup guard).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_notified_status: Option<TriageStatus>,
 }
 
 /// Maximum stored size of [`TriageItem::detail`] in bytes.
@@ -206,6 +226,7 @@ impl TriageItem {
             issue_number: None,
             pr_number: None,
             task_ids: Vec::new(),
+            slack_thread: None,
         }
     }
 }

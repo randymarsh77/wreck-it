@@ -48,6 +48,7 @@ mod processor;
 mod pulse;
 mod scheduler;
 mod security_ingest;
+mod slack;
 mod triage;
 mod types;
 mod webhook;
