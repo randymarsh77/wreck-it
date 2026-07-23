@@ -107,6 +107,15 @@ structured comment. The worker **never** approves workflows or enables
 auto-merge for dependency updates; merging stays a human (or explicitly
 configured) decision. Merged → item resolved; closed unmerged → dismissed.
 
+## Slack
+
+With the Slack secrets configured (see `wrangler.toml` comments), the worker
+also serves `/slack/events` (Events API, `app_mention`) and
+`/slack/oauth/callback` (workspace install). Linked channels receive
+threaded triage-lifecycle announcements, and `@wreck-it` mentions file
+triage items with dispatched fix agents. Setup runbook and app manifest:
+[docs/slack-app.md](../docs/slack-app.md).
+
 ## Pulse Trigger
 
 The pulse trigger system ensures that iterations run even when no webhook events arrive. This is critical for:

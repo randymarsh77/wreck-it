@@ -1,6 +1,6 @@
 # Spec 006: Triage Items & CI-Failure Triage (Mendral-style Cloud Harness)
 
-**Status:** Phases 1 (CI-failure triage) and 4 (supply-chain) implemented
+**Status:** Phases 1 (CI-failure triage), 4 (supply-chain), and 2 (Slack) implemented
 **Depends on:** GitHub App worker (docs/github-app.md), spec 001 (LLM strategy)
 
 ## Motivation
@@ -68,20 +68,38 @@ Deferred within phase 1: flaky-vs-real classification (the `occurrences` +
 commenting new run links on existing issues, cross-workflow correlation by
 `head_sha`.
 
-## Phase 2: Slack app (planned)
+## Phase 2: Slack app (implemented)
 
-Events API endpoint (`/slack/events`) in the worker with v0 signature
-verification and 3-second ack (`ctx.wait_until` for processing); OAuth v2
-install storing bot tokens in KV (`_slack/team/{team_id}`); channel↔repo
-links (`_slack/link/{team_id}/{channel_id}` + reverse index) managed from
-the portal. Outbound: Block Kit lifecycle notifications for triage items and
-PRs, threaded per item (`TriageItem` gains an optional `slack_thread` ref).
-Inbound `app_mention`: keyword commands in v1 (`status`, `help`, anything
-else creates a `slack_mention` triage item + a `wreck-it`-labeled issue via
-the installation token — the existing issues webhook then dispatches the
-agent — and replies in-thread). Slack-origin text is wrapped in a delimited
-"untrusted user report" section of issue bodies (prompt-injection guard).
-Secrets: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`.
+See `docs/slack-app.md` for the manifest and runbook. Modules:
+`worker/src/slack.rs` (client + v0 signature verification + Block Kit),
+`slack_events.rs` (`/slack/events`: challenge, retry/event-id dedup,
+3-second ack with processing in `ctx.wait_until`), `slack_oauth.rs`
+(HMAC-signed-state OAuth v2 install + portal channel-linking endpoints),
+`slack_notify.rs` (outbound lifecycle announcements).
+
+Key decisions vs. the original sketch:
+
+- **Notifications are a sweep, not per-event plumbing**:
+  `slack_notify::sync_and_save` replaces `save_triage` at every transition
+  site — it announces any item whose status differs from
+  `slack_thread.last_notified_status`, threads onto the item's announcement
+  message, and persists the dedup state atomically with the items.
+  Security findings announce only at high/critical to `notify_security`
+  links.
+- **Mention-created issues use `wreck-it-triage` + direct agent
+  assignment** (not the `wreck-it` label): a ralph iteration would not have
+  dispatched an arbitrary new issue; direct `assign_agent` is the proven
+  triage-dispatch path.
+- Mention text is fenced and framed as an untrusted report in issue bodies
+  (prompt-injection guard; fencing also disarms GitHub `@`-mentions).
+- KV: `_slack/team/{id}`, `_slack/link/{team}/{channel}`,
+  `{owner}/{repo}/slack_links` reverse index, `_slack/teams` index (KV
+  `list()` is avoided), `_slack/event/{id}` retry markers (1h TTL).
+- Secrets: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`.
+
+Deferred to v2: private channels, slash commands/shortcuts/interactivity,
+`ModelRouter` intent parsing, multi-channel announcements per item,
+bot-token encryption at rest (shared question with portal sessions).
 
 ## Phase 3: Sentry + server-side log ingestion (planned)
 
