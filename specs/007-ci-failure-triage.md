@@ -1,4 +1,4 @@
-# Spec 006: Triage Items & CI-Failure Triage (Mendral-style Cloud Harness)
+# Spec 007: Triage Items & CI-Failure Triage (Mendral-style Cloud Harness)
 
 **Status:** All phases implemented (1 CI-failure triage, 4 supply-chain, 2 Slack, 3 Sentry)
 **Depends on:** GitHub App worker (docs/github-app.md), spec 001 (LLM strategy)
