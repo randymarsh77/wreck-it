@@ -506,6 +506,9 @@ export async function agentMigrate(
   return request<AgentMigrateResponse>(
     `${agentBasePath(owner, repo, name)}/migrate`,
     { method: 'POST', body: JSON.stringify(state) },
+  )
+}
+
 export interface SlackTeam {
   team_id: string
   team_name: string
