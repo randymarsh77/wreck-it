@@ -59,72 +59,57 @@ pub const TITLE_ART: &[&str] = &[
     " ██     ██  ██    ██ █████ ██████  ██   ██    ██   ██  ",
 ];
 
-// ─── Ralph character art ─────────────────────────────────────────────
+// ─── Front-facing fist art ────────────────────────────────────────────
 
-/// The character ASCII art provided in the issue, rendered with monospace font.
-/// Each symbol can be independently colored via `ralph_art()` rules.
-pub const RALPH_ART: &[&str] = &[
+/// Original geometric closed fist punching toward the viewer, drawn on a 32 × 23 cell grid.
+/// Foreshortened knuckles fill the foreground; the thumb wraps around the side.
+/// The wrist is hidden behind the fist to keep the punch aimed at the viewer.
+/// Symbols encode teal armor, mint highlights, and slate shadows;
+/// `fist_art()` renders each occupied cell as a solid block.
+pub const FIST_ART: &[&str] = &[
     "                                ",
-    "      ▓▓▓▓     ▓▓▓▓    ▓▓▓▓     ",
-    "        ▓▓▓▓▓▓▓▓▓▓▓  ▓▓▓▓       ",
-    "   ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓   ",
-    "     ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓     ",
-    " ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ",
-    "   ▓▓▓▓▓▓▓▓░░░░░░░░░░▓▓▓▓▓▓▓▓   ",
-    "     ▓▓▓▓▒▒██░░░░░░██▒▒▓▓▓▓     ",
-    "   ▓▓▓▓▓▓▒▒▒▒██▓▓██▒▒▒▒▓▓▓▓▓▓   ",
-    " ▓▓▒▒▒▒▓▓▒▒────▒▒────▒▒▓▓▒▒▒▒▓▓ ",
-    "   ░░▒▒▓▓░░──██░▒██──░░▓▓▒▒░░   ",
-    "   ░░░░▓▓░░░░▓▓▓▓▓▓░░░░▓▓░░░░   ",
-    "       ░░░░░░▓▓▓▓▓▓░░░░░░       ",
-    "       ░░░░░░░░░░░░░░░░░░       ",
-    "     ░░░░██▀▀▀▀▀▀▀▀▀▀██░░░░     ",
-    "     ░░██████████████████░░     ",
-    "     ░░██▒▒██▓▓▓▓▓▓██▒▒██░░     ",
-    "     ░░██▓█▀▀▀▀▀▀▀▀▀▀█▓██░░     ",
-    "       ░░░░░░░░░░░░░░░░░░       ",
-    "         ▒▒▒▒▒▒▒▒▒▒▒▒▒▒         ",
+    "                                ",
+    "                                ",
+    "                                ",
+    "                                ",
+    "          ████████████          ",
+    "         ░░░░░░ ░░░░░░          ",
+    "  ░░░░░░ ░▓▓▓▓▓█░▓▓▓▓▓█░░░░░░   ",
+    "  ░▓▓▓▓▓█░▓▓▓▓▓█░▓▓▓▓▓█░▓▓▓▓▓█  ",
+    "  ░▓▓▓▓▓█░▓▓▓▓▓█░▓▓▓▓▓█░▓▓▓▓▓█  ",
+    "  ░▓▓▓▓▓█░▓▓▓▓▓█░▓▓▓▓▓█░▓▓▓▓▓█  ",
+    "  ░▓▓▓▓▓█░▓▓▓▓▓█░▓▓▓▓▓█░▓▓▓▓▓█  ",
+    "  ░▓▓▓▓▓█░▓▓▓▓▓█░▓▓▓▓▓█░▓▓▓▓▓█  ",
+    "  ▓▓▓▓▓▓█▓▓▓▓▓▓█▓▓▓▓▓▓█▓▓░░░▓▓  ",
+    "  █████████████████████░░░▓▓▓▓  ",
+    "        █████████████░░░░░▓▓    ",
+    "        █████████████░░░░░▓▓    ",
+    "            █████████▓▓▓▓▓▓     ",
+    "                   ████████     ",
+    "                                ",
+    "                                ",
+    "                                ",
     "                                ",
 ];
 
-/// Build the colored art for the Ralph character.
-pub fn ralph_art() -> ColoredArt {
+/// Build the colored front-facing fist mark.
+pub fn fist_art() -> ColoredArt {
     ColoredArt {
-        lines: RALPH_ART.to_vec(),
+        lines: FIST_ART.to_vec(),
         rules: vec![
             ArtColorRule {
                 ch: '▓',
-                style: Style::default().fg(Color::Red),
+                style: Style::default().fg(Color::Rgb(45, 166, 166)), // teal metal
                 display: Some('█'),
             },
             ArtColorRule {
                 ch: '░',
-                style: Style::default().fg(Color::Rgb(242, 192, 156)), // skin
+                style: Style::default().fg(Color::Rgb(153, 230, 216)), // mint highlights
                 display: Some('█'),
             },
             ArtColorRule {
                 ch: '█',
-                style: Style::default().fg(Color::Black),
-                display: Some('█'),
-            },
-            ArtColorRule {
-                ch: '▒',
-                style: Style::default().fg(Color::Rgb(180, 100, 80)), // light brown
-                display: Some('█'),
-            },
-            ArtColorRule {
-                ch: '─',
-                style: Style::default().fg(Color::White),
-                display: Some('█'),
-            },
-            ArtColorRule {
-                ch: '▀',
-                style: Style::default().fg(Color::White),
-                display: Some('█'),
-            },
-            ArtColorRule {
-                ch: '▄',
-                style: Style::default().fg(Color::White),
+                style: Style::default().fg(Color::Rgb(83, 110, 138)), // slate shadows
                 display: Some('█'),
             },
         ],
@@ -409,29 +394,29 @@ impl FallingCharAnimator {
 
 // ─── Splash-specific content builder ─────────────────────────────────
 
-/// Build the splash content as styled lines (title beside Ralph art)
+/// Build the splash content as styled lines (title beside front-facing fist art)
 /// without any centering — the animator handles positioning.
 pub fn build_splash_content() -> Vec<Line<'static>> {
     let title = title_art();
-    let ralph = ralph_art();
+    let fist = fist_art();
     let title_lines = title.to_lines();
-    let ralph_lines = ralph.to_lines();
+    let fist_lines = fist.to_lines();
 
     let char_counts = title_line_char_counts();
     let title_width = char_counts.iter().copied().max().unwrap_or(0);
     let gap = 4;
 
-    let ralph_height = ralph_lines.len();
+    let fist_height = fist_lines.len();
     let title_height = title_lines.len();
-    let title_v_offset = if ralph_height > title_height {
-        (ralph_height - title_height) / 2
+    let title_v_offset = if fist_height > title_height {
+        (fist_height - title_height) / 2
     } else {
         0
     };
 
     let mut lines = Vec::new();
 
-    for (row, ralph_line) in ralph_lines.iter().enumerate() {
+    for (row, fist_line) in fist_lines.iter().enumerate() {
         let mut spans: Vec<Span<'static>> = Vec::new();
 
         if row >= title_v_offset && row < title_v_offset + title_height {
@@ -446,7 +431,7 @@ pub fn build_splash_content() -> Vec<Line<'static>> {
         }
 
         spans.push(Span::raw(" ".repeat(gap)));
-        spans.extend(ralph_line.spans.clone());
+        spans.extend(fist_line.spans.clone());
 
         lines.push(Line::from(spans));
     }
@@ -464,10 +449,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ralph_art_lines_count() {
-        let art = ralph_art();
+    fn test_fist_art_lines_count() {
+        let art = fist_art();
         let lines = art.to_lines();
-        assert_eq!(lines.len(), RALPH_ART.len());
+        assert_eq!(lines.len(), FIST_ART.len());
     }
 
     #[test]
@@ -479,13 +464,12 @@ mod tests {
 
     #[test]
     fn test_color_rule_matching() {
-        let art = ralph_art();
+        let art = fist_art();
         // Verify that all expected character rules are present
         let rule_chars: Vec<char> = art.rules.iter().map(|r| r.ch).collect();
         assert!(rule_chars.contains(&'▓'));
         assert!(rule_chars.contains(&'░'));
         assert!(rule_chars.contains(&'█'));
-        assert!(rule_chars.contains(&'▒'));
     }
 
     #[test]
