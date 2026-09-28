@@ -2114,15 +2114,15 @@ mod tests {
     #[test]
     fn max_sync_steps_is_bounded() {
         // Ensure the constant exists and is reasonable.
-        assert!(MAX_SYNC_STEPS > 0);
-        assert!(MAX_SYNC_STEPS <= 100);
+        const { assert!(MAX_SYNC_STEPS > 0) };
+        const { assert!(MAX_SYNC_STEPS <= 100) };
     }
 
     #[test]
     fn max_progress_rounds_is_bounded() {
         // Ensure the progress-loop cap exists and is reasonable.
-        assert!(MAX_PROGRESS_ROUNDS > 0);
-        assert!(MAX_PROGRESS_ROUNDS <= 100);
+        const { assert!(MAX_PROGRESS_ROUNDS > 0) };
+        const { assert!(MAX_PROGRESS_ROUNDS <= 100) };
     }
 
     #[test]
@@ -2825,8 +2825,8 @@ mod tests {
     /// it as the fallback when no per-ralph override is configured).
     #[test]
     fn default_transient_backoff_secs_is_positive_and_bounded() {
-        assert!(DEFAULT_TRANSIENT_BACKOFF_SECS > 0);
-        assert!(DEFAULT_TRANSIENT_BACKOFF_SECS <= 300);
+        const { assert!(DEFAULT_TRANSIENT_BACKOFF_SECS > 0) };
+        const { assert!(DEFAULT_TRANSIENT_BACKOFF_SECS <= 300) };
     }
 
     /// When a `RalphConfig` has `transient_backoff_secs: None`, the backoff

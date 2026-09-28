@@ -583,8 +583,10 @@ mod tests {
 
     #[test]
     fn config_reflection_rounds_roundtrip() {
-        let mut config = Config::default();
-        config.reflection_rounds = 5;
+        let config = Config {
+            reflection_rounds: 5,
+            ..Default::default()
+        };
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.reflection_rounds, 5);
@@ -869,9 +871,11 @@ mod tests {
 
     #[test]
     fn config_gastown_fields_roundtrip() {
-        let mut config = Config::default();
-        config.gastown_endpoint = Some("https://gastown.example.com".to_string());
-        config.gastown_token = Some("tok_secret".to_string());
+        let config = Config {
+            gastown_endpoint: Some("https://gastown.example.com".to_string()),
+            gastown_token: Some("tok_secret".to_string()),
+            ..Default::default()
+        };
         let json = serde_json::to_string(&config).unwrap();
         let loaded: Config = serde_json::from_str(&json).unwrap();
         assert_eq!(
