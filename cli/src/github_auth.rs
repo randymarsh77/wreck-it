@@ -266,14 +266,21 @@ mod tests {
 
     // ---- resolve_github_token tests ----
 
-    #[tokio::test]
-    async fn resolve_from_config_token() {
+    #[test]
+    fn resolve_from_config_token() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // Acquire the process-wide environment lock before entering the runtime.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         // Clear env to avoid interference from CI environment.
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
 
-        let token = resolve_github_token(Some("cfg-token-123")).await.unwrap();
+        let token = runtime
+            .block_on(resolve_github_token(Some("cfg-token-123")))
+            .unwrap();
         assert_eq!(token, "cfg-token-123");
 
         // Restore env.
@@ -282,15 +289,20 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn resolve_skips_empty_config_token() {
+    #[test]
+    fn resolve_skips_empty_config_token() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // Acquire the process-wide environment lock before entering the runtime.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
         let had_oauth = std::env::var("WRECK_IT_OAUTH_CLIENT_ID").ok();
         std::env::remove_var("WRECK_IT_OAUTH_CLIENT_ID");
 
-        let result = resolve_github_token(Some("")).await;
+        let result = runtime.block_on(resolve_github_token(Some("")));
         // Should fail because no env, empty config, and no OAuth client ID.
         assert!(result.is_err());
 
@@ -302,15 +314,20 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn resolve_falls_through_when_no_sources() {
+    #[test]
+    fn resolve_falls_through_when_no_sources() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // Acquire the process-wide environment lock before entering the runtime.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         std::env::remove_var("GITHUB_TOKEN");
         let had_oauth = std::env::var("WRECK_IT_OAUTH_CLIENT_ID").ok();
         std::env::remove_var("WRECK_IT_OAUTH_CLIENT_ID");
 
-        let result = resolve_github_token(None).await;
+        let result = runtime.block_on(resolve_github_token(None));
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(
@@ -366,9 +383,14 @@ mod tests {
 
     // ---- resolve_github_api_token tests ----
 
-    #[tokio::test]
-    async fn api_token_falls_back_to_config_api_token() {
+    #[test]
+    fn api_token_falls_back_to_config_api_token() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // Acquire the process-wide environment lock before entering the runtime.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         let had_app_id = std::env::var("GITHUB_APP_ID").ok();
         let had_app_key = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
@@ -382,8 +404,8 @@ mod tests {
             ..Default::default()
         };
 
-        let token = resolve_github_api_token(&config, "owner", "repo")
-            .await
+        let token = runtime
+            .block_on(resolve_github_api_token(&config, "owner", "repo"))
             .unwrap();
         assert_eq!(token, "test-pat-token");
 
@@ -399,9 +421,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn api_token_falls_back_to_github_token_env() {
+    #[test]
+    fn api_token_falls_back_to_github_token_env() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // Acquire the process-wide environment lock before entering the runtime.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         let had_app_id = std::env::var("GITHUB_APP_ID").ok();
         let had_app_key = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
@@ -412,8 +439,8 @@ mod tests {
 
         let config = crate::types::Config::default();
 
-        let token = resolve_github_api_token(&config, "owner", "repo")
-            .await
+        let token = runtime
+            .block_on(resolve_github_api_token(&config, "owner", "repo"))
             .unwrap();
         assert_eq!(token, "env-pat-token");
 
@@ -430,9 +457,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn api_token_errors_when_no_sources() {
+    #[test]
+    fn api_token_errors_when_no_sources() {
         let _guard = ENV_LOCK.lock().unwrap();
+        // Acquire the process-wide environment lock before entering the runtime.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let had_env = std::env::var("GITHUB_TOKEN").ok();
         let had_app_id = std::env::var("GITHUB_APP_ID").ok();
         let had_app_key = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
@@ -443,7 +475,7 @@ mod tests {
 
         let config = crate::types::Config::default();
 
-        let result = resolve_github_api_token(&config, "owner", "repo").await;
+        let result = runtime.block_on(resolve_github_api_token(&config, "owner", "repo"));
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(

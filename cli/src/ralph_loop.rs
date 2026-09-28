@@ -2862,8 +2862,10 @@ mod tests {
         default_work_dir: &str,
         overrides: &[(&str, &str)],
     ) -> crate::types::Config {
-        let mut config = crate::types::Config::default();
-        config.work_dir = std::path::PathBuf::from(default_work_dir);
+        let mut config = crate::types::Config {
+            work_dir: std::path::PathBuf::from(default_work_dir),
+            ..Default::default()
+        };
         for &(k, v) in overrides {
             config.work_dirs.insert(k.to_string(), v.to_string());
         }
@@ -3084,7 +3086,7 @@ mod tests {
     /// Pending when vulnerabilities are found.
     #[test]
     fn security_gate_resets_deps_on_failure() {
-        use crate::types::{AgentRole, ArtefactKind, TaskArtefact, TaskRuntime};
+        use crate::types::{ArtefactKind, TaskArtefact};
         use tempfile::tempdir;
 
         let dir = tempdir().unwrap();
@@ -3192,7 +3194,7 @@ mod tests {
     /// coverage is below the threshold.
     #[test]
     fn coverage_enforcer_resets_deps_on_failure() {
-        use crate::types::{AgentRole, ArtefactKind, TaskArtefact, TaskRuntime};
+        use crate::types::{ArtefactKind, TaskArtefact};
         use tempfile::tempdir;
 
         let dir = tempdir().unwrap();
@@ -3386,8 +3388,10 @@ mod tests {
         let primary = tempfile::tempdir().unwrap();
         let dependent = tempfile::tempdir().unwrap();
 
-        let mut config = crate::types::Config::default();
-        config.work_dir = primary.path().to_path_buf();
+        let mut config = crate::types::Config {
+            work_dir: primary.path().to_path_buf(),
+            ..Default::default()
+        };
         config.work_dirs.insert(
             "primary".to_string(),
             primary.path().to_str().unwrap().to_string(),
@@ -3411,8 +3415,10 @@ mod tests {
     fn collect_dependent_repos_skips_nonexistent_dirs() {
         let primary = tempfile::tempdir().unwrap();
 
-        let mut config = crate::types::Config::default();
-        config.work_dir = primary.path().to_path_buf();
+        let mut config = crate::types::Config {
+            work_dir: primary.path().to_path_buf(),
+            ..Default::default()
+        };
         config.work_dirs.insert(
             "ghost".to_string(),
             "/nonexistent/path/that/does/not/exist".to_string(),

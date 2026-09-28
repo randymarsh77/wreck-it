@@ -277,16 +277,21 @@ mod tests {
         assert_eq!(parts.len(), 3);
     }
 
-    #[tokio::test]
-    async fn resolve_app_token_returns_none_without_env() {
+    #[test]
+    fn resolve_app_token_returns_none_without_env() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        // Acquire the process-wide environment lock before entering the runtime.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let had_id = std::env::var("GITHUB_APP_ID").ok();
         let had_key = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
 
         std::env::remove_var("GITHUB_APP_ID");
         std::env::remove_var("GITHUB_APP_PRIVATE_KEY");
 
-        let result = resolve_app_token("owner", "repo").await;
+        let result = runtime.block_on(resolve_app_token("owner", "repo"));
         assert!(
             result.is_none(),
             "should return None when env vars are not set"
@@ -300,16 +305,21 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn resolve_app_token_returns_none_with_empty_env() {
+    #[test]
+    fn resolve_app_token_returns_none_with_empty_env() {
         let _guard = crate::test_helpers::ENV_LOCK.lock().unwrap();
+        // Acquire the process-wide environment lock before entering the runtime.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let had_id = std::env::var("GITHUB_APP_ID").ok();
         let had_key = std::env::var("GITHUB_APP_PRIVATE_KEY").ok();
 
         std::env::set_var("GITHUB_APP_ID", "");
         std::env::set_var("GITHUB_APP_PRIVATE_KEY", "");
 
-        let result = resolve_app_token("owner", "repo").await;
+        let result = runtime.block_on(resolve_app_token("owner", "repo"));
         assert!(
             result.is_none(),
             "should return None when env vars are empty"

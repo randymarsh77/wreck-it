@@ -652,7 +652,7 @@ mod tests {
     ///   2. `design-1` (ideas)       – Outputs a "spec" artefact consumed by impl.
     ///   3. `impl-1`   (implementer) – Consumes spec; outputs a "code" artefact.
     ///   4. `review-1` (evaluator)   – Reviews impl-1; fails once (tests adaptive
-    ///                                  re-planning), then succeeds on re-plan.
+    ///      re-planning), then succeeds on re-plan.
     ///
     /// Checks:
     /// R1 – Role-based routing assigns tasks to the correct role pools.
