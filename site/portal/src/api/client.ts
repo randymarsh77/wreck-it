@@ -607,3 +607,8 @@ export function logout(): void {
 }
 
 export { getToken, clearToken }
+
+export function responseRequest<T = {ok:boolean}>(owner:string,repo:string,action:string,body?:unknown):Promise<T> {
+  return request<T>(`/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/response/${action}`,
+    body===undefined?{}:{method:'POST',body:JSON.stringify(body)})
+}

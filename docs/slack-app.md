@@ -12,7 +12,7 @@ wreck-it's Slack app turns linked channels into a triage surface:
 
 ## Creating the Slack app
 
-Create the app at <https://api.slack.com/apps> → *From an app manifest*,
+Create the app at [Slack Apps](https://api.slack.com/apps) → *From an app manifest*,
 substituting your worker's hostname:
 
 ```yaml

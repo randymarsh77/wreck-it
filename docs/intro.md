@@ -5,6 +5,15 @@ slug: /
 
 # Introduction
 
+**wreck-it** is a webhook-driven cloud meta-harness that turns
+error reports, support email, and post-deploy regressions into code fixes and
+verified deployments. Official Codex, Claude Code, and Copilot CLIs perform the
+coding; wreck-it owns routing, prompts, coordination, and delivery policy.
+
+Start with the [architecture](architecture.md) and [roadmap](roadmap.md).
+The response runtime is implemented and tested locally. Provisioning credentials
+and a deployment pipeline is required to activate it. The following describes the existing legacy execution paths.
+
 **wreck-it** is an autonomous AI agent orchestrator powered by GitHub Models (or the Copilot SDK). It runs Ralph Wiggum loops — continuous, external bash-style loops that execute AI agent tasks to completion — either **headless in CI** (GitHub Actions, cron schedules) or **interactively via a terminal UI**.
 
 ## Ralph Wiggum. Web Scale.

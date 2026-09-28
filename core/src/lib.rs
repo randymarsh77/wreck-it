@@ -17,6 +17,7 @@ pub mod log_source;
 pub mod plan_migration;
 pub mod provenance;
 pub mod replanner;
+pub mod routing;
 pub mod state;
 pub mod store;
 pub mod task_manager;

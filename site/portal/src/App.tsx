@@ -9,6 +9,7 @@ import Installations from './pages/Installations'
 import RepoConfig from './pages/RepoConfig'
 import Plan from './pages/Plan'
 import Triage from './pages/Triage'
+import Responses from './pages/Responses'
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="repos/:owner/:repo/config" element={<RepoConfig />} />
             <Route path="repos/:owner/:repo/plan" element={<Plan />} />
             <Route path="repos/:owner/:repo/triage" element={<Triage />} />
+            <Route path="repos/:owner/:repo/responses" element={<Responses />} />
           </Route>
         </Routes>
       </AuthProvider>

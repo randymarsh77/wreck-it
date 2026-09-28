@@ -73,7 +73,7 @@ fn portal_session_key(hmac_hex: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// Add CORS headers to a [`Response`].
-fn cors_headers(mut resp: Response) -> Result<Response> {
+pub(crate) fn cors_headers(mut resp: Response) -> Result<Response> {
     resp.headers_mut().set("Access-Control-Allow-Origin", "*")?;
     resp.headers_mut().set(
         "Access-Control-Allow-Methods",

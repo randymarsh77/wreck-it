@@ -1,0 +1,21 @@
+name: Autonomous response
+on:
+  pull_request:
+  push:
+    branches: [master, main]
+jobs:
+  response:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: cargo test -p wreck-it-core --locked
+      - run: cargo build -p wreck-it-core --example route --locked
+      - run: cargo check --manifest-path worker/Cargo.toml --locked
+      - run: npm ci && npm run check
+        working-directory: response
+      - run: npm ci && npm run build
+        working-directory: site/portal

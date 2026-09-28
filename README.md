@@ -1,10 +1,34 @@
 # wreck-it 🔧
 
-**Ralph Wiggum. Web Scale.**
+**From production signal to verified deployment.**
 
-Autonomous AI agent orchestration for your codebase. Run headless in GitHub Actions on a cron schedule, or interactively via the terminal UI — powered by GitHub Models or the Copilot SDK.
+wreck-it is a webhook-driven cloud meta-harness: error reports,
+support email, and post-deploy log monitoring trigger an autonomous response.
+It routes work to official Codex, Claude Code, or Copilot CLI harnesses, supplies
+prompts and evidence, and coordinates code follow-ups through checks, automatic
+merge, deployment, and production verification.
 
-🌐 **[wreckit.app](https://wreckit.app)** · 📖 **[Documentation](https://wreckit.app/docs/)** · 🤖 **[CI & Headless Guide](https://wreckit.app/docs/ci-headless)**
+The Cloudflare Worker coordinates; isolated Sandbox containers run the CLIs.
+Routing first checks model capability and owner-scoped account eligibility, then
+prefers available allowance approaching reset. Provider-supported authentication
+and credential ownership constrain every route.
+
+**Implemented:** signed signal ingestion, durable incidents and account leases,
+usage-aware routing, official CLI sandbox execution, checked PR delivery,
+SHA-correlated deployment observation, bounded follow-ups, and portal controls.
+See the [runtime setup guide](response/README.md) for provisioning and live smoke
+testing; provider credentials and deployment infrastructure are not bundled.
+See the [product spec](specs/008-autonomous-response.md),
+[architecture](docs/architecture.md), and [implementation roadmap](docs/roadmap.md).
+
+```sh
+cargo run -p wreck-it-core --example route -- examples/routing.json
+```
+
+🌐 **[wreckit.app](https://wreckit.app)** · 📖 **[Documentation](https://wreckit.app/docs/)**
+
+The CLI/TUI and Ralph-loop features below describe the existing implementation,
+which remains available alongside the opt-in cloud response flow.
 
 ## What is a Ralph Wiggum Loop?
 

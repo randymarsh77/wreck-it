@@ -55,3 +55,9 @@ new_sqlite_classes = ["SchedulerAgent"]
 # Tasks with expired cooldowns will be picked up even without webhook events.
 [triggers]
 crons = ["*/30 * * * *"]
+
+# Autonomous response control plane (deploy response/ first). Both services
+# require the same RESPONSE_INTERNAL_TOKEN / INTERNAL_TOKEN secret value.
+[[services]]
+binding = "RESPONSE_SERVICE"
+service = "wreck-it-response"

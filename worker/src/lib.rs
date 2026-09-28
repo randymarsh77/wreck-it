@@ -46,6 +46,7 @@ mod kv_store;
 mod log_ingest;
 mod portal_api;
 mod processor;
+mod response;
 mod pulse;
 mod scheduler;
 mod security_ingest;
@@ -150,6 +151,13 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     let url = req.url()?;
     let path = url.path();
 
+    if path.starts_with("/internal/response/") {
+        return response::internal(req, env).await;
+    }
+    if path.starts_with("/response/hooks/") {
+        return response::hook(req, env).await;
+    }
+
     // Slack endpoints are handled outside the Router: signature
     // verification needs the raw body, and event processing needs
     // `ctx.wait_until` for post-ack work.
@@ -176,6 +184,7 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     if path.starts_with("/api/") {
         let router = Router::new();
         let router = api::register_routes(router);
+        let router = response::register(router);
         let router = portal_api::register_portal_routes(router);
         return router.run(req, env).await;
     }

@@ -117,6 +117,7 @@ export default function RepoConfig() {
       <h2>Ralph Configuration</h2>
 
       <div style={{ marginBottom: 16 }}>
+        <Link to={`/repos/${owner}/${repo}/responses`} className="btn btn-sm">Autonomous responses</Link>
         <Link to={`/repos/${owner}/${repo}/plan`} className="btn btn-primary btn-sm">
           ✦ Generate Plan
         </Link>

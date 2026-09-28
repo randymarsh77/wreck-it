@@ -1,0 +1,26 @@
+{
+  "name": "wreck-it-response",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "services": [{ "binding": "CONTROL", "service": "wreck-it-worker" }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "OWNERS", "class_name": "Owner" },
+      { "name": "SESSIONS", "class_name": "Session" },
+      { "name": "SANDBOX", "class_name": "Sandbox" },
+    ],
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Owner", "Session", "Sandbox"] },
+  ],
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "max_instances": 10,
+      "instance_type": "standard-1",
+    },
+  ],
+}

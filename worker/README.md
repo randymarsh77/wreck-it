@@ -1,3 +1,8 @@
+> Direction update: this Worker is the control plane for the autonomous
+> response flow. Native official CLIs run through the separate response/Sandbox service.
+> See [spec 008](../specs/008-autonomous-response.md) and the
+> [roadmap](../docs/roadmap.md). Existing endpoints below retain legacy behavior.
+
 # wreck-it Worker
 
 A [Cloudflare Worker](https://developers.cloudflare.com/workers/) that serves as the webhook handler and **pulse trigger** for a **wreck-it** GitHub App. When GitHub events occur (issues labeled `wreck-it`, pushes to the state branch, PRs merged), the worker reads the repository's wreck-it configuration and state via the GitHub API, processes an iteration (selects the next pending task, advances the state machine), triggers cloud agents, manages PRs, and commits the updated state back to the state branch.
