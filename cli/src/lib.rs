@@ -60,6 +60,7 @@ mod splash;
 mod state_worktree;
 mod task_cli;
 mod templates;
+mod triage_cli;
 mod tui;
 mod unstuck;
 

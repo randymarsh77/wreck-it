@@ -14,7 +14,8 @@ use crate::github::GitHubClient;
 use crate::github_app;
 use crate::kv_store;
 use crate::processor;
-use crate::types::PulseRegistration;
+use crate::security_ingest;
+use crate::types::{PulseRegistration, RepoConfig};
 
 /// Run a single pulse: iterate over every registered repository and
 /// process one iteration for each.
@@ -72,7 +73,7 @@ pub async fn run_pulse(env: &worker::Env) -> Result<String, String> {
             _ => {}
         }
 
-        let result = process_registration(&jwt, reg).await;
+        let result = process_registration(&jwt, &kv, reg).await;
         let summary = match result {
             Ok(s) => s,
             Err(e) => {
@@ -91,7 +92,11 @@ pub async fn run_pulse(env: &worker::Env) -> Result<String, String> {
 }
 
 /// Process a single registered repository during a pulse.
-async fn process_registration(jwt: &str, reg: &PulseRegistration) -> Result<String, String> {
+async fn process_registration(
+    jwt: &str,
+    kv: &worker::kv::KvStore,
+    reg: &PulseRegistration,
+) -> Result<String, String> {
     worker::console_log!(
         "[wreck-it][pulse] processing {}/{} (installation={})",
         reg.owner,
@@ -102,14 +107,83 @@ async fn process_registration(jwt: &str, reg: &PulseRegistration) -> Result<Stri
     let token = github_app::vend_installation_token(reg.installation_id, jwt, &reg.repo).await?;
     let client = GitHubClient::new(&reg.owner, &reg.repo, &token);
 
-    match processor::process_iteration(&client, &reg.default_branch).await {
+    let mut summary = match processor::process_iteration(&client, &reg.default_branch).await {
         Ok(result) => {
             let status = if result.changed { "processed" } else { "no-op" };
-            Ok(format!(
-                "{}/{}: {status}: {}",
-                reg.owner, reg.repo, result.summary
-            ))
+            format!("{}/{}: {status}: {}", reg.owner, reg.repo, result.summary)
         }
-        Err(e) => Err(format!("{}/{}: iteration failed: {e}", reg.owner, reg.repo)),
+        Err(e) => return Err(format!("{}/{}: iteration failed: {e}", reg.owner, reg.repo)),
+    };
+
+    // Triage-gated ingestion passes (supply-chain alerts, log sources).
+    // Best-effort: a failure here must never fail the pulse iteration.
+    let repo_config = read_repo_config(&client, &reg.default_branch).await;
+    let triage_config = repo_config
+        .as_ref()
+        .and_then(|c| c.triage.clone())
+        .filter(|t| t.enabled);
+
+    if let Some(triage_config) = &triage_config {
+        match security_ingest::run_security_ingest(
+            &client,
+            kv,
+            &reg.owner,
+            &reg.repo,
+            triage_config,
+            crate::js_sys_now_secs(),
+        )
+        .await
+        {
+            Ok(s) => {
+                summary.push_str("; ");
+                summary.push_str(&s);
+            }
+            Err(e) => {
+                worker::console_warn!(
+                    "[wreck-it][pulse] security ingest failed for {}/{}: {e}",
+                    reg.owner,
+                    reg.repo,
+                );
+            }
+        }
+
+        // Log-source polling (Sentry → triage items).
+        if let Some(settings) = repo_config.as_ref().and_then(|c| c.log_source.as_ref()) {
+            match crate::log_ingest::run_log_ingest(
+                kv,
+                &reg.owner,
+                &reg.repo,
+                settings,
+                triage_config,
+                crate::js_sys_now_secs(),
+            )
+            .await
+            {
+                Ok(s) => {
+                    summary.push_str("; ");
+                    summary.push_str(&s);
+                }
+                Err(e) => {
+                    worker::console_warn!(
+                        "[wreck-it][pulse] log ingest failed for {}/{}: {e}",
+                        reg.owner,
+                        reg.repo,
+                    );
+                }
+            }
+        }
     }
+
+    Ok(summary)
+}
+
+/// Read and parse `.wreck-it/config.toml` from the default branch.  Any
+/// read/parse failure answers `None` (repo not opted in / misconfigured).
+async fn read_repo_config(client: &GitHubClient, default_branch: &str) -> Option<RepoConfig> {
+    let file = client
+        .get_file(".wreck-it/config.toml", default_branch)
+        .await
+        .ok()??;
+    let content = GitHubClient::decode_content(&file).ok()?;
+    toml::from_str(&content).ok()
 }

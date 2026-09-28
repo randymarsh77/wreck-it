@@ -20,8 +20,8 @@ state_file = ".planner-state.json"
 
 [[ralphs]]
 name = "feature-dev"
-task_file = "feature-dev-tasks.json"
-state_file = ".feature-dev-state.json"
+task_file = "response-tasks.json"
+state_file = ".response-state.json"
 
 [[ralphs]]
 name = "merge"

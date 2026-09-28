@@ -319,10 +319,7 @@ impl KanbanClient {
 /// or when required settings are missing.  Warnings are emitted for
 /// misconfiguration so that operators know why the feature is inactive.
 pub fn provider_from_config(cfg: &KanbanConfig) -> Option<KanbanClient> {
-    let backend = match &cfg.provider {
-        Some(b) => b,
-        None => return None,
-    };
+    let backend = cfg.provider.as_ref()?;
 
     let api_token = match &cfg.api_token {
         Some(t) if !t.is_empty() => t.clone(),

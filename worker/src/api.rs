@@ -20,6 +20,8 @@
 //! | `GET`    | `/api/pulse/registrations`                         | List pulse registrations     |
 //! | `PUT`    | `/api/pulse/registrations/{owner}/{repo}`          | Upsert a pulse registration  |
 //! | `DELETE` | `/api/pulse/registrations/{owner}/{repo}`          | Remove a pulse registration  |
+//! | `GET`    | `/api/repos/{owner}/{repo}/triage`                 | List triage items            |
+//! | `GET`    | `/api/repos/{owner}/{repo}/triage/{id}`            | Get a single triage item     |
 
 use crate::kv_store;
 use crate::types::{HeadlessState, PulseRegistration, Task, TaskStatus};
@@ -309,6 +311,44 @@ pub async fn delete_state(req: Request, ctx: RouteContext<()>) -> Result<Respons
 }
 
 // ---------------------------------------------------------------------------
+// Triage endpoints (read-only mirrors for the CLI)
+// ---------------------------------------------------------------------------
+
+/// `GET /api/repos/:owner/:repo/triage`
+pub async fn list_triage(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(r) = verify_api_token(&req, &ctx) {
+        return Ok(r);
+    }
+    let owner = ctx.param("owner").unwrap();
+    let repo = ctx.param("repo").unwrap();
+    let kv = get_kv(&ctx)?;
+
+    match kv_store::load_triage(&kv, owner, repo).await {
+        Ok(items) => json_response(&items, 200),
+        Err(e) => Response::error(e, 500),
+    }
+}
+
+/// `GET /api/repos/:owner/:repo/triage/:triage_id`
+pub async fn get_triage_item(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    if let Err(r) = verify_api_token(&req, &ctx) {
+        return Ok(r);
+    }
+    let owner = ctx.param("owner").unwrap();
+    let repo = ctx.param("repo").unwrap();
+    let triage_id = ctx.param("triage_id").unwrap();
+    let kv = get_kv(&ctx)?;
+
+    match kv_store::load_triage(&kv, owner, repo).await {
+        Ok(items) => match items.iter().find(|i| i.id == *triage_id) {
+            Some(item) => json_response(item, 200),
+            None => Response::error("Triage item not found", 404),
+        },
+        Err(e) => Response::error(e, 500),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Pulse registry endpoints
 // ---------------------------------------------------------------------------
 
@@ -397,6 +437,9 @@ pub fn register_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .get_async("/api/repos/:owner/:repo/state/:context", get_state)
         .put_async("/api/repos/:owner/:repo/state/:context", put_state)
         .delete_async("/api/repos/:owner/:repo/state/:context", delete_state)
+        // Triage endpoints
+        .get_async("/api/repos/:owner/:repo/triage", list_triage)
+        .get_async("/api/repos/:owner/:repo/triage/:triage_id", get_triage_item)
         // Pulse registry endpoints
         .get_async("/api/pulse/registrations", list_pulse_registrations)
         .put_async(

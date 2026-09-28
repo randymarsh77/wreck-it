@@ -1,10 +1,34 @@
 # wreck-it 🔧
 
-**Ralph Wiggum. Web Scale.**
+**From production signal to verified deployment.**
 
-Autonomous AI agent orchestration for your codebase. Run headless in GitHub Actions on a cron schedule, or interactively via the terminal UI — powered by GitHub Models or the Copilot SDK.
+wreck-it is a webhook-driven cloud meta-harness: error reports,
+support email, and post-deploy log monitoring trigger an autonomous response.
+It routes work to official Codex, Claude Code, or Copilot CLI harnesses, supplies
+prompts and evidence, and coordinates code follow-ups through checks, automatic
+merge, deployment, and production verification.
 
-🌐 **[wreckit.app](https://wreckit.app)** · 📖 **[Documentation](https://wreckit.app/docs/)** · 🤖 **[CI & Headless Guide](https://wreckit.app/docs/ci-headless)**
+The Cloudflare Worker coordinates; isolated Sandbox containers run the CLIs.
+Routing first checks model capability and owner-scoped account eligibility, then
+prefers available allowance approaching reset. Provider-supported authentication
+and credential ownership constrain every route.
+
+**Implemented:** signed signal ingestion, durable incidents and account leases,
+usage-aware routing, official CLI sandbox execution, checked PR delivery,
+SHA-correlated deployment observation, bounded follow-ups, and portal controls.
+See the [runtime setup guide](response/README.md) for provisioning and live smoke
+testing; provider credentials and deployment infrastructure are not bundled.
+See the [product spec](specs/008-autonomous-response.md),
+[architecture](docs/architecture.md), and [implementation roadmap](docs/roadmap.md).
+
+```sh
+cargo run -p wreck-it-core --example route -- examples/routing.json
+```
+
+🌐 **[wreckit.app](https://wreckit.app)** · 📖 **[Documentation](https://wreckit.app/docs/)**
+
+The CLI/TUI and Ralph-loop features below describe the existing implementation,
+which remains available alongside the opt-in cloud response flow.
 
 ## What is a Ralph Wiggum Loop?
 
@@ -47,7 +71,10 @@ The Ralph Wiggum Loop is a bash-style loop that continuously executes AI agent t
 - 🔒 **Security Gate**: Dedicated `security_gate` role runs `cargo audit` or `npm audit` automatically and persists findings as an artefact for downstream tasks
 - 📡 **OTEL Tracing**: Export task lifecycle spans to any OTLP-compatible collector (Jaeger, Honeycomb, Grafana Cloud) via the `[otel]` config section
 - 📋 **Kanban Integration**: Sync task status with Linear, JIRA, or Trello boards via the `kanban_provider` config option
-- 📊 **Log Source Ingest**: Pull error/exception log entries from Seq (or Cloudflare Workers) and automatically create wreck-it tasks to triage and fix them
+- 📊 **Log Source Ingest**: Pull error/exception log entries from Seq, Cloudflare Workers, or Sentry and automatically create wreck-it tasks to triage and fix them — the cloud harness also polls Sentry server-side into triage items
+- 🚨 **CI-Failure Triage**: The GitHub App turns failing workflow runs into first-class triage items — evidence collected from job logs, a fix issue dispatched to a cloud coding agent, and auto-resolution when the fix PR merges or the workflow goes green (`[triage]` in `.wreck-it/config.toml`)
+- 🛡️ **Supply-Chain Triage**: Dependabot alerts sync into the triage queue with advisory severity and auto-resolve when fixed upstream; Dependabot/Renovate PRs are tracked observe-only — never auto-merged
+- 💬 **Slack Integration**: Triage announcements thread into linked channels, and @wreck-it mentions file triage items with dispatched fix agents — replies land in the thread where you asked
 - 📈 **HTML Run Reports**: Generate a self-contained HTML summary of any run (`wreck-it report`) with task timeline, dependency graph, and cost breakdown
 - 🔌 **MCP Server**: Expose the task pipeline over the Model Context Protocol so AI assistants (Claude Desktop, VS Code Copilot Chat, Cursor) can manage tasks directly
 - 🔧 **Unstuck Helper**: Scan open PRs and the default branch for failing CI checks and automatically comment `@copilot` to request fixes (`wreck-it unstuck`)

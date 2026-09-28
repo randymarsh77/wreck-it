@@ -43,10 +43,18 @@ mod durable_object;
 mod github;
 mod github_app;
 mod kv_store;
+mod log_ingest;
 mod portal_api;
 mod processor;
+mod response;
 mod pulse;
 mod scheduler;
+mod security_ingest;
+mod slack;
+mod slack_events;
+mod slack_notify;
+mod slack_oauth;
+mod triage;
 mod types;
 mod webhook;
 
@@ -139,14 +147,44 @@ fn should_process_pr_event(
 }
 
 #[event(fetch)]
-async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     let url = req.url()?;
     let path = url.path();
+
+    if path.starts_with("/internal/response/") {
+        return response::internal(req, env).await;
+    }
+    if path.starts_with("/response/hooks/") {
+        return response::hook(req, env).await;
+    }
+
+    // Slack endpoints are handled outside the Router: signature
+    // verification needs the raw body, and event processing needs
+    // `ctx.wait_until` for post-ack work.
+    if path == "/slack/events" {
+        return match slack_events::handle(req, env, ctx).await {
+            Ok(resp) => Ok(resp),
+            Err(e) => {
+                console_error!("[wreck-it][slack] ✗ unhandled error: {e}");
+                Response::error(format!("Internal error: {e}"), 500)
+            }
+        };
+    }
+    if path == "/slack/oauth/callback" {
+        return match slack_oauth::handle_callback(req, env).await {
+            Ok(resp) => Ok(resp),
+            Err(e) => {
+                console_error!("[wreck-it][slack] ✗ oauth callback error: {e}");
+                Response::error(format!("Internal error: {e}"), 500)
+            }
+        };
+    }
 
     // Route API requests through the Router.
     if path.starts_with("/api/") {
         let router = Router::new();
         let router = api::register_routes(router);
+        let router = response::register(router);
         let router = portal_api::register_portal_routes(router);
         return router.run(req, env).await;
     }
@@ -369,17 +407,23 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
         }
         WebhookEvent::PullRequest => {
             let action = payload.action.as_deref().unwrap_or("");
-            let result = payload
-                .pull_request
-                .as_ref()
-                .map(|pr| should_process_pr_event(action, pr, auth_login_ref))
-                .unwrap_or(false);
             let pr_user = payload
                 .pull_request
                 .as_ref()
                 .and_then(|pr| pr.user.as_ref())
                 .map(|u| u.login.as_str())
                 .unwrap_or("(no user)");
+            // Dependency-update bots are not trusted authors, but their PRs
+            // get dedicated observe-only handling (see security_ingest).
+            let result = if security_ingest::is_dep_update_author(pr_user) {
+                ["opened", "synchronize", "closed"].contains(&action)
+            } else {
+                payload
+                    .pull_request
+                    .as_ref()
+                    .map(|pr| should_process_pr_event(action, pr, auth_login_ref))
+                    .unwrap_or(false)
+            };
             console_log!(
                 "[wreck-it] PR filter: action={} user={} should_process={}",
                 action,
@@ -389,26 +433,18 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
             result
         }
         WebhookEvent::WorkflowRun => {
-            // Process completed workflow runs that have a failure conclusion
-            // and at least one associated pull request.
+            // Accept all completed runs: the unstuck path needs
+            // failure-with-PRs, and the triage path applies its
+            // fine-grained branch/config filter after
+            // `.wreck-it/config.toml` has been fetched.
             let action = payload.action.as_deref().unwrap_or("");
-            let conclusion = payload
-                .workflow_run
-                .as_ref()
-                .and_then(|wr| wr.conclusion.as_deref())
-                .unwrap_or("");
-            let pr_count = payload
-                .workflow_run
-                .as_ref()
-                .map(|wr| wr.pull_requests.len())
-                .unwrap_or(0);
+            let result = action == "completed" && payload.workflow_run.is_some();
             console_log!(
-                "[wreck-it] workflow_run filter: action={} conclusion={} pull_requests={}",
+                "[wreck-it] workflow_run filter: action={} should_process={}",
                 action,
-                conclusion,
-                pr_count,
+                result,
             );
-            action == "completed" && conclusion == "failure" && pr_count > 0
+            result
         }
         _ => false,
     };
@@ -455,6 +491,165 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
 
     console_log!("[wreck-it] config found — proceeding with event handling");
 
+    // Parse the repo config once — the workflow_run branch and the triage
+    // PR hooks below both need it.
+    let repo_config: types::RepoConfig = config_file
+        .as_ref()
+        .and_then(|f| github::GitHubClient::decode_content(f).ok())
+        .and_then(|content| toml::from_str(&content).ok())
+        .unwrap_or_default();
+    let triage_enabled = repo_config
+        .triage
+        .as_ref()
+        .map(|t| t.enabled)
+        .unwrap_or(false);
+
+    // Workflow-run handling combines two independent responders:
+    //
+    //   1. CI-failure triage — failing runs on triaged branches become
+    //      triage items with a dispatched fix issue; successful runs
+    //      resolve matching open items (`[triage]` config).
+    //   2. The unstuck ralph — failing runs with associated PRs get a
+    //      `@copilot` comment on each PR (ralph with `command = "unstuck"`).
+    //
+    // Both get a chance to act; neither's opt-in gates the other.
+    if event == WebhookEvent::WorkflowRun {
+        let run = payload
+            .workflow_run
+            .as_ref()
+            .ok_or_else(|| Error::RustError("Missing workflow_run in payload".into()))?;
+
+        let mut summaries: Vec<String> = Vec::new();
+
+        // --- Triage pass ---------------------------------------------------
+        match &repo_config.triage {
+            Some(triage_config) if triage_config.enabled => {
+                let action = payload.action.as_deref().unwrap_or("");
+                let disposition = triage::workflow_run_disposition(
+                    action,
+                    run,
+                    triage_config,
+                    default_branch,
+                    &repo_config.state_branch,
+                );
+                if disposition == triage::WorkflowRunDisposition::Ignore {
+                    console_log!("[wreck-it] workflow run not triaged (branch/conclusion filter)");
+                } else {
+                    let kv = env
+                        .kv(kv_store::KV_BINDING)
+                        .map_err(|e| Error::RustError(format!("KV binding unavailable: {e}")))?;
+                    match triage::handle_workflow_run(
+                        &client,
+                        &kv,
+                        owner,
+                        repo_name,
+                        triage_config,
+                        run,
+                        disposition,
+                        js_sys_now_secs(),
+                    )
+                    .await
+                    {
+                        Ok(summary) => {
+                            console_log!("[wreck-it][triage] {}", summary);
+                            summaries.push(summary);
+                        }
+                        Err(e) => {
+                            console_error!("[wreck-it][triage] ✗ {e}");
+                            summaries.push(format!("triage failed: {e}"));
+                        }
+                    }
+                }
+            }
+            _ => {
+                console_log!("[wreck-it] triage not enabled for {}/{}", owner, repo_name);
+            }
+        }
+
+        // --- Unstuck pass ----------------------------------------------------
+        let failure = run.conclusion.as_deref() == Some("failure");
+        if failure && !run.pull_requests.is_empty() {
+            let has_unstuck = repo_config
+                .ralphs
+                .iter()
+                .any(|r| r.command.as_deref() == Some("unstuck"));
+            if has_unstuck {
+                let mut commented = 0u32;
+                for wr_pr in &run.pull_requests {
+                    console_log!(
+                        "[wreck-it] workflow_run failure — commenting on PR #{}",
+                        wr_pr.number,
+                    );
+                    match client.comment_on_pr(wr_pr.number, UNSTUCK_COMMENT).await {
+                        Ok(()) => {
+                            commented += 1;
+                        }
+                        Err(e) => {
+                            console_warn!(
+                                "[wreck-it] failed to comment on PR #{}: {}",
+                                wr_pr.number,
+                                e,
+                            );
+                        }
+                    }
+                }
+                summaries.push(format!("unstuck: commented on {commented} PR(s)"));
+            } else {
+                console_log!(
+                    "[wreck-it] no unstuck ralph configured — ignoring workflow_run failure"
+                );
+            }
+        }
+
+        if summaries.is_empty() {
+            return Response::ok("workflow run ignored");
+        }
+        return Response::ok(summaries.join("; "));
+    }
+
+    // Dependency-update PRs (Dependabot/Renovate): observe-only handling.
+    // Must return before the trusted-PR machinery below — these authors are
+    // not trusted, and dependency PRs must never get workflow approval or
+    // auto-merge from us.
+    if event == WebhookEvent::PullRequest {
+        if let Some(pr) = &payload.pull_request {
+            let author_is_dep_bot = pr
+                .user
+                .as_ref()
+                .map(|u| security_ingest::is_dep_update_author(&u.login))
+                .unwrap_or(false);
+            if author_is_dep_bot {
+                let triage_config = repo_config.triage.clone().unwrap_or_default();
+                let kv = env
+                    .kv(kv_store::KV_BINDING)
+                    .map_err(|e| Error::RustError(format!("KV binding unavailable: {e}")))?;
+                let action = payload.action.as_deref().unwrap_or("");
+
+                return match security_ingest::handle_dep_update_pr(
+                    &client,
+                    &kv,
+                    owner,
+                    repo_name,
+                    pr,
+                    action,
+                    &triage_config,
+                    js_sys_now_secs(),
+                )
+                .await
+                {
+                    Ok(summary) => {
+                        console_log!("[wreck-it][security] {}", summary);
+                        Response::ok(summary)
+                    }
+                    Err(e) => {
+                        console_error!("[wreck-it][security] ✗ {e}");
+                        Response::error(format!("Dep-update handling failed: {e}"), 500)
+                    }
+                };
+            }
+        }
+    }
+
     // For PR events from trusted authors, approve pending workflow runs
     // and enable auto-merge when required checks are detected.  This
     // handles the case where workflow runs need explicit approval before
@@ -470,7 +665,66 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
             let action = payload.action.as_deref().unwrap_or("");
             let merged = pr.merged.unwrap_or(false);
 
+            // Triage linkage: connect an agent's fix PR to the triage items
+            // whose dispatched issues it references (Investigating → PrOpen).
+            // Gated on triage being enabled so other repos pay no KV cost.
+            if triage_enabled && action != "closed" {
+                if let Ok(kv) = env.kv(kv_store::KV_BINDING) {
+                    match triage::handle_pr_linkage(
+                        &kv,
+                        owner,
+                        repo_name,
+                        pr.number,
+                        pr.body.as_deref(),
+                        js_sys_now_secs(),
+                    )
+                    .await
+                    {
+                        Ok(n) if n > 0 => {
+                            console_log!(
+                                "[wreck-it][triage] linked PR #{} to {} triage item(s)",
+                                pr.number,
+                                n,
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            console_warn!("[wreck-it][triage] PR linkage failed: {e}");
+                        }
+                    }
+                }
+            }
+
             if action == "closed" && merged {
+                // Triage resolution: a merged fix PR resolves its items.
+                if triage_enabled {
+                    if let Ok(kv) = env.kv(kv_store::KV_BINDING) {
+                        match triage::handle_merged_pr(
+                            &kv,
+                            owner,
+                            repo_name,
+                            pr.number,
+                            js_sys_now_secs(),
+                        )
+                        .await
+                        {
+                            Ok(n) if n > 0 => {
+                                console_log!(
+                                    "[wreck-it][triage] resolved {} item(s) via merged PR #{}",
+                                    n,
+                                    pr.number,
+                                );
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                console_warn!(
+                                    "[wreck-it][triage] merged-PR resolution failed: {e}"
+                                );
+                            }
+                        }
+                    }
+                }
+
                 // Merged PR — handle task completion.
                 console_log!("[wreck-it] handling merged PR #{}", pr.number);
                 match processor::process_merged_pr(&client, default_branch, pr.number).await {
@@ -577,58 +831,6 @@ async fn handle_webhook(mut req: Request, env: Env) -> Result<Response> {
                     pr_number, action,
                 ));
             }
-        }
-    }
-
-    // For workflow_run events with a failure conclusion, check if the repo
-    // has an "unstuck" ralph configured and, if so, comment `@copilot` on
-    // each associated PR to request fixes.
-    if event == WebhookEvent::WorkflowRun {
-        if let Some(workflow_run) = &payload.workflow_run {
-            let config_content = config_file
-                .as_ref()
-                .and_then(|f| github::GitHubClient::decode_content(f).ok());
-            let has_unstuck = config_content
-                .as_deref()
-                .and_then(|c| toml::from_str::<types::RepoConfig>(c).ok())
-                .map(|cfg| {
-                    cfg.ralphs
-                        .iter()
-                        .any(|r| r.command.as_deref() == Some("unstuck"))
-                })
-                .unwrap_or(false);
-
-            if !has_unstuck {
-                console_log!(
-                    "[wreck-it] no unstuck ralph configured — ignoring workflow_run failure"
-                );
-                return Response::ok("workflow_run failure ignored: no unstuck ralph configured");
-            }
-
-            let mut commented = 0u32;
-            for wr_pr in &workflow_run.pull_requests {
-                console_log!(
-                    "[wreck-it] workflow_run failure — commenting on PR #{}",
-                    wr_pr.number,
-                );
-                match client.comment_on_pr(wr_pr.number, UNSTUCK_COMMENT).await {
-                    Ok(()) => {
-                        commented += 1;
-                    }
-                    Err(e) => {
-                        console_warn!(
-                            "[wreck-it] failed to comment on PR #{}: {}",
-                            wr_pr.number,
-                            e,
-                        );
-                    }
-                }
-            }
-
-            return Response::ok(format!(
-                "workflow_run failure: commented on {} PR(s)",
-                commented,
-            ));
         }
     }
 
@@ -1114,6 +1316,22 @@ mod tests {
     fn reject_pr_synchronize_untrusted() {
         let pr = make_pr("attacker", "User");
         assert!(!should_process_pr_event("synchronize", &pr, None));
+    }
+
+    #[test]
+    fn dep_update_bots_stay_untrusted_in_normal_pr_path() {
+        // Dependabot/Renovate PRs are handled by the dedicated observe-only
+        // security_ingest branch. They must NEVER pass the trusted filter,
+        // which gates workflow approval and auto-merge.
+        for login in security_ingest::DEP_UPDATE_AUTHORS {
+            let pr = make_pr(login, "Bot");
+            for action in ["opened", "synchronize", "ready_for_review", "closed"] {
+                assert!(
+                    !should_process_pr_event(action, &pr, None),
+                    "{login} must not be trusted for action {action}"
+                );
+            }
+        }
     }
 
     #[test]

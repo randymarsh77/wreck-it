@@ -342,6 +342,62 @@ export async function reinitializeInstallation(
   )
 }
 
+export type TriageStatus =
+  | 'new'
+  | 'investigating'
+  | 'pr_open'
+  | 'resolved'
+  | 'dismissed'
+  | 'stale'
+
+export type TriageSeverity = 'low' | 'medium' | 'high' | 'critical'
+
+export interface TriageSource {
+  type: 'ci_failure' | 'log_event' | 'slack_mention' | 'security_finding'
+  run_id?: number
+  workflow_name?: string
+  branch?: string
+  head_sha?: string
+  conclusion?: string
+  run_url?: string
+  run_attempt?: number
+  provider?: string
+  event_id?: string
+  [key: string]: unknown
+}
+
+export interface TriageItem {
+  id: string
+  source: TriageSource
+  status: TriageStatus
+  severity: TriageSeverity
+  title: string
+  detail?: string
+  correlation_key: string
+  occurrences: number
+  created_at: number
+  updated_at: number
+  issue_number?: number
+  pr_number?: number
+}
+
+export async function getTriage(owner: string, repo: string): Promise<TriageItem[]> {
+  return request<TriageItem[]>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/triage`,
+  )
+}
+
+export async function dismissTriageItem(
+  owner: string,
+  repo: string,
+  id: string,
+): Promise<TriageItem> {
+  return request<TriageItem>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/triage/${encodeURIComponent(id)}/dismiss`,
+    { method: 'POST' },
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Agent (Durable Object) endpoints
 // ---------------------------------------------------------------------------
@@ -408,6 +464,17 @@ export async function agentRun(
   )
 }
 
+export async function retryTriageItem(
+  owner: string,
+  repo: string,
+  id: string,
+): Promise<TriageItem> {
+  return request<TriageItem>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/triage/${encodeURIComponent(id)}/retry`,
+    { method: 'POST' },
+  )
+}
+
 export async function agentPause(
   owner: string,
   repo: string,
@@ -442,8 +509,106 @@ export async function agentMigrate(
   )
 }
 
+export interface SlackTeam {
+  team_id: string
+  team_name: string
+}
+
+export interface SlackChannel {
+  id: string
+  name: string
+  is_member: boolean
+}
+
+export interface SlackLink {
+  team_id: string
+  channel_id: string
+  notify_triage: boolean
+  notify_pr: boolean
+  notify_security: boolean
+}
+
+export async function getSlackInstallUrl(owner: string, repo: string): Promise<string> {
+  const data = await request<{ url: string }>(
+    `/api/portal/slack/install-url?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`,
+  )
+  return data.url
+}
+
+export async function getSlackWorkspaces(): Promise<SlackTeam[]> {
+  return request<SlackTeam[]>('/api/portal/slack/workspaces')
+}
+
+export async function getSlackChannels(teamId: string): Promise<SlackChannel[]> {
+  return request<SlackChannel[]>(
+    `/api/portal/slack/${encodeURIComponent(teamId)}/channels`,
+  )
+}
+
+export async function getSlackLinks(owner: string, repo: string): Promise<SlackLink[]> {
+  return request<SlackLink[]>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/slack-links`,
+  )
+}
+
+export async function putSlackLink(
+  owner: string,
+  repo: string,
+  link: Omit<SlackLink, never>,
+): Promise<void> {
+  await request(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/slack-link`,
+    { method: 'PUT', body: JSON.stringify(link) },
+  )
+}
+
+export async function deleteSlackLink(
+  owner: string,
+  repo: string,
+  teamId: string,
+  channelId: string,
+): Promise<void> {
+  await request(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/slack-link?team_id=${encodeURIComponent(teamId)}&channel_id=${encodeURIComponent(channelId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function getLogSourceTokenStatus(
+  owner: string,
+  repo: string,
+): Promise<boolean> {
+  const data = await request<{ configured: boolean }>(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/log-source-token`,
+  )
+  return data.configured
+}
+
+export async function putLogSourceToken(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<void> {
+  await request(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/log-source-token`,
+    { method: 'PUT', body: JSON.stringify({ token }) },
+  )
+}
+
+export async function deleteLogSourceToken(owner: string, repo: string): Promise<void> {
+  await request(
+    `/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/log-source-token`,
+    { method: 'DELETE' },
+  )
+}
+
 export function logout(): void {
   clearToken()
 }
 
 export { getToken, clearToken }
+
+export function responseRequest<T = {ok:boolean}>(owner:string,repo:string,action:string,body?:unknown):Promise<T> {
+  return request<T>(`/api/portal/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/response/${action}`,
+    body===undefined?{}:{method:'POST',body:JSON.stringify(body)})
+}

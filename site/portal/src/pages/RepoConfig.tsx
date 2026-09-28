@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import SlackPanel from '../components/SlackPanel'
+import LogSourcePanel from '../components/LogSourcePanel'
 import {
   getRepoConfig,
   updateRepoConfig,
@@ -115,6 +117,7 @@ export default function RepoConfig() {
       <h2>Ralph Configuration</h2>
 
       <div style={{ marginBottom: 16 }}>
+        <Link to={`/repos/${owner}/${repo}/responses`} className="btn btn-sm">Autonomous responses</Link>
         <Link to={`/repos/${owner}/${repo}/plan`} className="btn btn-primary btn-sm">
           ✦ Generate Plan
         </Link>
@@ -174,6 +177,9 @@ export default function RepoConfig() {
       ) : (
         !error && <p className="muted">No configuration found.</p>
       )}
+
+      <SlackPanel owner={owner!} repo={repo!} />
+      <LogSourcePanel owner={owner!} repo={repo!} />
     </div>
   )
 }

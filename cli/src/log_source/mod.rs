@@ -19,6 +19,7 @@
 //! [`provider_from_config`] for details.
 
 pub mod cloudflare;
+pub mod sentry;
 pub mod seq;
 
 use anyhow::Result;
@@ -50,6 +51,7 @@ pub struct LogEntry {
 pub enum LogSourceBackend {
     Seq,
     Cloudflare,
+    Sentry,
 }
 
 impl std::fmt::Display for LogSourceBackend {
@@ -57,6 +59,7 @@ impl std::fmt::Display for LogSourceBackend {
         match self {
             Self::Seq => write!(f, "Seq"),
             Self::Cloudflare => write!(f, "Cloudflare"),
+            Self::Sentry => write!(f, "Sentry"),
         }
     }
 }
@@ -109,6 +112,14 @@ pub struct LogSourceConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub script_name: Option<String>,
 
+    /// Sentry organization slug (required when `provider` is `Sentry`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<String>,
+
+    /// Sentry project slug (required when `provider` is `Sentry`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+
     /// Maximum number of log entries to fetch per sync cycle.
     /// Defaults to `20` when not set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -150,6 +161,7 @@ pub trait LogSourceProvider: Send + Sync {
 pub enum LogSourceClient {
     Seq(seq::SeqProvider),
     Cloudflare(cloudflare::CloudflareProvider),
+    Sentry(sentry::SentryProvider),
 }
 
 impl LogSourceClient {
@@ -158,6 +170,7 @@ impl LogSourceClient {
         match self {
             Self::Seq(p) => p.provider_name(),
             Self::Cloudflare(p) => p.provider_name(),
+            Self::Sentry(p) => p.provider_name(),
         }
     }
 
@@ -165,6 +178,7 @@ impl LogSourceClient {
         match self {
             Self::Seq(p) => p.query_entries(since, count).await,
             Self::Cloudflare(p) => p.query_entries(since, count).await,
+            Self::Sentry(p) => p.query_entries(since, count).await,
         }
     }
 }
@@ -182,10 +196,7 @@ const DEFAULT_MAX_ENTRIES: usize = 20;
 /// configured) or when required settings are missing.  Warnings are emitted
 /// for misconfiguration so that operators know why the feature is inactive.
 pub fn provider_from_config(cfg: &LogSourceConfig) -> Option<LogSourceClient> {
-    let backend = match &cfg.provider {
-        Some(b) => b,
-        None => return None,
-    };
+    let backend = cfg.provider.as_ref()?;
 
     match backend {
         LogSourceBackend::Seq => {
@@ -235,6 +246,38 @@ pub fn provider_from_config(cfg: &LogSourceConfig) -> Option<LogSourceClient> {
                     filter,
                 ),
             ))
+        }
+        LogSourceBackend::Sentry => {
+            let organization = match &cfg.organization {
+                Some(o) => o.clone(),
+                None => {
+                    eprintln!("Warning: Sentry log source requires `organization`");
+                    return None;
+                }
+            };
+            let project = match &cfg.project {
+                Some(p) => p.clone(),
+                None => {
+                    eprintln!("Warning: Sentry log source requires `project`");
+                    return None;
+                }
+            };
+            let base_url = cfg
+                .api_base_url
+                .clone()
+                .unwrap_or_else(|| sentry::DEFAULT_SENTRY_API.to_string());
+            let query = cfg
+                .filter
+                .clone()
+                .unwrap_or_else(|| wreck_it_core::log_source::DEFAULT_SENTRY_QUERY.to_string());
+            let api_token = cfg.api_token.clone().unwrap_or_default();
+            Some(LogSourceClient::Sentry(sentry::SentryProvider::new(
+                api_token,
+                base_url,
+                organization,
+                project,
+                query,
+            )))
         }
     }
 }
@@ -315,6 +358,8 @@ mod tests {
             max_entries: Some(50),
             account_id: None,
             script_name: None,
+            organization: None,
+            project: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: LogSourceConfig = serde_json::from_str(&json).unwrap();
@@ -412,6 +457,51 @@ mod tests {
     }
 
     #[test]
+    fn provider_from_config_creates_sentry() {
+        let cfg = LogSourceConfig {
+            provider: Some(LogSourceBackend::Sentry),
+            api_token: Some("sn-tok".into()),
+            organization: Some("acme".into()),
+            project: Some("web-app".into()),
+            ..Default::default()
+        };
+        let p = provider_from_config(&cfg);
+        assert!(p.is_some());
+        assert_eq!(p.unwrap().provider_name(), "Sentry");
+    }
+
+    #[test]
+    fn provider_from_config_sentry_requires_organization() {
+        let cfg = LogSourceConfig {
+            provider: Some(LogSourceBackend::Sentry),
+            api_token: Some("sn-tok".into()),
+            project: Some("web-app".into()),
+            ..Default::default()
+        };
+        assert!(provider_from_config(&cfg).is_none());
+    }
+
+    #[test]
+    fn provider_from_config_sentry_requires_project() {
+        let cfg = LogSourceConfig {
+            provider: Some(LogSourceBackend::Sentry),
+            api_token: Some("sn-tok".into()),
+            organization: Some("acme".into()),
+            ..Default::default()
+        };
+        assert!(provider_from_config(&cfg).is_none());
+    }
+
+    #[test]
+    fn log_source_backend_sentry_serde_roundtrip() {
+        let json = serde_json::to_string(&LogSourceBackend::Sentry).unwrap();
+        assert_eq!(json, r#""sentry""#);
+        let back: LogSourceBackend = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, LogSourceBackend::Sentry);
+        assert_eq!(format!("{}", LogSourceBackend::Sentry), "Sentry");
+    }
+
+    #[test]
     fn log_source_config_cloudflare_roundtrip() {
         let cfg = LogSourceConfig {
             provider: Some(LogSourceBackend::Cloudflare),
@@ -421,6 +511,8 @@ mod tests {
             max_entries: Some(10),
             account_id: Some("acct-123".into()),
             script_name: Some("my-worker".into()),
+            organization: None,
+            project: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         let back: LogSourceConfig = serde_json::from_str(&json).unwrap();

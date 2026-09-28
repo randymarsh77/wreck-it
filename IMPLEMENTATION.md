@@ -1,3 +1,15 @@
+# Current direction
+
+As of 2026-09-27, [spec 008](specs/008-autonomous-response.md) and the
+[current roadmap](docs/roadmap.md) supersede the product direction below.
+`core/src/routing.rs` implements owner-scoped capability and usage routing, with
+an offline preview and regression tests. The cloud response runtime is implemented in `response/` and connected through
+`worker/src/response.rs`; all ten tasks in `tasks/response-tasks.json` are complete.
+See `response/README.md` for the acceptance suite, provisioning, and live smoke-test
+boundaries. The portal exposes autonomous response configuration and operations.
+
+The following is the historical implementation inventory.
+
 # Implementation Summary
 
 ## Project: wreck-it

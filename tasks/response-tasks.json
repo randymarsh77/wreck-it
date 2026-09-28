@@ -1,0 +1,122 @@
+[
+  {
+    "id": "response-lifecycle",
+    "description": "Implement normalized signals and the durable incident lifecycle from spec 008. Add shared typed error_report, support_email, and deployment_regression envelopes; owner/repo/delivery identity; attempt budgets; explicit transition validation; and Worker persistence with an outbox. Reuse authenticated GitHub/error ingest where possible. Acceptance: duplicate signed deliveries create one incident; stale callbacks are ignored; restart recovery does not dispatch duplicate work; merge alone cannot resolve a response.",
+    "status": "completed",
+    "role": "implementer",
+    "phase": 1,
+    "depends_on": [],
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "response-account-registry",
+    "description": "Implement owner-scoped account/model configuration and auth-reference resolution from spec 008. Keep credentials out of repository config, KV projections, prompts, and logs. Support official Codex owner-maintained native auth/API auth, Copilot supported tokens, and end-user-owned Claude API credentials. Do not broker Claude subscription credentials. Acceptance: cross-owner access and unsupported auth modes fail before secret resolution; configuration can be revoked and reauthentication surfaced.",
+    "status": "completed",
+    "role": "implementer",
+    "phase": 2,
+    "depends_on": [
+      "response-lifecycle"
+    ],
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "response-usage-leases",
+    "description": "Connect core::routing to documented provider/CLI usage adapters and an atomic Durable Object account lease ledger. Report supported and unavailable quota windows explicitly, distinguish provider allowance from optional configured API spend budgets, and defer missing/stale usage. Recheck quota and reserve before dispatch; bound lease expiry, heartbeat, cancellation, and reconciliation. Acceptance: simultaneous admissions respect account caps; weekly exhaustion blocks short-window headroom; reset and 429 require fresh evidence/cooldown; no private quota endpoint scraping.",
+    "status": "completed",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": [
+      "response-account-registry"
+    ],
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "response-sandbox-runner",
+    "description": "Build a separate TypeScript Cloudflare Sandbox runner with an authenticated service binding from the Rust Worker. Implement idempotent start/status/follow_up/cancel contracts, exact-SHA checkout, attempt-isolated workspace, output artifacts, timeout, and cleanup. Pin runtime/SDK versions and keep merge/deploy authority in the coordinator. Acceptance: repeated start returns the same session; worker restart recovers process state; timeout/cancel terminates and releases resources; secrets never appear in returned artifacts.",
+    "status": "completed",
+    "role": "implementer",
+    "phase": 3,
+    "depends_on": [
+      "response-account-registry"
+    ],
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "response-official-cli-adapters",
+    "description": "Implement adapters for unmodified official Codex CLI, Copilot CLI, and Claude Code in the runner. Seed versioned prompts and evidence; select configured models; capture native session IDs and structured results; resume explicit session IDs for follow-ups. Use argv-safe process invocation, bounded execution permissions, pinned CLI contracts, and provider-supported auth. Acceptance: fixture-backed output/error parsing and a fake-executable integration test per CLI cover success, auth failure, quota exhaustion, timeout, and follow-up; no custom inference/tool loop.",
+    "status": "completed",
+    "role": "implementer",
+    "phase": 4,
+    "depends_on": [
+      "response-sandbox-runner"
+    ],
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "response-error-to-pr",
+    "description": "Wire the first vertical slice: authenticated error report to correlated incident, capability rule, account route/lease, official CLI sandbox session, captured patch/tests, and GitHub PR. Maintain the incident/attempt/session/PR relation across retries. Acceptance: a seeded failure produces one tested PR, duplicate webhook delivery does not spawn another run, and crash-after-dispatch recovery reconciles the existing session.",
+    "status": "completed",
+    "role": "implementer",
+    "phase": 5,
+    "depends_on": [
+      "response-lifecycle",
+      "response-usage-leases",
+      "response-official-cli-adapters"
+    ],
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "response-auto-delivery",
+    "description": "Add repository delivery policy and implement required checks/review gates, GitHub auto-merge, merge SHA capture, and deployment workflow correlation. Respect branch protections and existing dependency/security observe-only rules. Never give the coding session merge/deploy credentials. Acceptance: missing, failed, or stale-head checks block merge; an eligible current head enables auto-merge; only the matching deployed merge SHA advances to observing; duplicate events do not repeat delivery side effects.",
+    "status": "completed",
+    "role": "implementer",
+    "phase": 6,
+    "depends_on": [
+      "response-error-to-pr"
+    ],
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "response-deploy-observation",
+    "description": "Implement finite post-deploy health/log observation tied to exact revision and environment. Resolve only after healthy observation; correlate regression evidence into one bounded follow-up session, with escalation on exhausted attempts and rollback only through explicit repository policy. Acceptance: wrong-SHA success cannot close the incident; repeated regression signals deduplicate; failed deploy and unhealthy observation remain open; a healthy verified deployment resolves.",
+    "status": "completed",
+    "role": "implementer",
+    "phase": 7,
+    "depends_on": [
+      "response-auto-delivery"
+    ],
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "response-email-log-adapters",
+    "description": "Add source-specific authenticated support-email and post-deploy log adapters to the normalized signal pipeline. Bound/redact evidence, retain source references, map senders/sources through repository policy, and treat content as untrusted. Prepare support response drafts; sending requires a separately configured outbound policy. Acceptance: spoofed or replayed payloads cannot start runs, duplicate messages correlate, deployment context survives normalization, and email content cannot grant merge authority.",
+    "status": "completed",
+    "role": "implementer",
+    "phase": 8,
+    "depends_on": [
+      "response-deploy-observation"
+    ],
+    "priority": 10,
+    "complexity": 7
+  },
+  {
+    "id": "response-portal-acceptance",
+    "description": "Expose account/model capability configuration, supported auth paths, usage freshness/reset, route exclusions, deferred work, session/PR/deployment links, and retry/observation state in the portal. Add end-to-end acceptance coverage for the spec 008 scenarios using fake CLIs and mocked provider/GitHub/deployment APIs. Document operator rollout and rollback. Acceptance: all three trigger classes traverse the same durable flow, concurrency/restart tests pass, and the UI clearly distinguishes configured policy, observed usage, and verified outcome.",
+    "status": "completed",
+    "role": "implementer",
+    "phase": 9,
+    "depends_on": [
+      "response-email-log-adapters"
+    ],
+    "priority": 10,
+    "complexity": 7
+  }
+]

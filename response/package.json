@@ -1,0 +1,24 @@
+{
+  "name": "wreck-it-response",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/sandbox": "0.12.10",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260927.1",
+    "@types/node": "24.12.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "wrangler": "4.142.0",
+    "miniflare": "5.20260926.0-alpha",
+    "esbuild": "0.25.12"
+  }
+}

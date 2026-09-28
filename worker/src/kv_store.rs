@@ -5,6 +5,7 @@
 //! Values are stored as JSON strings.
 
 use crate::types::{HeadlessState, InstallationSettings, PulseRegistration, Task};
+use wreck_it_core::triage::TriageItem;
 
 /// KV binding name expected in `wrangler.toml`.
 pub const KV_BINDING: &str = "WRECK_IT_STORE";
@@ -159,6 +160,307 @@ pub async fn save_installation_settings(
 }
 
 // ---------------------------------------------------------------------------
+// Triage items
+// ---------------------------------------------------------------------------
+
+/// Build the KV key for a repository's triage item list.
+pub fn triage_key(owner: &str, repo: &str) -> String {
+    format!("{}/{}/triage", owner, repo)
+}
+
+/// Load all triage items from KV for the given repository.
+///
+/// Returns an empty `Vec` when the key does not exist.
+pub async fn load_triage(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+) -> Result<Vec<TriageItem>, String> {
+    let key = triage_key(owner, repo);
+    match kv.get(&key).text().await {
+        Ok(Some(json)) => {
+            serde_json::from_str(&json).map_err(|e| format!("failed to parse triage JSON: {e}"))
+        }
+        Ok(None) => Ok(Vec::new()),
+        Err(e) => Err(format!("KV get failed for {key}: {e}")),
+    }
+}
+
+/// Persist the full triage item list to KV, replacing any previous value.
+///
+/// Like the tasks document, this is a read-modify-write over a single JSON
+/// document: concurrent webhook deliveries for the same repository can lose
+/// an update.  That is accepted for v1 — a lost CI-failure upsert is
+/// recreated by the next failing run — and the Durable Object backend
+/// (spec 001) is the long-term fix.
+pub async fn save_triage(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+    items: &[TriageItem],
+) -> Result<(), String> {
+    let key = triage_key(owner, repo);
+    let json =
+        serde_json::to_string(items).map_err(|e| format!("failed to serialize triage: {e}"))?;
+    kv.put(&key, json)
+        .map_err(|e| format!("KV put build failed for {key}: {e}"))?
+        .execute()
+        .await
+        .map_err(|e| format!("KV put execute failed for {key}: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// Log-source secrets
+// ---------------------------------------------------------------------------
+
+/// KV key for a repository's log-source auth token.
+///
+/// The token is written through the portal and never stored in the
+/// repository's config file.
+pub fn log_source_token_key(owner: &str, repo: &str) -> String {
+    format!("{owner}/{repo}/secrets/log_source_token")
+}
+
+/// Load a repository's log-source token, if configured.
+pub async fn load_log_source_token(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+) -> Result<Option<String>, String> {
+    let key = log_source_token_key(owner, repo);
+    kv.get(&key)
+        .text()
+        .await
+        .map_err(|e| format!("KV get failed for {key}: {e}"))
+}
+
+/// Store a repository's log-source token.
+pub async fn save_log_source_token(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+    token: &str,
+) -> Result<(), String> {
+    let key = log_source_token_key(owner, repo);
+    kv.put(&key, token)
+        .map_err(|e| format!("KV put build failed for {key}: {e}"))?
+        .execute()
+        .await
+        .map_err(|e| format!("KV put execute failed for {key}: {e}"))
+}
+
+/// Delete a repository's log-source token.
+pub async fn delete_log_source_token(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+) -> Result<(), String> {
+    let key = log_source_token_key(owner, repo);
+    kv.delete(&key)
+        .await
+        .map_err(|e| format!("KV delete failed for {key}: {e}"))
+}
+
+// ---------------------------------------------------------------------------
+// Slack integration
+// ---------------------------------------------------------------------------
+
+use crate::slack::{SlackChannelLink, SlackLinkRef, SlackWorkspace};
+
+/// KV key for an installed Slack workspace.
+pub fn slack_team_key(team_id: &str) -> String {
+    format!("_slack/team/{team_id}")
+}
+
+/// KV key for a channel→repo link.
+pub fn slack_link_key(team_id: &str, channel_id: &str) -> String {
+    format!("_slack/link/{team_id}/{channel_id}")
+}
+
+/// KV key for a repository's reverse index of linked channels.
+pub fn slack_links_index_key(owner: &str, repo: &str) -> String {
+    format!("{owner}/{repo}/slack_links")
+}
+
+/// KV key marking a processed Slack event id (retry dedup, 1h TTL).
+pub fn slack_event_key(event_id: &str) -> String {
+    format!("_slack/event/{event_id}")
+}
+
+async fn load_json<T: serde::de::DeserializeOwned>(
+    kv: &worker::kv::KvStore,
+    key: &str,
+) -> Result<Option<T>, String> {
+    match kv.get(key).text().await {
+        Ok(Some(json)) => serde_json::from_str(&json)
+            .map(Some)
+            .map_err(|e| format!("failed to parse {key}: {e}")),
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("KV get failed for {key}: {e}")),
+    }
+}
+
+async fn save_json<T: serde::Serialize>(
+    kv: &worker::kv::KvStore,
+    key: &str,
+    value: &T,
+) -> Result<(), String> {
+    let json = serde_json::to_string(value).map_err(|e| format!("failed to serialize: {e}"))?;
+    kv.put(key, json)
+        .map_err(|e| format!("KV put build failed for {key}: {e}"))?
+        .execute()
+        .await
+        .map_err(|e| format!("KV put execute failed for {key}: {e}"))
+}
+
+/// Load an installed Slack workspace by team id.
+pub async fn load_slack_workspace(
+    kv: &worker::kv::KvStore,
+    team_id: &str,
+) -> Result<Option<SlackWorkspace>, String> {
+    load_json(kv, &slack_team_key(team_id)).await
+}
+
+/// Persist an installed Slack workspace.
+pub async fn save_slack_workspace(
+    kv: &worker::kv::KvStore,
+    workspace: &SlackWorkspace,
+) -> Result<(), String> {
+    save_json(kv, &slack_team_key(&workspace.team_id), workspace).await
+}
+
+/// Load a channel→repo link.
+pub async fn load_slack_link(
+    kv: &worker::kv::KvStore,
+    team_id: &str,
+    channel_id: &str,
+) -> Result<Option<SlackChannelLink>, String> {
+    load_json(kv, &slack_link_key(team_id, channel_id)).await
+}
+
+/// Persist a channel→repo link and maintain the repo's reverse index.
+///
+/// The link is written first, the reverse index second; a crash in between
+/// leaves an orphaned link that outbound notification simply never finds —
+/// tolerated rather than transactional (KV has no transactions).
+pub async fn save_slack_link(
+    kv: &worker::kv::KvStore,
+    team_id: &str,
+    channel_id: &str,
+    link: &SlackChannelLink,
+) -> Result<(), String> {
+    save_json(kv, &slack_link_key(team_id, channel_id), link).await?;
+
+    let index_key = slack_links_index_key(&link.owner, &link.repo);
+    let mut index: Vec<SlackLinkRef> = load_json(kv, &index_key).await?.unwrap_or_default();
+    if !index
+        .iter()
+        .any(|r| r.team_id == team_id && r.channel_id == channel_id)
+    {
+        index.push(SlackLinkRef {
+            team_id: team_id.to_string(),
+            channel_id: channel_id.to_string(),
+        });
+        save_json(kv, &index_key, &index).await?;
+    }
+    Ok(())
+}
+
+/// Remove a channel→repo link (and its reverse-index entry).
+pub async fn delete_slack_link(
+    kv: &worker::kv::KvStore,
+    team_id: &str,
+    channel_id: &str,
+) -> Result<bool, String> {
+    let link: Option<SlackChannelLink> =
+        load_json(kv, &slack_link_key(team_id, channel_id)).await?;
+    let link = match link {
+        Some(l) => l,
+        None => return Ok(false),
+    };
+    kv.delete(&slack_link_key(team_id, channel_id))
+        .await
+        .map_err(|e| format!("KV delete failed: {e}"))?;
+
+    let index_key = slack_links_index_key(&link.owner, &link.repo);
+    let mut index: Vec<SlackLinkRef> = load_json(kv, &index_key).await?.unwrap_or_default();
+    let before = index.len();
+    index.retain(|r| !(r.team_id == team_id && r.channel_id == channel_id));
+    if index.len() != before {
+        save_json(kv, &index_key, &index).await?;
+    }
+    Ok(true)
+}
+
+/// Load a repository's linked channels (reverse index).
+pub async fn load_slack_links_for_repo(
+    kv: &worker::kv::KvStore,
+    owner: &str,
+    repo: &str,
+) -> Result<Vec<SlackLinkRef>, String> {
+    Ok(load_json(kv, &slack_links_index_key(owner, repo))
+        .await?
+        .unwrap_or_default())
+}
+
+/// KV key for the index of installed Slack teams (KV cannot enumerate keys
+/// without `list()`, which this codebase avoids).
+const SLACK_TEAMS_INDEX_KEY: &str = "_slack/teams";
+
+/// Summary entry in the installed-teams index.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct SlackTeamRef {
+    pub team_id: String,
+    pub team_name: String,
+}
+
+/// Load the installed-teams index.
+pub async fn load_slack_teams(kv: &worker::kv::KvStore) -> Result<Vec<SlackTeamRef>, String> {
+    Ok(load_json(kv, SLACK_TEAMS_INDEX_KEY)
+        .await?
+        .unwrap_or_default())
+}
+
+/// Upsert a team into the installed-teams index.
+pub async fn upsert_slack_team(
+    kv: &worker::kv::KvStore,
+    team_id: &str,
+    team_name: &str,
+) -> Result<(), String> {
+    let mut teams = load_slack_teams(kv).await?;
+    if let Some(existing) = teams.iter_mut().find(|t| t.team_id == team_id) {
+        existing.team_name = team_name.to_string();
+    } else {
+        teams.push(SlackTeamRef {
+            team_id: team_id.to_string(),
+            team_name: team_name.to_string(),
+        });
+    }
+    save_json(kv, SLACK_TEAMS_INDEX_KEY, &teams).await
+}
+
+/// Record a Slack event id as processed (1h TTL).  Returns `false` when the
+/// id was already recorded — the caller should skip the duplicate delivery.
+pub async fn mark_slack_event_processed(
+    kv: &worker::kv::KvStore,
+    event_id: &str,
+) -> Result<bool, String> {
+    let key = slack_event_key(event_id);
+    match kv.get(&key).text().await {
+        Ok(Some(_)) => return Ok(false),
+        Ok(None) => {}
+        Err(e) => return Err(format!("KV get failed for {key}: {e}")),
+    }
+    kv.put(&key, "1")
+        .map_err(|e| format!("KV put build failed for {key}: {e}"))?
+        .expiration_ttl(3600)
+        .execute()
+        .await
+        .map_err(|e| format!("KV put execute failed for {key}: {e}"))?;
+    Ok(true)
+}
+
+// ---------------------------------------------------------------------------
 // Pulse registry
 // ---------------------------------------------------------------------------
 
@@ -250,6 +552,30 @@ mod tests {
     #[test]
     fn state_key_named_context() {
         assert_eq!(state_key("octo", "repo", "docs"), "octo/repo/state/docs");
+    }
+
+    #[test]
+    fn triage_key_format() {
+        assert_eq!(triage_key("octo", "repo"), "octo/repo/triage");
+    }
+
+    #[test]
+    fn log_source_token_key_format() {
+        assert_eq!(
+            log_source_token_key("octo", "repo"),
+            "octo/repo/secrets/log_source_token"
+        );
+    }
+
+    #[test]
+    fn slack_key_formats() {
+        assert_eq!(slack_team_key("T123"), "_slack/team/T123");
+        assert_eq!(slack_link_key("T123", "C9"), "_slack/link/T123/C9");
+        assert_eq!(
+            slack_links_index_key("octo", "repo"),
+            "octo/repo/slack_links"
+        );
+        assert_eq!(slack_event_key("Ev1"), "_slack/event/Ev1");
     }
 
     #[test]

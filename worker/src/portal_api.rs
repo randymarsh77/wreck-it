@@ -37,6 +37,10 @@
 //! | `POST`    | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/resume`    | Resume agent execution   |
 //! | `POST`    | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/migrate`   | Seed agent from KV/file  |
 //! | `GET`     | `/api/portal/repos/:owner/:repo/ralphs/:name/agent/websocket` | WebSocket for live state |
+//! | `GET`     | `/api/portal/repos/:owner/:repo/triage`               | List triage items                 |
+//! | `GET`     | `/api/portal/repos/:owner/:repo/triage/:id`           | Get a single triage item          |
+//! | `POST`    | `/api/portal/repos/:owner/:repo/triage/:id/dismiss`   | Dismiss a triage item             |
+//! | `POST`    | `/api/portal/repos/:owner/:repo/triage/:id/retry`     | (Re-)dispatch a fix for an item   |
 //!
 //! ## Required secrets
 //!
@@ -69,7 +73,7 @@ fn portal_session_key(hmac_hex: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// Add CORS headers to a [`Response`].
-fn cors_headers(mut resp: Response) -> Result<Response> {
+pub(crate) fn cors_headers(mut resp: Response) -> Result<Response> {
     resp.headers_mut().set("Access-Control-Allow-Origin", "*")?;
     resp.headers_mut().set(
         "Access-Control-Allow-Methods",
@@ -104,9 +108,15 @@ fn json_response<T: serde::Serialize>(value: &T, status: u16) -> Result<Response
 }
 
 /// Build a plain-text error response with CORS headers.
-fn error_response(msg: &str, status: u16) -> Result<Response> {
+pub(crate) fn error_response(msg: &str, status: u16) -> Result<Response> {
     let resp = Response::error(msg, status)?;
     cors_headers(resp)
+}
+
+/// Build a 200 JSON response with CORS headers (crate-visible helper for
+/// endpoint modules like `slack_oauth`).
+pub(crate) fn json_ok<T: serde::Serialize>(value: &T) -> Result<Response> {
+    json_response(value, 200)
 }
 
 // ---------------------------------------------------------------------------
@@ -742,6 +752,62 @@ async fn get_installation_token(
     github_app::vend_installation_token(installation_id, &jwt, repo)
         .await
         .map_err(|e| error_response(&format!("Token vending failed: {e}"), 500).unwrap())
+}
+
+/// Discover the GitHub App installation id for `owner/repo` via an App JWT.
+pub(crate) async fn discover_installation_id(
+    ctx: &RouteContext<()>,
+    owner: &str,
+    repo: &str,
+) -> std::result::Result<u64, Response> {
+    let app_id = ctx
+        .secret("GITHUB_APP_ID")
+        .map(|s| s.to_string())
+        .map_err(|_| error_response("GITHUB_APP_ID not configured", 500).unwrap())?;
+    let private_key = ctx
+        .secret("GITHUB_APP_PRIVATE_KEY")
+        .map(|s| s.to_string())
+        .map_err(|_| error_response("GITHUB_APP_PRIVATE_KEY not configured", 500).unwrap())?;
+
+    let now_secs = js_sys::Date::now() as u64 / 1000;
+    let jwt = github_app::generate_jwt(&app_id, &private_key, now_secs)
+        .map_err(|e| error_response(&format!("JWT generation failed: {e}"), 500).unwrap())?;
+
+    let install_url = format!("https://api.github.com/repos/{owner}/{repo}/installation");
+    let install_info = github_api_get(&install_url, &jwt)
+        .await
+        .map_err(|e| error_response(&format!("Failed to get installation: {e}"), 500).unwrap())?;
+
+    install_info["id"]
+        .as_u64()
+        .ok_or_else(|| error_response("Missing installation id", 500).unwrap())
+}
+
+/// Verify the portal session and return the authenticated GitHub login.
+pub(crate) async fn session_login(
+    req: &Request,
+    ctx: &RouteContext<()>,
+) -> std::result::Result<String, Response> {
+    let github_token = verify_portal_session(req, ctx).await?;
+    let user = github_api_get("https://api.github.com/user", &github_token)
+        .await
+        .map_err(|_| error_response("Failed to resolve user", 502).unwrap())?;
+    user["login"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| error_response("Corrupt user response", 502).unwrap())
+}
+
+/// Verify the portal session AND repository access (crate-visible wrapper
+/// around the triage-endpoint helper).
+pub(crate) async fn require_repo_access(
+    req: &Request,
+    ctx: &RouteContext<()>,
+    owner: &str,
+    repo: &str,
+    require_push: bool,
+) -> std::result::Result<(), Response> {
+    verify_repo_access(req, ctx, owner, repo, require_push).await
 }
 
 // ---------------------------------------------------------------------------
@@ -2106,6 +2172,216 @@ async fn agent_websocket(req: Request, ctx: RouteContext<()>) -> Result<Response
 }
 
 // ---------------------------------------------------------------------------
+// Triage endpoints
+// ---------------------------------------------------------------------------
+
+/// Verify the portal session AND that the user can access `owner/repo`.
+///
+/// Triage data lives in KV (not behind the user's own GitHub token like the
+/// config endpoints), so an explicit repository-access check is required to
+/// stop a logged-in user from reading another installation's triage items.
+/// When `require_push` is set, the user must also have push permission
+/// (used for mutating endpoints).
+async fn verify_repo_access(
+    req: &Request,
+    ctx: &RouteContext<()>,
+    owner: &str,
+    repo: &str,
+    require_push: bool,
+) -> std::result::Result<(), Response> {
+    let github_token = verify_portal_session(req, ctx).await?;
+    let url = format!("https://api.github.com/repos/{owner}/{repo}");
+    let repo_info = github_api_get(&url, &github_token)
+        .await
+        .map_err(|_| error_response("Repository not found or not accessible", 404).unwrap())?;
+    if require_push {
+        let can_push = repo_info
+            .pointer("/permissions/push")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !can_push {
+            return Err(error_response("Push permission required", 403).unwrap());
+        }
+    }
+    Ok(())
+}
+
+/// `GET /api/portal/repos/:owner/:repo/triage`
+async fn list_triage(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, false).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    match kv_store::load_triage(&kv, &owner, &repo).await {
+        Ok(items) => json_response(&items, 200),
+        Err(e) => error_response(&e, 500),
+    }
+}
+
+/// `GET /api/portal/repos/:owner/:repo/triage/:id`
+async fn get_triage_item(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    let id = ctx.param("id").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, false).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    match kv_store::load_triage(&kv, &owner, &repo).await {
+        Ok(items) => match items.iter().find(|i| i.id == id) {
+            Some(item) => json_response(item, 200),
+            None => error_response("Triage item not found", 404),
+        },
+        Err(e) => error_response(&e, 500),
+    }
+}
+
+/// `POST /api/portal/repos/:owner/:repo/triage/:id/dismiss`
+async fn dismiss_triage_item(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    let id = ctx.param("id").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, true).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    let mut items = kv_store::load_triage(&kv, &owner, &repo)
+        .await
+        .map_err(Error::RustError)?;
+
+    let item = match items.iter_mut().find(|i| i.id == id) {
+        Some(item) => item,
+        None => return error_response("Triage item not found", 404),
+    };
+    if item.status.is_terminal() {
+        return error_response("Triage item is already in a terminal state", 409);
+    }
+    item.status = wreck_it_core::triage::TriageStatus::Dismissed;
+    item.updated_at = js_sys::Date::now() as u64 / 1000;
+    let updated = item.clone();
+
+    crate::slack_notify::sync_and_save(&kv, &owner, &repo, &mut items)
+        .await
+        .map_err(Error::RustError)?;
+    json_response(&updated, 200)
+}
+
+/// `POST /api/portal/repos/:owner/:repo/triage/:id/retry`
+///
+/// (Re-)dispatches a fix issue for a `New`, `Dismissed`, or `Stale`
+/// CI-failure item using an installation token, transitioning it to
+/// `Investigating`.  Items already being worked (`Investigating`/`PrOpen`)
+/// or `Resolved` answer 409.
+async fn retry_triage_item(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    use wreck_it_core::triage::TriageStatus;
+
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    let id = ctx.param("id").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, true).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    let mut items = kv_store::load_triage(&kv, &owner, &repo)
+        .await
+        .map_err(Error::RustError)?;
+
+    let item = match items.iter_mut().find(|i| i.id == id) {
+        Some(item) => item,
+        None => return error_response("Triage item not found", 404),
+    };
+    if !matches!(
+        item.status,
+        TriageStatus::New | TriageStatus::Dismissed | TriageStatus::Stale
+    ) {
+        return error_response("Only new, dismissed, or stale items can be dispatched", 409);
+    }
+
+    let installation_token = match get_installation_token(&ctx, &owner, &repo).await {
+        Ok(t) => t,
+        Err(r) => return Ok(r),
+    };
+    let client = crate::github::GitHubClient::new(&owner, &repo, &installation_token);
+
+    match crate::triage::dispatch_fix_issue_with_stored_evidence(&client, item).await {
+        Ok(issue_number) => {
+            item.updated_at = js_sys::Date::now() as u64 / 1000;
+            let updated = item.clone();
+            crate::slack_notify::sync_and_save(&kv, &owner, &repo, &mut items)
+                .await
+                .map_err(Error::RustError)?;
+            console_log!("[wreck-it][portal] retried triage item {id} → issue #{issue_number}");
+            json_response(&updated, 200)
+        }
+        Err(e) => error_response(&format!("Dispatch failed: {e}"), 502),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Log-source token endpoints
+// ---------------------------------------------------------------------------
+
+/// Request body for `PUT …/log-source-token`.
+#[derive(serde::Deserialize)]
+struct LogSourceTokenRequest {
+    token: String,
+}
+
+/// `GET /api/portal/repos/:owner/:repo/log-source-token`
+///
+/// Write-only secret: answers only `{"configured": bool}` — the token value
+/// is never returned.
+async fn get_log_source_token(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, false).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    match kv_store::load_log_source_token(&kv, &owner, &repo).await {
+        Ok(token) => json_response(&serde_json::json!({ "configured": token.is_some() }), 200),
+        Err(e) => error_response(&e, 500),
+    }
+}
+
+/// `PUT /api/portal/repos/:owner/:repo/log-source-token`
+async fn put_log_source_token(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, true).await {
+        return Ok(r);
+    }
+    let body: LogSourceTokenRequest = match req.json().await {
+        Ok(b) => b,
+        Err(e) => return error_response(&format!("Invalid JSON: {e}"), 400),
+    };
+    if body.token.trim().is_empty() {
+        return error_response("token must not be empty", 400);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    match kv_store::save_log_source_token(&kv, &owner, &repo, body.token.trim()).await {
+        Ok(()) => json_response(&serde_json::json!({ "configured": true }), 200),
+        Err(e) => error_response(&e, 500),
+    }
+}
+
+/// `DELETE /api/portal/repos/:owner/:repo/log-source-token`
+async fn delete_log_source_token(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let owner = ctx.param("owner").unwrap().clone();
+    let repo = ctx.param("repo").unwrap().clone();
+    if let Err(r) = verify_repo_access(&req, &ctx, &owner, &repo, true).await {
+        return Ok(r);
+    }
+    let kv = ctx.kv(kv_store::KV_BINDING)?;
+    match kv_store::delete_log_source_token(&kv, &owner, &repo).await {
+        Ok(()) => json_response(&serde_json::json!({ "configured": false }), 200),
+        Err(e) => error_response(&e, 500),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Router registration
 // ---------------------------------------------------------------------------
 
@@ -2146,6 +2422,28 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         )
         .options_async(
             "/api/portal/repos/:owner/:repo/ralphs/:name/state",
+            options_handler,
+        )
+        .options_async("/api/portal/slack/install-url", options_handler)
+        .options_async("/api/portal/slack/workspaces", options_handler)
+        .options_async("/api/portal/slack/:team_id/channels", options_handler)
+        .options_async(
+            "/api/portal/repos/:owner/:repo/slack-links",
+            options_handler,
+        )
+        .options_async("/api/portal/repos/:owner/:repo/slack-link", options_handler)
+        .options_async(
+            "/api/portal/repos/:owner/:repo/log-source-token",
+            options_handler,
+        )
+        .options_async("/api/portal/repos/:owner/:repo/triage", options_handler)
+        .options_async("/api/portal/repos/:owner/:repo/triage/:id", options_handler)
+        .options_async(
+            "/api/portal/repos/:owner/:repo/triage/:id/dismiss",
+            options_handler,
+        )
+        .options_async(
+            "/api/portal/repos/:owner/:repo/triage/:id/retry",
             options_handler,
         )
         // Auth endpoints
@@ -2245,6 +2543,55 @@ pub fn register_portal_routes(router: Router<'_, ()>) -> Router<'_, ()> {
         .get_async(
             "/api/portal/repos/:owner/:repo/ralphs/:name/agent/websocket",
             agent_websocket,
+        )
+        // Slack endpoints
+        .get_async(
+            "/api/portal/slack/install-url",
+            crate::slack_oauth::install_url,
+        )
+        .get_async(
+            "/api/portal/slack/workspaces",
+            crate::slack_oauth::list_workspaces,
+        )
+        .get_async(
+            "/api/portal/slack/:team_id/channels",
+            crate::slack_oauth::list_channels,
+        )
+        .get_async(
+            "/api/portal/repos/:owner/:repo/slack-links",
+            crate::slack_oauth::list_repo_links,
+        )
+        .put_async(
+            "/api/portal/repos/:owner/:repo/slack-link",
+            crate::slack_oauth::put_repo_link,
+        )
+        .delete_async(
+            "/api/portal/repos/:owner/:repo/slack-link",
+            crate::slack_oauth::delete_repo_link,
+        )
+        // Log-source token endpoints
+        .get_async(
+            "/api/portal/repos/:owner/:repo/log-source-token",
+            get_log_source_token,
+        )
+        .put_async(
+            "/api/portal/repos/:owner/:repo/log-source-token",
+            put_log_source_token,
+        )
+        .delete_async(
+            "/api/portal/repos/:owner/:repo/log-source-token",
+            delete_log_source_token,
+        )
+        // Triage endpoints
+        .get_async("/api/portal/repos/:owner/:repo/triage", list_triage)
+        .get_async("/api/portal/repos/:owner/:repo/triage/:id", get_triage_item)
+        .post_async(
+            "/api/portal/repos/:owner/:repo/triage/:id/dismiss",
+            dismiss_triage_item,
+        )
+        .post_async(
+            "/api/portal/repos/:owner/:repo/triage/:id/retry",
+            retry_triage_item,
         )
 }
 

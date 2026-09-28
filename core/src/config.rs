@@ -62,6 +62,107 @@ pub struct RepoConfig {
     /// (task file and state file come from the headless config or CLI flags).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ralphs: Vec<RalphConfig>,
+
+    /// CI-failure triage configuration.  Absent section = disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage: Option<TriageConfig>,
+
+    /// Server-side log-source polling (`[log_source]`).  Absent = disabled.
+    ///
+    /// Non-secret settings only — the auth token is stored in worker KV via
+    /// the portal, never committed to the repository.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_source: Option<LogSourceSettings>,
+}
+
+/// Server-side log-source settings (`[log_source]` in `.wreck-it/config.toml`).
+///
+/// Consumed by the worker's pulse loop to poll an external error tracker and
+/// create triage items.  v1 supports `provider = "sentry"`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct LogSourceSettings {
+    /// Provider name (`"sentry"` in v1).  Absent/unknown = disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+
+    /// Sentry organization slug.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<String>,
+
+    /// Sentry project slug.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+
+    /// Instance base URL (defaults to `https://sentry.io`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base_url: Option<String>,
+
+    /// Search query (defaults to `is:unresolved level:error`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+
+    /// Maximum entries ingested per pulse (defaults to 20).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_entries: Option<usize>,
+}
+
+/// Configuration for CI-failure triage (`[triage]` in `.wreck-it/config.toml`).
+///
+/// When enabled, the worker turns failing `workflow_run` webhook events into
+/// triage items and (optionally) dispatches a cloud coding agent to fix them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TriageConfig {
+    /// Master switch.  The section being present but disabled behaves the
+    /// same as the section being absent.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Create a fix issue and assign a coding agent automatically when a new
+    /// triage item is created.  When `false`, items stay `New` until they are
+    /// dispatched manually from the portal.
+    #[serde(default = "default_true")]
+    pub auto_dispatch: bool,
+
+    /// Branches whose workflow runs are triaged.  Empty = the repository's
+    /// default branch only.  The state branch is always excluded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub branches: Vec<String>,
+
+    /// Maximum stored triage items per repository (terminal items are pruned
+    /// first).  Defaults to 200.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_items: Option<usize>,
+
+    /// Optional agent login override for dispatched fix issues (mirrors
+    /// `RalphConfig::agent`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl TriageConfig {
+    /// Effective per-repo item cap.
+    pub fn effective_max_items(&self) -> usize {
+        self.max_items.unwrap_or(crate::triage::DEFAULT_MAX_ITEMS)
+    }
+
+    /// Whether workflow runs on `branch` should be triaged.
+    ///
+    /// `default_branch` is the repository's default branch; `state_branch`
+    /// is always excluded regardless of configuration.
+    pub fn triages_branch(&self, branch: &str, default_branch: &str, state_branch: &str) -> bool {
+        if branch == state_branch {
+            return false;
+        }
+        if self.branches.is_empty() {
+            branch == default_branch
+        } else {
+            self.branches.iter().any(|b| b == branch)
+        }
+    }
 }
 
 /// Configuration for a named ralph context.
@@ -213,6 +314,8 @@ impl Default for RepoConfig {
             tasks_dir: None,
             state_root: default_state_root(),
             ralphs: Vec::new(),
+            triage: None,
+            log_source: None,
         }
     }
 }
@@ -389,6 +492,111 @@ transient_backoff_secs = 60
             serialized.contains("transient_backoff_secs"),
             "transient_backoff_secs should be present: {serialized}"
         );
+    }
+
+    #[test]
+    fn triage_section_roundtrips_via_toml() {
+        let toml_str = r#"
+[triage]
+enabled = true
+branches = ["master", "release"]
+max_items = 50
+agent = "copilot"
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        let triage = cfg.triage.as_ref().expect("triage section present");
+        assert!(triage.enabled);
+        assert!(triage.auto_dispatch, "auto_dispatch defaults to true");
+        assert_eq!(triage.branches, vec!["master", "release"]);
+        assert_eq!(triage.effective_max_items(), 50);
+        assert_eq!(triage.agent.as_deref(), Some("copilot"));
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(serialized.contains("[triage]"));
+    }
+
+    #[test]
+    fn log_source_section_roundtrips_via_toml() {
+        let toml_str = r#"
+[log_source]
+provider = "sentry"
+organization = "acme"
+project = "web-app"
+query = "is:unresolved level:error"
+max_entries = 10
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        let ls = cfg.log_source.as_ref().expect("log_source present");
+        assert_eq!(ls.provider.as_deref(), Some("sentry"));
+        assert_eq!(ls.organization.as_deref(), Some("acme"));
+        assert_eq!(ls.project.as_deref(), Some("web-app"));
+        assert_eq!(ls.max_entries, Some(10));
+        assert!(ls.api_base_url.is_none());
+        let serialized = toml::to_string_pretty(&cfg).unwrap();
+        assert!(serialized.contains("[log_source]"));
+    }
+
+    #[test]
+    fn log_source_section_absent_by_default() {
+        let cfg = RepoConfig::default();
+        assert!(cfg.log_source.is_none());
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        assert!(!toml_str.contains("log_source"));
+    }
+
+    #[test]
+    fn triage_section_absent_by_default() {
+        let cfg = RepoConfig::default();
+        assert!(cfg.triage.is_none());
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            !toml_str.contains("triage"),
+            "triage should be absent: {toml_str}"
+        );
+    }
+
+    #[test]
+    fn triage_minimal_section_defaults() {
+        let toml_str = r#"
+[triage]
+enabled = true
+"#;
+        let cfg: RepoConfig = toml::from_str(toml_str).unwrap();
+        let triage = cfg.triage.unwrap();
+        assert!(triage.auto_dispatch);
+        assert!(triage.branches.is_empty());
+        assert_eq!(
+            triage.effective_max_items(),
+            crate::triage::DEFAULT_MAX_ITEMS
+        );
+        assert!(triage.agent.is_none());
+    }
+
+    #[test]
+    fn triages_branch_default_branch_only_when_unconfigured() {
+        let triage = TriageConfig {
+            enabled: true,
+            ..TriageConfig::default()
+        };
+        assert!(triage.triages_branch("main", "main", "wreck-it-state"));
+        assert!(!triage.triages_branch("feature", "main", "wreck-it-state"));
+        assert!(!triage.triages_branch("wreck-it-state", "main", "wreck-it-state"));
+    }
+
+    #[test]
+    fn triages_branch_explicit_list() {
+        let triage = TriageConfig {
+            enabled: true,
+            branches: vec!["main".to_string(), "release".to_string()],
+            ..TriageConfig::default()
+        };
+        assert!(triage.triages_branch("release", "main", "wreck-it-state"));
+        assert!(!triage.triages_branch("feature", "main", "wreck-it-state"));
+        // State branch excluded even if explicitly listed.
+        let triage = TriageConfig {
+            branches: vec!["wreck-it-state".to_string()],
+            ..triage
+        };
+        assert!(!triage.triages_branch("wreck-it-state", "main", "wreck-it-state"));
     }
 
     #[test]

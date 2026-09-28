@@ -1,0 +1,39 @@
+{
+  "now": 1000,
+  "request": {
+    "owner": "example-owner",
+    "capability": "repair",
+    "minimum_remaining_basis_points": 1000,
+    "max_usage_age_seconds": 300
+  },
+  "accounts": [
+    {
+      "id": "codex-personal",
+      "owner": "example-owner",
+      "harness": "codex",
+      "auth": "native_subscription",
+      "credential_ref": "runner:codex-personal",
+      "enabled": true,
+      "models": [{"model": "configure-your-codex-model", "capabilities": ["repair"]}],
+      "max_concurrent_sessions": 1
+    },
+    {
+      "id": "copilot-personal",
+      "owner": "example-owner",
+      "harness": "copilot",
+      "auth": "copilot_token",
+      "credential_ref": "secret:copilot-personal",
+      "enabled": true,
+      "models": [{"model": "configure-your-copilot-model", "capabilities": ["repair"]}],
+      "max_concurrent_sessions": 1
+    }
+  ],
+  "usage": [
+    {"account_id": "codex-personal", "observed_at": 990,
+     "windows": [{"remaining_basis_points": 9000, "resets_at": 19000}],
+     "active_sessions": 0, "blocked_until": null, "requires_reauthentication": false},
+    {"account_id": "copilot-personal", "observed_at": 990,
+     "windows": [{"remaining_basis_points": 7000, "resets_at": 2800}],
+     "active_sessions": 0, "blocked_until": null, "requires_reauthentication": false}
+  ]
+}

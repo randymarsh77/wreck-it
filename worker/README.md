@@ -1,3 +1,8 @@
+> Direction update: this Worker is the control plane for the autonomous
+> response flow. Native official CLIs run through the separate response/Sandbox service.
+> See [spec 008](../specs/008-autonomous-response.md) and the
+> [roadmap](../docs/roadmap.md). Existing endpoints below retain legacy behavior.
+
 # wreck-it Worker
 
 A [Cloudflare Worker](https://developers.cloudflare.com/workers/) that serves as the webhook handler and **pulse trigger** for a **wreck-it** GitHub App. When GitHub events occur (issues labeled `wreck-it`, pushes to the state branch, PRs merged), the worker reads the repository's wreck-it configuration and state via the GitHub API, processes an iteration (selects the next pending task, advances the state machine), triggers cloud agents, manages PRs, and commits the updated state back to the state branch.
@@ -51,8 +56,80 @@ GitHub Event (webhook)          Cron Trigger (pulse)
 | `push` | any | Triggers iteration (external state updates) |
 | `pull_request` | `closed` (merged) | Marks task complete, updates state |
 | `pull_request` | `opened` / `ready_for_review` / `synchronize` | Approves pending workflow runs and enables auto-merge for trusted PRs |
+| `pull_request` | `opened` / `synchronize` / `closed` (Dependabot/Renovate author) | Observe-only supply-chain tracking: triage item + one structured comment; never workflow approval or auto-merge |
+| `workflow_run` | `completed` (failure / timed out) | Creates or updates a triage item and dispatches a fix issue to a coding agent (requires `[triage]` in `.wreck-it/config.toml`) |
+| `workflow_run` | `completed` (success) | Auto-resolves open triage items for the same workflow + branch |
 | `ping` | — | Responds with `pong` (app setup verification) |
 | `scheduled` | cron | Iterates all registered repos (pulse trigger) |
+
+## CI-Failure Triage
+
+When a repository opts in via `.wreck-it/config.toml`:
+
+```toml
+[triage]
+enabled = true
+# auto_dispatch = true   # create + assign a fix issue automatically
+# branches = []          # empty = default branch only
+# max_items = 200        # stored-items cap (terminal items pruned first)
+```
+
+failing workflow runs on triaged branches become **triage items** stored in
+KV (`{owner}/{repo}/triage`). Repeat failures of the same workflow+branch
+collapse into one open item. For each new item the worker collects evidence
+(failed jobs, steps, ANSI-stripped log tails) and — with `auto_dispatch` —
+opens a fix issue labeled `wreck-it-triage` and assigns a cloud coding
+agent. The item lifecycle is:
+
+```
+new → investigating → pr_open → resolved   (or dismissed / stale)
+```
+
+Items resolve automatically when the linked fix PR merges or when a later
+run of the same workflow succeeds. The portal exposes the queue at
+`/repos/{owner}/{repo}/triage` (list, dismiss, retry), and the CLI via
+`wreck-it triage list|show`. The `wreck-it-triage` label is deliberately
+distinct from `wreck-it` so triage issues never trigger a ralph iteration.
+
+## Supply-Chain Security
+
+For repos with `[triage]` enabled, each pulse also polls the **Dependabot
+alerts API** and syncs open alerts into the triage queue as
+`security_finding` items (correlation key `sec:dependabot:{alert_number}`,
+severity from the advisory). Items resolve automatically when the alert is
+fixed or dismissed upstream. The first sync ingests critical/high alerts
+only, to avoid flooding legacy repositories; later syncs ingest all
+severities.
+
+Requires the **Dependabot alerts: Read** App permission and the repo's
+dependency graph. Without them the API answers 403/404 and ingestion
+degrades to a logged warning.
+
+Pull requests authored by `dependabot[bot]` / `renovate[bot]` /
+`renovate-bot` — which the trusted-author filter deliberately ignores — are
+tracked observe-only: a `sec:dep-pr:{pr_number}` triage item plus one
+structured comment. The worker **never** approves workflows or enables
+auto-merge for dependency updates; merging stays a human (or explicitly
+configured) decision. Merged → item resolved; closed unmerged → dismissed.
+
+## Slack
+
+With the Slack secrets configured (see `wrangler.toml` comments), the worker
+also serves `/slack/events` (Events API, `app_mention`) and
+`/slack/oauth/callback` (workspace install). Linked channels receive
+threaded triage-lifecycle announcements, and `@wreck-it` mentions file
+triage items with dispatched fix agents. Setup runbook and app manifest:
+[docs/slack-app.md](../docs/slack-app.md).
+
+## Log Sources
+
+For repos with `[triage]` enabled and a `[log_source]` section in
+`.wreck-it/config.toml` (v1: `provider = "sentry"` with `organization` and
+`project` slugs), each pulse polls the tracker and syncs matching issues
+into the triage queue as `log_event` items — recurring issues update their
+open item rather than duplicating. The auth token is stored write-only in
+KV via the portal (`Repo Config → Log source`); it never appears in the
+repository or in API responses.
 
 ## Pulse Trigger
 
@@ -144,11 +221,15 @@ Point the GitHub App's webhook URL to your deployed worker URL (e.g. `https://wr
 - **Issues** — Read & write
 - **Pull requests** — Read & write
 - **Actions** — Read & write
+- **Dependabot alerts** — Read (for supply-chain triage; optional —
+  ingestion degrades gracefully without it)
 
 **Subscribe to these events:**
 - **Issues** — to trigger on issue creation / labeling
 - **Push** — to react to state branch changes
 - **Pull requests** — to detect merged PRs
+- **Workflow runs** — to triage failing CI runs (existing installations
+  must re-approve if permissions change)
 
 ## Development
 
