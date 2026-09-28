@@ -163,7 +163,7 @@ pub async fn run_list(repo: &str, status: Option<&str>) -> Result<()> {
     if let Some(filter) = filter {
         items.retain(|i| i.status == filter);
     }
-    items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    items.sort_by_key(|item| std::cmp::Reverse(item.updated_at));
     print!("{}", render_table(&items));
     Ok(())
 }

@@ -276,7 +276,7 @@ pub fn generate_pattern_report(tasks: &[Task], work_dir: &Path) -> String {
     };
 
     // Sort multi-attempt tasks by failure count descending.
-    multi_attempt_tasks.sort_by(|a, b| b.1.cmp(&a.1));
+    multi_attempt_tasks.sort_by_key(|a| std::cmp::Reverse(a.1));
 
     let mut report = format!(
         "# Adaptive Prompt Optimizer — Pattern Report\n\n\
@@ -366,7 +366,7 @@ fn build_pattern_insights_section(multi_attempt_tasks: &[(String, u32, &str)]) -
     section.push_str("|--------|----------------|\n");
 
     let mut sorted: Vec<(&str, u32)> = prefix_failures.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted.sort_by_key(|a| std::cmp::Reverse(a.1));
     for (prefix, count) in &sorted {
         section.push_str(&format!("| `{prefix}` | {count} |\n"));
     }

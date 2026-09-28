@@ -196,10 +196,7 @@ const DEFAULT_MAX_ENTRIES: usize = 20;
 /// configured) or when required settings are missing.  Warnings are emitted
 /// for misconfiguration so that operators know why the feature is inactive.
 pub fn provider_from_config(cfg: &LogSourceConfig) -> Option<LogSourceClient> {
-    let backend = match &cfg.provider {
-        Some(b) => b,
-        None => return None,
-    };
+    let backend = cfg.provider.as_ref()?;
 
     match backend {
         LogSourceBackend::Seq => {
